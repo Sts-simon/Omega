@@ -714,18 +714,14 @@ mod tests {
             procurement.evidence_status(&vehicle(), &edited_program),
             EvidenceStatus::Stale
         );
-        assert!(procurement
-            .deliver(4, Some(7), &vehicle(), &edited_program)
-            .is_err());
+        assert!(procurement.deliver(4, Some(7), &vehicle(), &edited_program).is_err());
         assert_eq!(procurement.active().len(), 1);
 
         assert_eq!(
             procurement.evidence_status(&vehicle(), &original_program),
             EvidenceStatus::Current
         );
-        let delivery = procurement
-            .deliver(4, Some(7), &vehicle(), &original_program)
-            .unwrap();
+        let delivery = procurement.deliver(4, Some(7), &vehicle(), &original_program).unwrap();
         assert_eq!(delivery.reward, 9_000);
         assert!(procurement.active().is_empty());
         assert_eq!(procurement.completed().len(), 1);
