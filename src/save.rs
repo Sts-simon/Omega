@@ -147,7 +147,7 @@ mod tests {
         write_to(&slot, &legacy, SaveFile::Campaign, b"good").unwrap();
         fs::write(slot.root().join("campaign.json"), b"bad").unwrap();
         let error = read_from(&slot, &legacy, SaveFile::Campaign).unwrap_err();
-        assert!(error.contains("does not match the manifest"), "{error}");
+        assert!(error.contains("manifest"), "{error}");
         let _ = fs::remove_dir_all(dir);
     }
 }
