@@ -88,6 +88,7 @@ fn main() {
                     design::update_hud,
                     design::update_inspector_ui,
                     campus::sync_boards,
+                    campus::scroll_program_list,
                     missile::sync_missile_visuals,
                     missile::focus_missile_camera,
                     campus::update_toast,
@@ -135,7 +136,11 @@ fn move_camera(
         || inspector.is_editing()
         || matches!(
             campus.view,
-            CampusView::Contracts | CampusView::Research | CampusView::Programming | CampusView::Computation
+            CampusView::Contracts
+                | CampusView::Research
+                | CampusView::Programming
+                | CampusView::Program
+                | CampusView::Computation
         )
         || campus.profile_editor_open
         || sequence.graph_is_open()

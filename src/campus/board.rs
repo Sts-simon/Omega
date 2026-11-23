@@ -8,6 +8,8 @@ use crate::interface::{UiAction, UiActionButton};
 use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
 use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable};
 use crate::ui_kit::{self, ButtonTone, NavStatus, UiState};
+use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
+use bevy::ui::{ScrollPosition, UiGlobalTransform};
 use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -22,6 +24,10 @@ pub(crate) enum BoardKind {
 
 #[derive(Component)]
 pub(crate) struct ToastText;
+
+/// Marks the scrolling container that holds the missile program block list.
+#[derive(Component)]
+pub(crate) struct ProgramListScroll;
 
 fn root_node(kind: BoardKind) -> Node {
     let mut node = Node {
@@ -1445,11 +1451,20 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
         flex_direction: FlexDirection::Column,
         flex_grow: 1.0,
         flex_basis: Val::Px(0.0),
+        min_height: Val::Px(0.0),
         row_gap: Val::Px(10.0),
         ..default()
     })
     .with_children(|middle| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        // The block list scrolls inside the panel and the selected-block panel keeps its own
+        // height, so a long program never pushes the editing controls off the screen.
+        node.flex_shrink = 1.0;
+        node.min_height = Val::Px(0.0);
+        // Cap the block list so the selected-block controls keep their place on screen even with a
+        // 32-block program; the list scrolls instead of pushing them out of the window.
+        node.max_height = Val::Percent(70.0);
+        node.overflow = Overflow::clip_y();
         middle.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "THREADS", 12.0, ui_kit::ACCENT);
             panel
@@ -1492,30 +1507,47 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                 .get(session.thread)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            if blocks.is_empty() {
-                ui_kit::label(
-                    panel,
-                    "Empty thread. Add a block from the palette.",
-                    10.5,
-                    ui_kit::TEXT_DIM,
-                );
-            }
-            for (index, block) in blocks.iter().enumerate() {
-                let tone = if session.block == Some(index) {
-                    ButtonTone::Primary
-                } else {
-                    ButtonTone::Ghost
-                };
-                ui_kit::button(
-                    panel,
-                    format!("{}. {}", index + 1, block.label()),
-                    UiAction::Program(ProgramAction::SelectBlock(index)),
-                    tone,
-                    Val::Percent(100.0),
-                );
-            }
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        row_gap: Val::Px(4.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    ScrollPosition(Vec2::new(0.0, session.scroll)),
+                    ProgramListScroll,
+                ))
+                .with_children(|list| {
+                    if blocks.is_empty() {
+                        ui_kit::label(
+                            list,
+                            "Empty thread. Add a block from the palette.",
+                            10.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
+                    for (index, block) in blocks.iter().enumerate() {
+                        let tone = if session.block == Some(index) {
+                            ButtonTone::Primary
+                        } else {
+                            ButtonTone::Ghost
+                        };
+                        ui_kit::button(
+                            list,
+                            format!("{}. {}", index + 1, block.label()),
+                            UiAction::Program(ProgramAction::SelectBlock(index)),
+                            tone,
+                            Val::Percent(100.0),
+                        );
+                    }
+                });
         });
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        node.flex_shrink = 0.0;
         middle.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "SELECTED BLOCK", 12.0, ui_kit::ACCENT);
             match session.selected_block() {
@@ -1643,6 +1675,9 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                 for issue in issues.iter().take(6) {
                     ui_kit::label(panel, format!("- {issue}"), 10.0, ui_kit::BAD);
                 }
+                if issues.len() > 6 {
+                    ui_kit::label(panel, format!("+{} more issue(s)", issues.len() - 6), 10.0, ui_kit::BAD);
+                }
             }
             if let Ok(hash) = session.content_hash() {
                 let short: String = hash.as_str().chars().take(16).collect();
@@ -1656,6 +1691,36 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
             );
         });
     });
+}
+
+/// Mouse-wheel scrolling for the missile program block list.
+///
+/// `bevy_ui` moves a node's children by `ScrollPosition` but nothing turns the wheel into an
+/// offset, so the list would stay stuck on its first blocks once a program outgrows the panel. The
+/// offset is mirrored in the session because the board is rebuilt after every edit.
+pub(crate) fn scroll_program_list(
+    wheel: Res<AccumulatedMouseScroll>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut session: ResMut<MissileProgramSession>,
+    mut lists: Query<(&mut ScrollPosition, &ComputedNode, &UiGlobalTransform), With<ProgramListScroll>>,
+) {
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    for (mut position, node, transform) in &mut lists {
+        if !node.contains_point(*transform, cursor) {
+            continue;
+        }
+        if wheel.delta.y != 0.0 {
+            let step = match wheel.unit {
+                MouseScrollUnit::Line => 34.0,
+                MouseScrollUnit::Pixel => 1.0,
+            } * wheel.delta.y;
+            position.y = (position.y - step).max(0.0);
+        }
+        // Rebuilding the board reads this back; the layout pass clamps the value to the content.
+        session.scroll = position.y;
+    }
 }
 
 fn visible(kind: BoardKind, campus: &CampusState, sketch_active: bool) -> bool {

@@ -5,7 +5,9 @@
 - The program is persisted to `programs/missile.json` through the save slot on every change, reloaded at startup, and carries a content hash ready to bind trial evidence.
 - The 0.6 chamber sequencer remains available as the **SEQUENCER** tab, now explicitly labelled legacy in its header.
 - Also merged: abstract military contract rules from `feature/0.29.0-military-contracts` (`omega-rules::contracts`: mission and vehicle families, requirements, offer generation, phases, submission evaluation). Its capability test depended on a seeded difficulty roll; it now pins the capability instead.
-- Tests: application 129, `omega-data` 10, `omega-rules` 56, `omega-sim-core` 71; all pass. The editor is covered by 8 new unit tests. Not verified on screen.
+- Verified on screen: palette gating, thread/memory meters, validation, tuning, reordering, removal, clear, persistence and reload. Two defects found and fixed: a program longer than ~20 blocks pushed the selected-block controls off the window bottom, and the validation list stopped at six issues without saying so.
+- The block list now caps its height and scrolls with the wheel (the offset survives the rebuild after each edit), the selected-block panel keeps its place, and the wheel no longer zooms the island camera behind the board.
+- Tests: application 130, `omega-data` 10, `omega-rules` 56, `omega-sim-core` 71; all pass. The editor is covered by 9 new unit tests.
 
 ## Unreleased — Project renamed to Omega
 - Renamed the Cargo package and binary from `aerolab` to `omega`, and the workspace crates from `aerolab-sim-core`, `aerolab-data` and `aerolab-rules` to `omega-sim-core`, `omega-data` and `omega-rules` (the last two directories moved to `crates/omega-data` and `crates/omega-rules`).

@@ -23,7 +23,9 @@ mod verification;
 
 #[cfg(test)]
 pub(crate) use board::friendly_capabilities;
-pub(crate) use board::{ToastText, handle_extra_actions, setup_boards, sync_boards, update_nav_status, update_toast};
+pub(crate) use board::{
+    ToastText, handle_extra_actions, scroll_program_list, setup_boards, sync_boards, update_nav_status, update_toast,
+};
 
 const CAMPAIGN_SCHEMA: u32 = 1;
 const MAX_ACTIVE_CONTRACTS: usize = 2;

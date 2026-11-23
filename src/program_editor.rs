@@ -96,6 +96,9 @@ pub(crate) struct MissileProgramSession {
     pub program: Program,
     pub thread: usize,
     pub block: Option<usize>,
+    /// Vertical scroll of the block list, kept across board rebuilds so a long program does not
+    /// jump back to its first block after every edit.
+    pub(crate) scroll: f32,
 }
 
 impl Default for MissileProgramSession {
@@ -106,6 +109,7 @@ impl Default for MissileProgramSession {
             },
             thread: 0,
             block: None,
+            scroll: 0.0,
         }
     }
 }
@@ -235,6 +239,7 @@ impl MissileProgramSession {
                 if index >= self.program.threads.len() {
                     return Err("No such thread".to_string());
                 }
+                self.scroll = 0.0;
                 self.thread = index;
                 self.block = None;
                 Ok(String::new())
@@ -302,6 +307,7 @@ impl MissileProgramSession {
                 };
                 self.thread = 0;
                 self.block = None;
+                self.scroll = 0.0;
                 Ok("Program cleared".to_string())
             }
         }
@@ -322,6 +328,7 @@ impl MissileProgramSession {
             program,
             thread: 0,
             block: None,
+            scroll: 0.0,
         })
     }
 }
