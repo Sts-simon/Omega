@@ -101,6 +101,8 @@ pub(crate) struct BatchJob {
     pub total: usize,
     done: Arc<AtomicUsize>,
     outcome: Arc<Mutex<Option<Result<BatchSummary, String>>>>,
+    /// Inputs the batch was started with, kept so its result can be marked stale later.
+    input_hash: String,
 }
 
 /// What the seeded target-lock roll gives for the current vehicle and seed.
@@ -151,6 +153,8 @@ pub(crate) struct TrialSession {
     pub air_launch: bool,
     pub report: Option<TrialRun>,
     pub batch: Option<BatchSummary>,
+    /// Vehicle, program, profile and first seed the stored batch was flown with.
+    pub batch_hash: Option<String>,
     pub baseline: Option<Baseline>,
     pub comparison: Option<Comparison>,
     /// Seed batch currently flying on a worker thread.
@@ -166,6 +170,7 @@ impl Default for TrialSession {
             air_launch: false,
             report: None,
             batch: None,
+            batch_hash: None,
             baseline: None,
             comparison: None,
             batch_job: None,
@@ -175,12 +180,26 @@ impl Default for TrialSession {
 }
 
 impl TrialSession {
-    /// Takes the finished batch, if the worker has delivered one.
+    /// Takes the finished batch, if the worker has delivered one, and remembers its inputs.
     pub(crate) fn take_batch_outcome(&mut self) -> Option<Result<BatchSummary, String>> {
         let outcome = self.batch_job.as_ref()?.outcome.lock().ok()?.take()?;
-        self.batch_job = None;
+        let job = self.batch_job.take();
+        if outcome.is_ok()
+            && let Some(job) = job
+        {
+            self.batch_hash = Some(job.input_hash);
+        }
         self.revision += 1;
         Some(outcome)
+    }
+
+    /// Whether the stored batch was flown with a different vehicle, program, profile or seed.
+    pub(crate) fn batch_stale(&self, vehicle: &Vehicle, program: &Program) -> bool {
+        if self.batch.is_none() {
+            return false;
+        }
+        let current = input_hash(vehicle, program, &config(self));
+        self.batch_hash.as_deref() != Some(current.as_str())
     }
 
     /// Seeds flown and seeds requested by the running batch.
@@ -282,6 +301,7 @@ pub(crate) fn start_batch(
     let vehicle = vehicle.clone();
     let program = program.clone();
     let base = config(session);
+    let input_hash = input_hash(&vehicle, &program, &base);
     let done = Arc::new(AtomicUsize::new(0));
     let outcome = Arc::new(Mutex::new(None));
     let worker_done = Arc::clone(&done);
@@ -296,6 +316,7 @@ pub(crate) fn start_batch(
         total: runs,
         done,
         outcome,
+        input_hash,
     });
     session.revision += 1;
     Ok("Batch started".to_string())
@@ -489,10 +510,45 @@ mod tests {
         let summary = wait_for_batch(&mut session);
         assert_eq!(summary.runs, 60);
         assert!(session.batch_job.is_none());
+        assert!(session.batch_hash.is_some());
         assert_eq!(session.batch_progress(), None);
         start_batch(&mut session, &rocket(), &two_stage(20.0), 10, true).unwrap();
         assert!(session.batch_progress().is_some());
         wait_for_batch(&mut session);
+    }
+
+    #[test]
+    fn a_finished_batch_goes_stale_when_its_inputs_change() {
+        let vehicle = rocket();
+        let program = two_stage(20.0);
+        let mut session = TrialSession::default();
+        assert!(!session.batch_stale(&vehicle, &program));
+
+        start_batch(&mut session, &vehicle, &program, 10, true).unwrap();
+        session.batch = Some(wait_for_batch(&mut session));
+        assert!(session.batch_hash.is_some());
+        assert!(
+            !session.batch_stale(&vehicle, &program),
+            "the inputs it flew are current"
+        );
+
+        session.seed = 2;
+        assert!(session.batch_stale(&vehicle, &program));
+        session.seed = 1;
+        assert!(!session.batch_stale(&vehicle, &program), "back to the flown seed");
+
+        assert!(session.batch_stale(&vehicle, &two_stage(8.0)), "program changed");
+
+        let mut edited = rocket();
+        edited.stages[0].parts[0].spec = PartSpec::SolidMotor {
+            length_m: 3.0,
+            diameter_m: 0.4,
+            burn_time_s: 20.0,
+        };
+        assert!(session.batch_stale(&edited, &program), "vehicle changed");
+
+        session.air_launch = true;
+        assert!(session.batch_stale(&vehicle, &program), "profile changed");
     }
 
     #[test]

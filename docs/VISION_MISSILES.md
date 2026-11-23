@@ -11,7 +11,7 @@
 
 ## Guardrails (what the game deliberately does not model)
 - No real missile names, designations or performance data; every number is a gameplay value.
-- No guidance laws, no tracking or seeker algorithms: a target lock is a single seeded probability roll that depends on the radar class and the speed at that moment.
+- No guidance laws, no tracking or seeker algorithms: a target lock is a single seeded probability roll that depends on the radar class and the speed at that moment. A seed's only other effect is a small, symmetric manufacturing spread (±3 % thrust and solid-motor burn time, ±5 % drag); the flight stays deterministic for a given vehicle, program and seed.
 - No warhead modelling: the mission module is only a mass.
 - No countermeasures, no targeting of real places or forces.
 - The flight model integrates speed along the path (thrust, drag, gravity during a vertical launch); there is no steering or trajectory optimisation.

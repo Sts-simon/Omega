@@ -92,15 +92,19 @@ workspace folder are ignored.
 - The seed is editable (`-10 / -1 / +1 / +10`) and the mission profile switches between a vertical
   launch and an air launch at 200 m/s. The input hash of vehicle, program, profile and seed is shown
   next to the report, so a design edited after a run is visibly stale.
-- The seed is the target-lock roll and nothing else (the flight itself is deterministic), so the
-  setup panel shows what the current seed does: `ROLL 0.11` against the radar's 55 % reads `LOCK`
-  and flips to `NO LOCK` as the seed changes, and a warning says so when no radar or no
-  `LOCK TARGET` block is fitted.
+- The seed rolls the target lock **and** a small manufacturing spread (±3 % engine thrust and
+  solid-motor burn time, ±5 % drag), so a batch samples the design instead of repeating one flight.
+  The flight stays deterministic: same vehicle, program and seed give the same report. The setup
+  panel shows what the current seed does before a run: `ROLL 0.11` against the radar's 55 % reads
+  `LOCK` and flips to `NO LOCK` as the seed changes, next to the thrust/burn/drag spread, and a
+  warning says so when no radar or no `LOCK TARGET` block is fitted.
 - Monte Carlo batches of 10 / 100 / 1,000 seeds summarize the outcome distribution (runs without
   lift-off, runs without separation, lock acquisition, mean speed, path and time) and stay locked
   until the "Batch trials" research node grants `analysis:monte_carlo`. A batch flies on a worker
   thread and shows its progress, so a thousand seeds never block the frame, and each report is
-  folded into the running totals instead of being kept, so the memory footprint stays flat.
+  folded into the running totals instead of being kept, so the memory footprint stays flat. A
+  finished batch remembers the inputs it was flown with: changing the vehicle, the program, the
+  profile or the seed marks its result `STALE` on the batch panel until it is flown again.
 - A/B comparison stores snapshot A, flies the edited design over the same ten seeds and prints the
   deltas for path, maximum speed and lock rate.
 - The session (seed, reports, batch, snapshot) is in memory only; the vehicle and program it flies

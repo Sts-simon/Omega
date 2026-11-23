@@ -90,10 +90,40 @@ fn unit_random(seed: u64) -> f64 {
     (splitmix64(seed) >> 11) as f64 / (1u64 << 53) as f64
 }
 
-/// The roll a seeded target-lock attempt compares with the radar probability: the only thing the
-/// seed changes in a flight. Exposed so the trial screen can show what a seed does before a run.
+/// The roll a seeded target-lock attempt compares with the radar probability. Exposed so the trial
+/// screen can show what a seed does before a run.
 pub fn lock_roll(seed: u64) -> f64 {
     unit_random(seed)
+}
+
+/// A seed's manufacturing and atmosphere spread: small, symmetric and deterministic.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dispersion {
+    /// Multiplier on engine thrust (grain lot and nozzle).
+    pub thrust: f64,
+    /// Multiplier on a solid motor's burn time (propellant mass flow).
+    pub burn: f64,
+    /// Multiplier on drag (skin finish and air density).
+    pub drag: f64,
+}
+
+/// Amplitude of the per-seed spread. Small enough that the mean still describes the design.
+pub const DISPERSION_THRUST: f64 = 0.03;
+pub const DISPERSION_BURN: f64 = 0.03;
+pub const DISPERSION_DRAG: f64 = 0.05;
+
+fn spread(seed: u64, salt: u64, amplitude: f64) -> f64 {
+    1.0 + amplitude * (2.0 * unit_random(seed ^ salt) - 1.0)
+}
+
+/// The spread a seed applies to the flight: ±3 % thrust and burn, ±5 % drag. The target lock stays
+/// a single probability roll (`lock_roll`); this only varies the hardware, never a guidance law.
+pub fn dispersion(seed: u64) -> Dispersion {
+    Dispersion {
+        thrust: spread(seed, 0x5EED, DISPERSION_THRUST),
+        burn: spread(seed, 0x1234_5678_9ABC_DEF0, DISPERSION_BURN),
+        drag: spread(seed, 0x0D15_C0FF, DISPERSION_DRAG),
+    }
 }
 
 fn air_density(altitude_m: f64) -> f64 {
@@ -120,6 +150,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
     }
 
     let dt = config.dt_s;
+    let spread = dispersion(config.seed);
     let stage_count = vehicle.stages.len();
     let mut attached = vec![true; stage_count];
     let mut ignited = vec![false; stage_count];
@@ -215,7 +246,8 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                                     .parts
                                     .iter()
                                     .map(|p| p.spec.stats().thrust_n)
-                                    .sum();
+                                    .sum::<f64>()
+                                    * spread.thrust;
                                 first_ignition_twr = Some(thrust / (attached_mass(&attached, &remaining) * G0));
                             }
                         }
@@ -299,7 +331,9 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                 .fold(0.0, f64::max);
             d.max(0.1)
         };
-        let drag = 0.5 * rho * speed * speed * DRAG_COEFFICIENT * std::f64::consts::PI * diameter * diameter / 4.0;
+        let drag =
+            0.5 * rho * speed * speed * DRAG_COEFFICIENT * spread.drag * std::f64::consts::PI * diameter * diameter
+                / 4.0;
 
         let effective_throttle = match speed_target {
             Some(target) => {
@@ -329,9 +363,9 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                 match part.spec {
                     PartSpec::SolidMotor { burn_time_s, .. } => {
                         if remaining[stage][j] > 0.0 {
-                            thrust += stats.thrust_n;
+                            thrust += stats.thrust_n * spread.thrust;
                             remaining[stage][j] =
-                                (remaining[stage][j] - stats.propellant_kg / burn_time_s * dt).max(0.0);
+                                (remaining[stage][j] - stats.propellant_kg / (burn_time_s * spread.burn) * dt).max(0.0);
                             any_active = true;
                         }
                     }
@@ -339,7 +373,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                         let can_run =
                             !matches!(part.spec, PartSpec::AirBreathing { .. }) || speed >= AIR_BREATHING_MIN_SPEED_MS;
                         if can_run && tank_pool - drawn > 0.0 {
-                            let engine_thrust = stats.thrust_n * effective_throttle;
+                            let engine_thrust = stats.thrust_n * spread.thrust * effective_throttle;
                             thrust += engine_thrust;
                             drawn += engine_thrust / (stats.isp_s * G0) * dt;
                             any_active = true;
@@ -678,6 +712,39 @@ mod tests {
     }
 
     #[test]
+    fn a_seed_spreads_the_hardware_but_the_flight_stays_deterministic() {
+        let vehicle = sounding_rocket();
+        let program = two_stage_program(20.0);
+        let paths: Vec<f64> = (0..12)
+            .map(|seed| {
+                simulate(
+                    &vehicle,
+                    &program,
+                    FlightConfig {
+                        seed,
+                        ..FlightConfig::default()
+                    },
+                )
+                .unwrap()
+                .path_length_m
+            })
+            .collect();
+        let min = paths.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = paths.iter().cloned().fold(0.0, f64::max);
+        assert!(max - min > 1.0, "every seed flew the same path: {paths:?}");
+
+        for seed in 0..10 {
+            let spread = dispersion(seed);
+            assert_eq!(spread, dispersion(seed), "the spread is deterministic");
+            assert!((spread.thrust - 1.0).abs() <= DISPERSION_THRUST + 1e-12);
+            assert!((spread.burn - 1.0).abs() <= DISPERSION_BURN + 1e-12);
+            assert!((spread.drag - 1.0).abs() <= DISPERSION_DRAG + 1e-12);
+        }
+        let mean = (0..200).map(|seed| dispersion(seed).thrust).sum::<f64>() / 200.0;
+        assert!((mean - 1.0).abs() < DISPERSION_THRUST / 2.0, "mean spread {mean}");
+    }
+
+    #[test]
     fn a_radar_dropped_with_its_stage_cannot_lock() {
         let mut vehicle = sounding_rocket();
         vehicle.stages[0].parts.push(part(
@@ -700,6 +767,36 @@ mod tests {
             "{:?}",
             report.anomalies
         );
+    }
+
+    #[test]
+    fn the_seeded_spread_reaches_the_simulated_thrust() {
+        let vehicle = sounding_rocket();
+        let program = Program::single(vec![Block::IgniteStage { stage: 0 }]);
+        let twr = |seed| {
+            simulate(
+                &vehicle,
+                &program,
+                FlightConfig {
+                    seed,
+                    ..FlightConfig::default()
+                },
+            )
+            .unwrap()
+            .first_ignition_twr
+            .unwrap()
+        };
+        let (slow_seed, fast_seed) =
+            (0..100u64)
+                .map(|seed| (seed, dispersion(seed).thrust))
+                .fold((0, 0), |(low, high), (seed, factor)| {
+                    let low = if factor < dispersion(low).thrust { seed } else { low };
+                    let high = if factor > dispersion(high).thrust { seed } else { high };
+                    (low, high)
+                });
+        let ratio = twr(fast_seed) / twr(slow_seed);
+        let expected = dispersion(fast_seed).thrust / dispersion(slow_seed).thrust;
+        assert!((ratio - expected).abs() < 1e-9, "{ratio} vs {expected}");
     }
 
     #[test]

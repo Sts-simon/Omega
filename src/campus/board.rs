@@ -1763,6 +1763,7 @@ fn build_trials(
     let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
     let busy = session.batch_job.is_some();
     let current_hash = trials::input_hash(vehicle, program, &trials::config(session));
+    let batch_stale = session.batch_stale(vehicle, program);
 
     // Left: seed, run, batch and comparison controls.
     root.spawn(Node {
@@ -1840,6 +1841,18 @@ fn build_trials(
                     ui_kit::WARN,
                 ),
             }
+            let spread = omega_rules::flight::dispersion(session.seed);
+            ui_kit::label(
+                panel,
+                format!(
+                    "Seed spread  thrust {:+.1}%  burn {:+.1}%  drag {:+.1}%",
+                    (spread.thrust - 1.0) * 100.0,
+                    (spread.burn - 1.0) * 100.0,
+                    (spread.drag - 1.0) * 100.0
+                ),
+                9.5,
+                ui_kit::TEXT_DIM,
+            );
             ui_kit::button(
                 panel,
                 "RUN TRIAL",
@@ -1881,6 +1894,9 @@ fn build_trials(
                 ));
             } else if !monte_carlo {
                 ui_kit::label(panel, "Locked: Monte Carlo research needed.", 9.5, ui_kit::WARN);
+            }
+            if batch_stale && !busy {
+                ui_kit::label(panel, "Batch stale: inputs changed.", 9.5, ui_kit::WARN);
             }
             heading(panel, "A / B");
             panel
@@ -2113,7 +2129,18 @@ fn build_trials(
                             ui_kit::chip(row, format!("{} runs", batch.runs), ui_kit::NEUTRAL);
                             ui_kit::chip(row, format!("{} no lift-off", batch.no_liftoff), ui_kit::BAD);
                             ui_kit::chip(row, format!("{} no separation", batch.no_separation), ui_kit::WARN);
+                            if batch_stale {
+                                ui_kit::chip(row, "STALE", ui_kit::BAD);
+                            }
                         });
+                    if batch_stale {
+                        ui_kit::label(
+                            panel,
+                            "Vehicle, program, profile or seed changed since this batch.",
+                            9.5,
+                            ui_kit::BAD,
+                        );
+                    }
                     ui_kit::label(
                         panel,
                         format!(
