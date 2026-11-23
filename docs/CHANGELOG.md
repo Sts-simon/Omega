@@ -1,3 +1,8 @@
+## Unreleased — Project consistency and maintenance baseline (0.30.0)
+- Align the package version, lockfile, window title, README and current roadmap at 0.30.0.
+- Replace outdated architecture and vision descriptions that still referred to the removed civil loop, legacy editor and pre-missile workflow.
+- Record the current repository baseline: missile-only gameplay loop, versioned save slot, research-gated contracts and the existing CI checks. No gameplay or save-schema change is intended by this maintenance pass.
+
 ## Unreleased — Research-gated contracts and the end of the inherited loop (lots 4-5)
 - **Research now constrains the contract office.** Each offer names the `family:*` capability it needs: air-to-surface and surface-to-surface work uses the starting ballistic family, surface-to-air and air-to-air need their own family, a cruiser needs the cruise family, and difficulty 4-5 surface-to-surface offers need the anti-ship family. An unresearched family produces no offer; the empty board lists the missing technologies by name.
 - **Active contracts follow `ExtraActiveProjects`.** The office starts with one slot and `Parallel project management` raises it to two. Each contract keeps its own evidence, dossier, deadline and selection, and a trial feeds every active contract. Accepting an offer for a locked family (only possible from an older save) or beyond the slot count is refused with a readable message.

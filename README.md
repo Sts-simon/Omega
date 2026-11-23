@@ -1,11 +1,12 @@
-# Omega — Research Island
+# Omega — Missile Design
 
 [![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.26.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.26.0)
+[![Version](https://img.shields.io/badge/version-0.30.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.30.0)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-**Version 0.26.0** — a Rust + Bevy engineering sandbox shaped like a fictional island research
-campus. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
+**Version 0.30.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
+military-themed contracts, assembles an abstract staged vehicle, edits its onboard program, runs
+reproducible simulated trials and delivers a dossier. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
 research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
 credits.
 
