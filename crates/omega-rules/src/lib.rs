@@ -14,7 +14,7 @@ pub mod research;
 pub mod vehicle;
 
 pub use contracts::{
-    generate_contract_board, ContractOffer, ContractPhase, ContractProgress,
+    generate_contract_board, ContractEvaluation, ContractOffer, ContractPhase, ContractProgress,
     ContractRequirements, MissionFamily, VehicleFamily,
 };
 pub use diff::{diff_parts, DesignDiff};
