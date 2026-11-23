@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn unique_sibling(path: &Path, suffix: &str) -> Result<PathBuf, String> {
-    let file_name = path.file_name().and_then(|name| name.to_str())
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
         .ok_or_else(|| format!("invalid path {}", path.display()))?;
     let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     Ok(path.with_file_name(format!("{file_name}.{}.{}.{}", std::process::id(), sequence, suffix)))
@@ -16,18 +18,25 @@ fn sync_parent(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        File::open(parent).and_then(|directory| directory.sync_all())
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
             .map_err(|error| format!("cannot sync directory {}: {error}", parent.display()))?;
     }
     Ok(())
 }
 
 fn write_new_synced(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
         .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
-    file.write_all(bytes).map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-    file.flush().map_err(|error| format!("cannot flush {}: {error}", path.display()))?;
-    file.sync_all().map_err(|error| format!("cannot sync {}: {error}", path.display()))
+    file.write_all(bytes)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    file.flush()
+        .map_err(|error| format!("cannot flush {}: {error}", path.display()))?;
+    file.sync_all()
+        .map_err(|error| format!("cannot sync {}: {error}", path.display()))
 }
 
 /// Replace a file through a unique sibling temporary file.
@@ -42,7 +51,9 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
     let temp = unique_sibling(path, "tmp")?;
     let backup_temp = unique_sibling(path, "bak.tmp")?;
-    let file_name = path.file_name().and_then(|name| name.to_str())
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
         .ok_or_else(|| format!("invalid path {}", path.display()))?;
     let backup = path.with_file_name(format!("{file_name}.bak"));
 
@@ -50,9 +61,9 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         write_new_synced(&temp, bytes)?;
 
         if path.exists() {
-            fs::copy(path, &backup_temp)
-                .map_err(|error| format!("cannot back up {}: {error}", path.display()))?;
-            File::open(&backup_temp).and_then(|file| file.sync_all())
+            fs::copy(path, &backup_temp).map_err(|error| format!("cannot back up {}: {error}", path.display()))?;
+            File::open(&backup_temp)
+                .and_then(|file| file.sync_all())
                 .map_err(|error| format!("cannot sync backup for {}: {error}", path.display()))?;
             fs::rename(&backup_temp, &backup)
                 .map_err(|error| format!("cannot replace backup {}: {error}", backup.display()))?;
@@ -88,7 +99,8 @@ mod tests {
         write_atomic(&path, b"two").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"two");
         assert_eq!(fs::read(path.with_file_name("a.json.bak")).unwrap(), b"one");
-        let leftovers = fs::read_dir(path.parent().unwrap()).unwrap()
+        let leftovers = fs::read_dir(path.parent().unwrap())
+            .unwrap()
             .filter_map(Result::ok)
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
             .count();

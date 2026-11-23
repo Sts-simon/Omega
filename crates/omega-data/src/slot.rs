@@ -39,8 +39,16 @@ pub enum SlotError {
     UnsafePath(String),
     DuplicatePath(String),
     MissingFile(String),
-    SizeMismatch { path: String, expected: u64, actual: u64 },
-    Corrupt { path: String, expected: ContentHash, actual: ContentHash },
+    SizeMismatch {
+        path: String,
+        expected: u64,
+        actual: u64,
+    },
+    Corrupt {
+        path: String,
+        expected: ContentHash,
+        actual: ContentHash,
+    },
     UnsupportedSchema(u32),
     RevisionOverflow,
     AlreadyExists,
@@ -81,7 +89,9 @@ pub struct SaveSlot {
 fn check_relative(rel: &str) -> Result<(), SlotError> {
     let path = Path::new(rel);
     let safe = !rel.is_empty()
-        && path.components().all(|component| matches!(component, Component::Normal(_)))
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
         && rel != MANIFEST_FILE;
     if safe {
         Ok(())
@@ -98,7 +108,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), SlotError> {
         return Err(SlotError::InvalidManifest("game_version is empty".to_string()));
     }
     if manifest.revision == 0 {
-        return Err(SlotError::InvalidManifest("revision must be greater than zero".to_string()));
+        return Err(SlotError::InvalidManifest(
+            "revision must be greater than zero".to_string(),
+        ));
     }
 
     let mut paths = HashSet::with_capacity(manifest.files.len());
@@ -109,7 +121,10 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), SlotError> {
         }
         let hash = entry.hash.as_str();
         if hash.len() != 16 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(SlotError::InvalidManifest(format!("invalid content hash for {}", entry.path)));
+            return Err(SlotError::InvalidManifest(format!(
+                "invalid content hash for {}",
+                entry.path
+            )));
         }
     }
     Ok(())
@@ -129,10 +144,10 @@ impl SaveSlot {
         if !path.exists() {
             return Ok(None);
         }
-        let bytes = fs::read(&path)
-            .map_err(|error| SlotError::Io(format!("cannot read {}: {error}", path.display())))?;
-        let manifest: Manifest = serde_json::from_slice(&bytes)
-            .map_err(|error| SlotError::Parse(format!("invalid manifest: {error}")))?;
+        let bytes =
+            fs::read(&path).map_err(|error| SlotError::Io(format!("cannot read {}: {error}", path.display())))?;
+        let manifest: Manifest =
+            serde_json::from_slice(&bytes).map_err(|error| SlotError::Parse(format!("invalid manifest: {error}")))?;
         validate_manifest(&manifest)?;
         Ok(Some(manifest))
     }
@@ -157,7 +172,9 @@ impl SaveSlot {
         let mut entries: Vec<ManifestEntry> = previous
             .as_ref()
             .map(|manifest| {
-                manifest.files.iter()
+                manifest
+                    .files
+                    .iter()
                     .filter(|entry| !input_paths.contains(entry.path.as_str()))
                     .cloned()
                     .collect()
@@ -180,17 +197,20 @@ impl SaveSlot {
             revision,
             files: entries,
         };
-        let bytes = serde_json::to_vec_pretty(&manifest)
-            .map_err(|error| SlotError::Parse(error.to_string()))?;
+        let bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| SlotError::Parse(error.to_string()))?;
         write_atomic(&self.root.join(MANIFEST_FILE), &bytes).map_err(SlotError::Io)?;
         Ok(manifest)
     }
 
     pub fn read_verified(&self, rel: &str) -> Result<Vec<u8>, SlotError> {
         check_relative(rel)?;
-        let manifest = self.read_manifest()?
+        let manifest = self
+            .read_manifest()?
             .ok_or_else(|| SlotError::MissingFile(MANIFEST_FILE.to_string()))?;
-        let entry = manifest.files.iter().find(|entry| entry.path == rel)
+        let entry = manifest
+            .files
+            .iter()
+            .find(|entry| entry.path == rel)
             .ok_or_else(|| SlotError::MissingFile(rel.to_string()))?;
         let path = self.root.join(rel);
         let bytes = fs::read(&path).map_err(|error| {
@@ -283,7 +303,9 @@ mod tests {
     fn commit_then_read_verified_round_trips() {
         let dir = temp_dir("roundtrip");
         let slot = SaveSlot::new(dir.join("slot_1"));
-        let manifest = slot.commit("0.30.1", &[("campaign.json", b"{\"a\":1}".to_vec())]).unwrap();
+        let manifest = slot
+            .commit("0.30.1", &[("campaign.json", b"{\"a\":1}".to_vec())])
+            .unwrap();
         assert_eq!(manifest.revision, 1);
         assert_eq!(slot.read_verified("campaign.json").unwrap(), b"{\"a\":1}");
         let second = slot.commit("0.30.1", &[("designs/a.json", b"[]".to_vec())]).unwrap();
@@ -299,7 +321,10 @@ mod tests {
         let slot = SaveSlot::new(dir.join("s"));
         slot.commit("0.30.1", &[("campaign.json", b"good".to_vec())]).unwrap();
         fs::write(slot.root().join("campaign.json"), b"evil").unwrap();
-        assert!(matches!(slot.read_verified("campaign.json"), Err(SlotError::Corrupt { .. })));
+        assert!(matches!(
+            slot.read_verified("campaign.json"),
+            Err(SlotError::Corrupt { .. })
+        ));
         assert_eq!(slot.verify_all().unwrap().len(), 1);
         let _ = fs::remove_dir_all(dir);
     }
@@ -362,7 +387,10 @@ mod tests {
     fn duplicate_paths_in_a_commit_are_rejected_before_writing() {
         let dir = temp_dir("duplicate-input");
         let slot = SaveSlot::new(dir.join("s"));
-        let result = slot.commit("0.30.1", &[("campaign.json", b"one".to_vec()), ("campaign.json", b"two".to_vec())]);
+        let result = slot.commit(
+            "0.30.1",
+            &[("campaign.json", b"one".to_vec()), ("campaign.json", b"two".to_vec())],
+        );
         assert!(matches!(result, Err(SlotError::DuplicatePath(_))));
         assert!(!slot.root().join("campaign.json").exists());
         let _ = fs::remove_dir_all(dir);
@@ -374,7 +402,10 @@ mod tests {
         let slot = SaveSlot::new(dir.join("s"));
         slot.commit("0.30.1", &[("campaign.json", b"longer".to_vec())]).unwrap();
         fs::write(slot.root().join("campaign.json"), b"x").unwrap();
-        assert!(matches!(slot.read_verified("campaign.json"), Err(SlotError::SizeMismatch { .. })));
+        assert!(matches!(
+            slot.read_verified("campaign.json"),
+            Err(SlotError::SizeMismatch { .. })
+        ));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -393,7 +424,10 @@ mod tests {
     fn unsafe_paths_are_rejected() {
         let slot = SaveSlot::new(temp_dir("unsafe").join("s"));
         for bad in ["../x.json", "/etc/passwd", "a/../../b", "", "manifest.json"] {
-            assert!(matches!(slot.commit("0.30.1", &[(bad, vec![])]), Err(SlotError::UnsafePath(_))), "{bad}");
+            assert!(
+                matches!(slot.commit("0.30.1", &[(bad, vec![])]), Err(SlotError::UnsafePath(_))),
+                "{bad}"
+            );
         }
         let _ = fs::remove_dir_all(slot.root().parent().unwrap());
     }
@@ -410,7 +444,10 @@ mod tests {
         assert_eq!(manifest.files.len(), 2);
         assert_eq!(slot.read_verified("designs/assembly.json").unwrap(), b"{\"parts\":[]}");
         assert!(legacy.join("assembly.json").exists());
-        assert!(matches!(slot.import_legacy(&legacy, "0.30.1"), Err(SlotError::AlreadyExists)));
+        assert!(matches!(
+            slot.import_legacy(&legacy, "0.30.1"),
+            Err(SlotError::AlreadyExists)
+        ));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -419,7 +456,10 @@ mod tests {
         let dir = temp_dir("legacy-empty");
         fs::create_dir_all(dir.join("saves")).unwrap();
         let slot = SaveSlot::new(dir.join("slot_1"));
-        assert!(matches!(slot.import_legacy(&dir.join("saves"), "0.30.1"), Err(SlotError::NothingToImport)));
+        assert!(matches!(
+            slot.import_legacy(&dir.join("saves"), "0.30.1"),
+            Err(SlotError::NothingToImport)
+        ));
         let _ = fs::remove_dir_all(dir);
     }
 }
