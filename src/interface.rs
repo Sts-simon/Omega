@@ -60,6 +60,7 @@ pub(crate) enum UiAction {
     ToggleHelp,
     Missile(crate::missile::MissileAction),
     Program(crate::program_editor::ProgramAction),
+    Trial(crate::trials::TrialAction),
     StartResearch(usize),
     NextDay,
 }
@@ -123,6 +124,7 @@ pub fn setup(mut commands: Commands) {
         add_nav_button(parent, "WORKSHOP", CampusView::Missile);
         add_nav_button(parent, "RESEARCH", CampusView::Research);
         add_nav_button(parent, "PROGRAM", CampusView::Program);
+        add_nav_button(parent, "TRIALS", CampusView::Trials);
         add_nav_button(parent, "SEQUENCER", CampusView::Programming);
         add_nav_button(parent, "COMPUTE", CampusView::Computation);
         add_nav_button(parent, "LEGACY BENCH", CampusView::Construction);
@@ -501,6 +503,7 @@ pub fn handle_actions(
             // Missile workshop and program actions are owned by `campus::handle_extra_actions`,
             // which also has the research capabilities and the vehicle.
             UiAction::Program(_) => {}
+            UiAction::Trial(_) => {}
             UiAction::AddPanel => design.add_part(PartKind::Panel),
             UiAction::AddBeam => design.add_part(PartKind::Beam),
             UiAction::AddEnclosure => design.add_part(PartKind::Enclosure),

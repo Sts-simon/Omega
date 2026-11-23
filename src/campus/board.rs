@@ -7,6 +7,7 @@ use crate::design::{InspectorState, RevisionLog, record_revision, restore_revisi
 use crate::interface::{UiAction, UiActionButton};
 use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
 use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable};
+use crate::trials::{self, TrialAction, TrialSession};
 use crate::ui_kit::{self, ButtonTone, NavStatus, UiState};
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::ui::ScrollPosition;
@@ -20,6 +21,7 @@ pub(crate) enum BoardKind {
     Project,
     Missile,
     Program,
+    Trials,
 }
 
 #[derive(Component)]
@@ -50,7 +52,7 @@ fn root_node(kind: BoardKind) -> Node {
                 bottom: Val::Px(18.0),
             };
         }
-        BoardKind::Contracts | BoardKind::Research | BoardKind::Missile | BoardKind::Program => {
+        BoardKind::Contracts | BoardKind::Research | BoardKind::Missile | BoardKind::Program | BoardKind::Trials => {
             node.left = Val::Px(14.0);
             node.right = Val::Px(14.0);
             node.top = Val::Px(76.0);
@@ -76,6 +78,7 @@ pub(crate) fn setup_boards(mut commands: Commands) {
         BoardKind::Project,
         BoardKind::Missile,
         BoardKind::Program,
+        BoardKind::Trials,
     ] {
         commands.spawn((root_node(kind), kind));
     }
@@ -217,7 +220,7 @@ fn build_island(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
         });
     });
 
-    let facilities: [(&str, &str, &str, CampusView, Color); 5] = [
+    let facilities: [(&str, &str, &str, CampusView, Color); 6] = [
         (
             "CONTRACT OFFICE",
             "F1",
@@ -245,6 +248,13 @@ fn build_island(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
             "Compose the onboard program from the blocks the installed hardware unlocks.",
             CampusView::Program,
             Color::srgb(0.35, 0.75, 0.55),
+        ),
+        (
+            "TRIALS",
+            "NEW",
+            "Fly the vehicle and its program: four plots, events, anomalies, seeded batches and A/B comparison.",
+            CampusView::Trials,
+            Color::srgb(0.90, 0.55, 0.35),
         ),
         (
             "COMPUTE",
@@ -1688,6 +1698,458 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
     });
 }
 
+fn rate(value: Option<f64>) -> String {
+    value
+        .map(|rate| format!("{:.0}%", rate * 100.0))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+/// One bar chart: samples collapsed to at most 96 bars, scaled to the series maximum.
+fn plot(
+    parent: &mut ChildSpawnerCommands<'_>,
+    title: &str,
+    unit: &str,
+    color: Color,
+    samples: &[omega_rules::flight::Sample],
+    value: impl Fn(&omega_rules::flight::Sample) -> f64,
+) {
+    let max = samples
+        .iter()
+        .map(|sample| value(sample).max(0.0))
+        .fold(0.0, f64::max)
+        .max(1e-9);
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        })
+        .with_children(|row| {
+            ui_kit::label(row, title, 10.5, ui_kit::TEXT);
+            ui_kit::label(row, format!("max {max:.0} {unit}"), 9.5, ui_kit::TEXT_DIM);
+        });
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(62.0),
+            align_items: AlignItems::End,
+            column_gap: Val::Px(1.0),
+            ..default()
+        })
+        .with_children(|chart| {
+            let step = (samples.len() / 96).max(1);
+            for sample in samples.iter().step_by(step) {
+                let ratio = (value(sample).max(0.0) / max).clamp(0.0, 1.0);
+                chart.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        height: Val::Percent((ratio * 100.0) as f32),
+                        min_height: Val::Px(1.0),
+                        ..default()
+                    },
+                    BackgroundColor(color),
+                ));
+            }
+        });
+}
+
+fn build_trials(
+    root: &mut ChildSpawnerCommands<'_>,
+    campus: &CampusState,
+    vehicle: &omega_rules::Vehicle,
+    program: &omega_rules::Program,
+    session: &TrialSession,
+) {
+    let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
+    let current_hash = trials::input_hash(vehicle, program, &trials::config(session));
+
+    // Left: seed, run, batch and comparison controls.
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        width: Val::Px(252.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|left| {
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        left.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "TRIAL SETUP", 15.0, ui_kit::ACCENT);
+            ui_kit::label(panel, vehicle.name.clone(), 10.5, ui_kit::TEXT_DIM);
+            heading(panel, "MISSION PROFILE");
+            ui_kit::button(
+                panel,
+                if session.air_launch {
+                    "AIR LAUNCH 200 m/s"
+                } else {
+                    "VERTICAL LAUNCH"
+                },
+                UiAction::Trial(TrialAction::ToggleLaunch),
+                ButtonTone::Secondary,
+                Val::Percent(100.0),
+            );
+            heading(panel, "SEED");
+            ui_kit::label(panel, format!("Seed {}", session.seed), 13.0, ui_kit::TEXT);
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (text, step) in [("-10", -10i64), ("-1", -1), ("+1", 1), ("+10", 10)] {
+                        ui_kit::button_row_item(
+                            row,
+                            text,
+                            UiAction::Trial(TrialAction::SeedStep(step)),
+                            ButtonTone::Ghost,
+                        );
+                    }
+                });
+            ui_kit::button(
+                panel,
+                "RUN TRIAL",
+                UiAction::Trial(TrialAction::Run),
+                ButtonTone::Primary,
+                Val::Percent(100.0),
+            );
+            heading(panel, "MONTE CARLO BATCH");
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for runs in trials::BATCH_SIZES {
+                        let tone = if monte_carlo {
+                            ButtonTone::Secondary
+                        } else {
+                            ButtonTone::Disabled
+                        };
+                        ui_kit::button_row_item(
+                            row,
+                            ui_kit::thousands(runs as u64),
+                            UiAction::Trial(TrialAction::Batch(runs)),
+                            tone,
+                        );
+                    }
+                });
+            if !monte_carlo {
+                ui_kit::label(panel, "Locked: Monte Carlo research needed.", 9.5, ui_kit::WARN);
+            }
+            heading(panel, "A / B");
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    ui_kit::button_row_item(
+                        row,
+                        "SNAPSHOT A",
+                        UiAction::Trial(TrialAction::Snapshot),
+                        ButtonTone::Secondary,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "COMPARE",
+                        UiAction::Trial(TrialAction::Compare),
+                        ButtonTone::Secondary,
+                    );
+                });
+            match &session.baseline {
+                Some(baseline) => ui_kit::label(
+                    panel,
+                    format!("A: {} ({})", baseline.hash, baseline.vehicle.name),
+                    9.5,
+                    ui_kit::TEXT_DIM,
+                ),
+                None => ui_kit::label(panel, "A: empty. Snapshot before editing.", 9.5, ui_kit::TEXT_DIM),
+            }
+            heading(panel, "INPUT HASH");
+            ui_kit::label(
+                panel,
+                current_hash.chars().take(16).collect::<String>(),
+                11.0,
+                ui_kit::TEXT,
+            );
+            if session
+                .report
+                .as_ref()
+                .is_some_and(|run| run.input_hash != current_hash)
+            {
+                ui_kit::label(panel, "Changed since the last run.", 9.5, ui_kit::WARN);
+            }
+            ui_kit::label(
+                panel,
+                "Same vehicle, program and seed give the same report.",
+                9.5,
+                ui_kit::TEXT_DIM,
+            );
+        });
+    });
+
+    // Middle: the four plots and the headline figures.
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_grow: 1.0,
+        flex_basis: Val::Px(0.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|middle| {
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        middle.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "TRAJECTORY", 12.0, ui_kit::ACCENT);
+            match &session.report {
+                None => ui_kit::label(
+                    panel,
+                    "No trial yet. Press RUN TRIAL to fly the current vehicle and program.",
+                    10.5,
+                    ui_kit::TEXT_DIM,
+                ),
+                Some(run) => {
+                    let samples = &run.report.samples;
+                    plot(panel, "SPEED", "m/s", ui_kit::ACCENT, samples, |s| s.speed_ms);
+                    plot(panel, "ALTITUDE", "m", ui_kit::PURPLE, samples, |s| s.altitude_m);
+                    plot(panel, "MASS", "kg", ui_kit::WARN, samples, |s| s.mass_kg);
+                    plot(panel, "THRUST", "kN", Color::srgb(0.36, 0.62, 0.95), samples, |s| {
+                        s.thrust_n / 1_000.0
+                    });
+                }
+            }
+        });
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        middle.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "METRICS", 12.0, ui_kit::ACCENT);
+            match &session.report {
+                None => ui_kit::label(panel, "Run a trial to see figures.", 10.5, ui_kit::TEXT_DIM),
+                Some(run) => {
+                    let report = &run.report;
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            ui_kit::chip(row, format!("{:.0} m/s max", report.max_speed_ms), ui_kit::GOOD);
+                            ui_kit::chip(
+                                row,
+                                format!("{:.1} km", report.path_length_m / 1_000.0),
+                                ui_kit::NEUTRAL,
+                            );
+                            ui_kit::chip(row, format!("{:.1} s", report.flight_time_s), ui_kit::NEUTRAL);
+                        });
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            let twr = report.first_ignition_twr;
+                            ui_kit::chip(
+                                row,
+                                format!("TWR {:.2}", twr.unwrap_or(0.0)),
+                                if twr.is_some_and(|value| value >= 1.0) {
+                                    ui_kit::GOOD
+                                } else {
+                                    ui_kit::BAD
+                                },
+                            );
+                            match report.lock {
+                                Some(lock) => ui_kit::chip(
+                                    row,
+                                    format!(
+                                        "lock {:.0}% {}",
+                                        lock.probability * 100.0,
+                                        if lock.success { "acquired" } else { "failed" }
+                                    ),
+                                    if lock.success { ui_kit::GOOD } else { ui_kit::BAD },
+                                ),
+                                None => ui_kit::chip(row, "no lock attempted", ui_kit::NEUTRAL),
+                            }
+                            ui_kit::chip(
+                                row,
+                                if report.lifted_off { "lifted off" } else { "no lift-off" },
+                                if report.lifted_off { ui_kit::GOOD } else { ui_kit::BAD },
+                            );
+                        });
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "Run seed {} ({}) | final {:.0} m/s | {} samples",
+                            run.seed,
+                            if run.air_launch { "air launch" } else { "vertical" },
+                            report.final_speed_ms,
+                            report.samples.len()
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                }
+            }
+        });
+    });
+
+    // Right: timeline, anomalies and the batch/comparison results.
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        width: Val::Px(330.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|right| {
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        right.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "EVENTS", 12.0, ui_kit::ACCENT);
+            match &session.report {
+                None => ui_kit::label(panel, "Nothing flown yet.", 10.0, ui_kit::TEXT_DIM),
+                Some(run) if run.report.events.is_empty() => {
+                    ui_kit::label(panel, "No event was reported.", 10.0, ui_kit::TEXT_DIM)
+                }
+                Some(run) => {
+                    for (t, label) in run.report.events.iter().take(9) {
+                        ui_kit::label(panel, format!("{t:6.1}s  {label}"), 10.0, ui_kit::TEXT);
+                    }
+                    if run.report.events.len() > 9 {
+                        ui_kit::label(
+                            panel,
+                            format!("+{} more events", run.report.events.len() - 9),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
+                }
+            }
+            heading(panel, "ANOMALIES");
+            match &session.report {
+                None => ui_kit::label(panel, "-", 10.0, ui_kit::TEXT_DIM),
+                Some(run) if run.report.anomalies.is_empty() => {
+                    panel
+                        .spawn(Node::default())
+                        .with_children(|row| ui_kit::chip(row, "NO ANOMALY", ui_kit::GOOD));
+                }
+                Some(run) => {
+                    for anomaly in run.report.anomalies.iter().take(5) {
+                        ui_kit::label(panel, format!("- {anomaly}"), 9.5, ui_kit::BAD);
+                    }
+                    if run.report.anomalies.len() > 5 {
+                        ui_kit::label(
+                            panel,
+                            format!("+{} more", run.report.anomalies.len() - 5),
+                            9.5,
+                            ui_kit::BAD,
+                        );
+                    }
+                }
+            }
+        });
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        right.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "BATCH", 12.0, ui_kit::ACCENT);
+            match &session.batch {
+                None => ui_kit::label(
+                    panel,
+                    "Run a seeded batch to see the distribution.",
+                    10.0,
+                    ui_kit::TEXT_DIM,
+                ),
+                Some(batch) => {
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            ui_kit::chip(row, format!("{} runs", batch.runs), ui_kit::NEUTRAL);
+                            ui_kit::chip(row, format!("{} no lift-off", batch.no_liftoff), ui_kit::BAD);
+                            ui_kit::chip(row, format!("{} no separation", batch.no_separation), ui_kit::WARN);
+                        });
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "lock acquired {}/{} ({}) | {} runs with anomalies",
+                            batch.lock_success,
+                            batch.lock_attempts,
+                            rate(batch.lock_rate()),
+                            batch.anomalies
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "mean {:.0} m/s | {:.1} km | {:.1} s",
+                            batch.mean_max_speed_ms,
+                            batch.mean_path_m / 1_000.0,
+                            batch.mean_flight_time_s
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                }
+            }
+            heading(panel, "A VS B");
+            match &session.comparison {
+                None => ui_kit::label(panel, "Snapshot A, edit, then COMPARE.", 10.0, ui_kit::TEXT_DIM),
+                Some(comparison) => {
+                    let a = &comparison.baseline;
+                    let b = &comparison.current;
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "A {}  vs  B {}",
+                            comparison.baseline_hash,
+                            comparison.current_hash.chars().take(8).collect::<String>()
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "path   {:.1} -> {:.1} km  ({:+.1})",
+                            a.mean_path_m / 1_000.0,
+                            b.mean_path_m / 1_000.0,
+                            (b.mean_path_m - a.mean_path_m) / 1_000.0
+                        ),
+                        10.0,
+                        ui_kit::TEXT,
+                    );
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "speed  {:.0} -> {:.0} m/s  ({:+.0})",
+                            a.mean_max_speed_ms,
+                            b.mean_max_speed_ms,
+                            b.mean_max_speed_ms - a.mean_max_speed_ms
+                        ),
+                        10.0,
+                        ui_kit::TEXT,
+                    );
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "lock   {} -> {}  ({} vs {})",
+                            rate(a.lock_rate()),
+                            rate(b.lock_rate()),
+                            a.lock_success,
+                            b.lock_success
+                        ),
+                        10.0,
+                        ui_kit::TEXT,
+                    );
+                }
+            }
+        });
+    });
+}
+
 /// Mouse-wheel scrolling for the missile program block list.
 ///
 /// `bevy_ui` moves a node's children by `ScrollPosition` but nothing turns the wheel into an
@@ -1722,6 +2184,7 @@ fn visible(kind: BoardKind, campus: &CampusState, sketch_active: bool) -> bool {
         BoardKind::Research => campus.view == CampusView::Research,
         BoardKind::Missile => campus.view == CampusView::Missile,
         BoardKind::Program => campus.view == CampusView::Program,
+        BoardKind::Trials => campus.view == CampusView::Trials,
         BoardKind::Project => campus.view == CampusView::Construction && !campus.profile_editor_open && !sketch_active,
     }
 }
@@ -1732,6 +2195,7 @@ fn signature(
     design: &str,
     missile: &MissileSession,
     program: &MissileProgramSession,
+    trials: &TrialSession,
 ) -> String {
     let contracts = || {
         let active: Vec<String> = campus
@@ -1779,6 +2243,15 @@ fn signature(
             "{:?}|{:?}|{}|{:?}",
             missile.vehicle, program.program, program.thread, program.block
         ),
+        BoardKind::Trials => format!(
+            "{}|{}|{}|{}|{}|{}",
+            trials.revision,
+            trials.seed,
+            trials.air_launch,
+            trials.report.is_some(),
+            trials.batch.is_some(),
+            trials.comparison.is_some()
+        ),
         BoardKind::Project => format!("{}|{:?}", contracts(), campus.instrument_profile),
     }
 }
@@ -1790,6 +2263,7 @@ pub(crate) fn sync_boards(
     sketch: Res<PolygonSketchSession>,
     missile: Res<MissileSession>,
     program: Res<MissileProgramSession>,
+    trials: Res<TrialSession>,
     mut boards: Query<(Entity, &mut Node, &BoardKind)>,
     mut seen: Local<HashMap<BoardKind, String>>,
 ) {
@@ -1804,7 +2278,7 @@ pub(crate) fn sync_boards(
             seen.remove(kind);
             continue;
         }
-        let sig = signature(*kind, &campus, design_hash.as_str(), &missile, &program);
+        let sig = signature(*kind, &campus, design_hash.as_str(), &missile, &program, &trials);
         if seen.get(kind) == Some(&sig) {
             continue;
         }
@@ -1814,6 +2288,7 @@ pub(crate) fn sync_boards(
         let campus_ref: &CampusState = &campus;
         let missile_ref: &MissileSession = &missile;
         let program_ref: &MissileProgramSession = &program;
+        let trials_ref: &TrialSession = &trials;
         let hash = design_hash.clone();
         commands.entity(entity).with_children(|root| match kind {
             BoardKind::Island => build_island(root, campus_ref),
@@ -1821,6 +2296,7 @@ pub(crate) fn sync_boards(
             BoardKind::Research => build_research(root, campus_ref),
             BoardKind::Missile => build_missile(root, campus_ref, missile_ref),
             BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref),
+            BoardKind::Trials => build_trials(root, campus_ref, &missile_ref.vehicle, &program_ref.program, trials_ref),
             BoardKind::Project => build_project(root, campus_ref, &hash),
         });
     }
@@ -1890,6 +2366,7 @@ pub(crate) fn handle_extra_actions(
     mut log: ResMut<RevisionLog>,
     mut missile: ResMut<MissileSession>,
     mut program: ResMut<MissileProgramSession>,
+    mut trials: ResMut<TrialSession>,
 ) {
     for (interaction, button) in &buttons {
         if *interaction != UiInteraction::Pressed {
@@ -1911,6 +2388,19 @@ pub(crate) fn handle_extra_actions(
                 }
                 Err(message) => campus.message = message,
             },
+            UiAction::Trial(action) => {
+                let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
+                let outcome =
+                    trials::apply_action(&mut trials, action, &missile.vehicle, &program.program, monte_carlo);
+                match outcome {
+                    Ok(message) => {
+                        if !message.is_empty() {
+                            campus.message = message;
+                        }
+                    }
+                    Err(message) => campus.message = friendly_capabilities(&message),
+                }
+            }
             UiAction::Missile(action) => {
                 let owned = campus.owned_capabilities();
                 let message = friendly_capabilities(&missile.apply(action, &owned));

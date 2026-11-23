@@ -7,6 +7,7 @@ mod program_editor;
 mod save;
 mod scene;
 mod sequence;
+mod trials;
 mod ui_kit;
 
 use crate::ui_kit::UiInteraction;
@@ -34,6 +35,7 @@ fn main() {
         .init_resource::<design::InspectorState>()
         .init_resource::<jobs::JobManager>()
         .init_resource::<program_editor::MissileProgramSession>()
+        .init_resource::<trials::TrialSession>()
         .init_resource::<sequence::SequenceWorkspace>()
         .add_systems(
             Startup,

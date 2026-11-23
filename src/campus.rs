@@ -67,6 +67,8 @@ pub enum CampusView {
     Missile,
     /// Onboard missile program editor.
     Program,
+    /// Deterministic flight trials of the current vehicle and program.
+    Trials,
     Research,
     Programming,
     Computation,
@@ -947,6 +949,7 @@ impl CampusState {
             CampusView::Construction => "Opened the legacy assembly bench".to_string(),
             CampusView::Missile => "Opened the missile workshop".to_string(),
             CampusView::Program => "Opened the missile program editor".to_string(),
+            CampusView::Trials => "Opened the trial range".to_string(),
             CampusView::Research => "Opened the research centre".to_string(),
             CampusView::Programming => "Opened the programming studio".to_string(),
             CampusView::Computation => "Opened the computation laboratory".to_string(),
@@ -1334,7 +1337,8 @@ pub fn handle_input(
         | CampusView::Programming
         | CampusView::Computation
         | CampusView::Missile
-        | CampusView::Program => {}
+        | CampusView::Program
+        | CampusView::Trials => {}
     }
 }
 
@@ -1779,6 +1783,10 @@ pub fn update_hud(
             }
         }
         CampusView::Missile | CampusView::Program => String::new(),
+        CampusView::Trials => format!(
+            "OMEGA | TRIAL RANGE\n\nDeterministic flight test of the current vehicle and its onboard program.\nFour plots (speed, altitude, mass, thrust), the event timeline and the anomalies that explain a failure.\nSeeded batches (10 / 100 / 1000) and A/B comparison need the Monte Carlo analysis research grant.\n\n{}",
+            campus.message
+        ),
         CampusView::Research => format!(
             "OMEGA | RESEARCH CENTRE\n\nTECHNOLOGY DEPARTMENTS\n\nVEHICLE FAMILIES\nStructural concepts, configurations and design envelopes.\n\nMATERIALS\nDensity, stiffness, thermal resistance and durability.\n\nSCIENTIFIC SENSORS\nEnvironmental measurement, sampling and data quality.\n\nEMBEDDED COMPUTING\nProcessing capacity, memory and program complexity.\n\nMANUFACTURING\nProcesses, tolerances and production methods.\n\nResearch progression and persistent unlocks are planned for version 0.25.\n\n{}",
             campus.message

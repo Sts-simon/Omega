@@ -89,8 +89,9 @@ the editing logic.
 **Status.** Done in the working tree: `program_editor.rs` behind the PROGRAM tab (`F4`), palette
 driven by the installed hardware, live thread and memory meters, per-block tuning and reordering,
 validation naming the thread and block, `programs/missile.json` persistence, content hash, and the
-0.6 sequencer demoted to a legacy SEQUENCER tab. Covered by 8 unit tests. Not yet verified on
-screen, and no contract or trial consumes a program yet (lot 3).
+0.6 sequencer demoted to a legacy SEQUENCER tab. Covered by 8 unit tests and verified on screen
+(palette gating, meters, validation, tuning, reordering, persistence and reload). The TRIALS screen
+(lot 2) now consumes the program; contracts consume it in lot 3.
 
 ### Lot 2 — Trial screen (0.28)
 
@@ -108,6 +109,15 @@ results that nobody can see.
 
 **Acceptance.** A two-stage trial shows the four plots; replaying a seed reproduces a result
 identical to a `omega-rules::flight` test; the batch refuses to start without the grant.
+
+**Status.** Done in the working tree: `trials.rs` behind a TRIALS tab (navigation bar and island
+card), seed stepper, vertical or air-launch profile, `RUN`, four plots, event timeline,
+plain-language anomalies, input hash with a stale marker, batches of 10 / 100 / 1,000 gated on
+`analysis:monte_carlo`, and A/B comparison over the same ten seeds with deltas. Covered by 8 unit
+tests and verified on screen with a two-stage solid rocket: the four plots and the full event
+timeline render, an empty program reports "no stage was ever ignited", the batch and A/B refuse
+without the grant, and igniting the second stage moves the A/B speed delta to +425 m/s on the same
+seeds. Vehicle/contract selection arrives with lot 3.
 
 ### Lot 3 — Missile contracts, evidence, plan delivery (0.29)
 

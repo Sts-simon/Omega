@@ -83,6 +83,23 @@ workspace folder are ignored.
   the parallel-thread limit is reached.
 - The 0.6 chamber sequencer is now the **SEQUENCER** tab, explicitly labelled legacy.
 
+### Trial screen (playable, 0.28 work)
+
+- The **TRIALS** tab flies the saved vehicle with its onboard program and shows four bar plots
+  (speed, altitude, mass, thrust), the event timeline (ignition, lift-off, pitch-over, separation,
+  burnout, stall) and every anomaly in plain language, such as "stage 1 dropped with 280 kg of
+  propellant unburnt".
+- The seed is editable (`-10 / -1 / +1 / +10`) and the mission profile switches between a vertical
+  launch and an air launch at 200 m/s. The input hash of vehicle, program, profile and seed is shown
+  next to the report, so a design edited after a run is visibly stale.
+- Monte Carlo batches of 10 / 100 / 1,000 seeds summarize the outcome distribution (runs without
+  lift-off, runs without separation, lock acquisition, mean speed, path and time) and stay locked
+  until the "Batch trials" research node grants `analysis:monte_carlo`.
+- A/B comparison stores snapshot A, flies the edited design over the same ten seeds and prints the
+  deltas for path, maximum speed and lock rate.
+- The session (seed, reports, batch, snapshot) is in memory only; the vehicle and program it flies
+  are the saved ones.
+
 ### Legacy civil loop (playable, transitional)
 
 - Contract Office: five randomized civilian/scientific domains, one offer each, with unit
