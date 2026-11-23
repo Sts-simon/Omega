@@ -165,6 +165,11 @@ impl SaveSlot {
         }
 
         let previous = self.read_manifest()?;
+        if previous.is_some() {
+            if let Some(problem) = self.verify_all()?.into_iter().next() {
+                return Err(problem);
+            }
+        }
         let revision = match previous.as_ref() {
             Some(manifest) => manifest.revision.checked_add(1).ok_or(SlotError::RevisionOverflow)?,
             None => 1,
@@ -326,6 +331,21 @@ mod tests {
             Err(SlotError::Corrupt { .. })
         ));
         assert_eq!(slot.verify_all().unwrap().len(), 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_commit_refuses_to_overwrite_a_corrupt_slot_or_its_backup() {
+        let dir = temp_dir("corrupt-commit");
+        let slot = SaveSlot::new(dir.join("s"));
+        slot.commit("0.30.1", &[("campaign.json", b"v1".to_vec())]).unwrap();
+        slot.commit("0.30.1", &[("campaign.json", b"v2".to_vec())]).unwrap();
+        fs::write(slot.root().join("campaign.json"), b"tampered").unwrap();
+
+        let result = slot.commit("0.30.1", &[("campaign.json", b"v3".to_vec())]);
+        assert!(matches!(result, Err(SlotError::Corrupt { .. })));
+        assert_eq!(fs::read(slot.root().join("campaign.json")).unwrap(), b"tampered");
+        assert_eq!(fs::read(slot.root().join("campaign.json.bak")).unwrap(), b"v1");
         let _ = fs::remove_dir_all(dir);
     }
 
