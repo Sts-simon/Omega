@@ -249,6 +249,74 @@ pub fn generate_contract_board(seed: u64, first_id: u32) -> Vec<ContractOffer> {
         .collect()
 }
 
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractEvaluation {
+    pub design_passed: bool,
+    pub program_passed: bool,
+    pub trials_passed: bool,
+    pub missing_capabilities: Vec<String>,
+    pub score_issues: Vec<String>,
+    pub accepted: bool,
+}
+
+impl ContractOffer {
+    /// Evaluate abstract game scores and unlocked research capabilities against this offer.
+    /// This is a contract rubric, not a real-world engineering assessment.
+    pub fn evaluate_submission(
+        &self,
+        design_score: u8,
+        program_score: u8,
+        trial_score: u8,
+        capabilities: &[String],
+    ) -> ContractEvaluation {
+        let missing_capabilities: Vec<String> = self
+            .requirements
+            .required_capabilities
+            .iter()
+            .filter(|required| !capabilities.iter().any(|available| available == *required))
+            .cloned()
+            .collect();
+
+        let mut score_issues = Vec::new();
+        if design_score < self.requirements.min_design_score {
+            score_issues.push(format!(
+                "design score {design_score} is below {}",
+                self.requirements.min_design_score
+            ));
+        }
+        if program_score < self.requirements.min_program_score {
+            score_issues.push(format!(
+                "program score {program_score} is below {}",
+                self.requirements.min_program_score
+            ));
+        }
+        if trial_score < self.requirements.min_trial_score {
+            score_issues.push(format!(
+                "trial score {trial_score} is below {}",
+                self.requirements.min_trial_score
+            ));
+        }
+
+        let design_passed = design_score >= self.requirements.min_design_score;
+        let program_passed = program_score >= self.requirements.min_program_score;
+        let trials_passed = trial_score >= self.requirements.min_trial_score;
+        let accepted = design_passed
+            && program_passed
+            && trials_passed
+            && missing_capabilities.is_empty();
+
+        ContractEvaluation {
+            design_passed,
+            program_passed,
+            trials_passed,
+            missing_capabilities,
+            score_issues,
+            accepted,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
