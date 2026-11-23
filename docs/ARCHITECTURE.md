@@ -1,214 +1,103 @@
 # Architecture
 
-## Main rule
+## Product boundary
 
-The renderer must never wait for a long scientific computation. The Bevy app owns interaction and visualization; independent workers own long-running jobs; workers return immutable result records through channels.
+Omega is a Rust 2024 and Bevy game built around a fictional, abstract contract loop:
 
-## Logical modules
+**contract → workshop → program → trial → dossier → delivery**
 
-### Campus and facilities (`campus.rs`, `campus/board.rs`, `campus/verification.rs`)
-- Owns the current view (`CampusView`: island, contracts, construction, missile, research,
-  programming, computation), tags the five interactive building meshes and performs local-space
-  ray/AABB picking.
-- Routes the player into each facility and back to the island.
-- Hosts the randomized five-domain civil contract board, the two-active-project limit, the campaign
-  economy, the research state and day clock, and campaign persistence.
-- `campus/board.rs` builds the card boards (island facilities, Contract Office, dossier matrix,
-  Research Centre, missile workshop palette and stage figures, workshop project card) and only
-  rebuilds a board when its content signature changes.
-- `campus/verification.rs` turns contract requirements and results into hash-bound evidence and a
-  delivery dossier; evidence becomes stale when the design hash changes.
-- The `interface` module owns shared navigation, contextual tool shelves, mouse actions and the
-  message lane. Accepted civil projects progress through design checks, generic material screening,
-  a field-test gameplay stage and dossier-gated delivery/payout.
+The game layer owns presentation, player progression and persistence. Reusable rules and data crates remain independent of Bevy so they can be tested without launching the application.
 
-### Missile workshop (`missile.rs`)
-- Owns the staged-vehicle session (`omega_rules::vehicle::Vehicle`), the selected part, the active
-  stage and the part id counter.
-- Applies button actions (add part, select, add/remove stage, adjust length/diameter/burn
-  time/engine scale/module mass, remove part, presets, clear) with per-part clamps, a four-stage
-  limit and the rule that the single flight computer always sits in the last stage.
-- Gates part templates by the capabilities owned through research and reports the missing
-  technology by label.
-- Lays the parts out as a 3D stack (engines first inside each stage, nose cone on top) and rebuilds
-  the meshes only when the vehicle or selection changes.
-- Persists the vehicle to `designs/vehicle.json` on every change and validates saved parts on load.
+The project intentionally does not implement real-world weapon engineering, guidance or navigation laws, tracking algorithms, seeker logic, warhead models or real-world performance validation. Simulation values are game parameters.
 
-### Presentation (`main.rs`, `scene.rs`, `interface.rs`)
-- Bevy window, orbit camera, island, persistent top navigation and contextual facility tool shelves.
-- `interface.rs` dispatches mouse-clickable actions to the campus, design, sequencer and job modules.
-- UI overlays block world picking and camera motion; they do not implement scientific algorithms.
+## Workspace
 
-### Design model (`design/model.rs`)
-- Serializable project data.
-- Generic parametric parts and materials.
-- Validation at load/save boundaries.
-- Approximate mass estimates from primitive volume assumptions.
-- Directed parent-child connection graph with cycle, endpoint and single-parent validation.
-- Schema 1 to schema 2 migration for older project files.
-- No dependency on Bevy, so the model can be tested headlessly.
+- `omega` — Bevy application and user interface.
+- `omega-data` — Bevy-independent persistence primitives, content hashes and save-slot handling.
+- `omega-rules` — serializable game models and deterministic rules for vehicles, programs, trials, research, requirements, dossiers and contracts.
+- `omega-sim-core` — standalone scientific-computing library retained in the workspace. The game application does not depend on it.
 
-### Design editor (`design/editor.rs`, `design/storage.rs`)
-- Selection, local-space mouse picking, rotation, axis-specific resizing and keyboard editing.
-- Converts the serializable design model into Bevy preview meshes.
-- Owns the current edit-session revision, selected component ID and bounded snapshot history.
-- Provides keyboard undo/redo and metadata-only parent-child link editing.
-- Persists assemblies as JSON and migrates schema 1 files on load.
+## Application modules
 
-### Scientific core (`crates/sim-core/`)
-- Independent Rust library crate with no Bevy dependency.
-- Provides validated SI quantity wrappers and versioned provenance metadata.
-- Implements transient 2D finite-volume heat conduction for a solid slab (per-cell materials,
-  harmonic face conductivity, insulated or fixed-temperature boundaries, volumetric source,
-  explicit stability limit, energy balance).
-- Implements a 2D linear-elastic pin-jointed truss solver (sparse assembly, Jacobi-preconditioned
-  conjugate gradients, nodal displacement/reactions, member force/stress, energy consistency).
-- Meshes coplanar rectangles and simple concave polygon regions with holes (Earcut), welds conforming
-  shared edges, preserves material/thickness/source-part provenance, supports conforming
-  longest-edge refinement and reports mesh-quality metrics.
-- Runs transient triangular finite-element heat conduction on those meshes with per-element
-  thickness, explicit stability checks, progress and cancellation.
-- Exports self-contained HTML/SVG reports and full-resolution CSV fields for thermal and truss
-  results.
+### `campus.rs` and `campus/board.rs`
 
-### Research jobs (`jobs/`)
-- A worker thread receives jobs from a queue.
-- A Rayon pool performs CPU-parallel calculations.
-- Progress, completion, cancellation and failure events are sent back to the main thread.
-- Cancellation uses an atomic token checked between numerical iterations.
-- A Bevy HUD displays the latest task records.
-- Results are persisted separately from the live scene.
-- Each thermal result includes its exact configuration and model/solver metadata.
+Own the campaign state and facility navigation. The current views are the island, contract office, research centre, workshop, program editor and trials. The board module builds the facility and gameplay panels. Research progression and the campaign day/credit state are managed here.
 
-## Data flow
+### `procurement.rs`
 
-```text
-User input
-   |
-   +----> Design editor -----> Generic design model + assembly graph -----> JSON project file
-   |              |                    |
-   |              |                    +-----> In-memory undo/redo snapshots
-   |              +-----> Bevy preview meshes / HUD
-   |
-   +----> Job manager / queue
-                 |
-                 v
-              Worker thread
-                 |
-                 v
-              Rayon CPU pool
-                 |
-                 v
-              Result + progress events
-                 |
-                 +-----> JSON report
-                 +-----> Bevy status / future plots
-```
+Owns the contract office integration: available offers, accepted and completed contracts, active-contract capacity, deadlines, trial evidence, dossier state and delivery. Evidence is bound to the relevant vehicle/program inputs; changes to those inputs make dependent evidence stale.
 
-## Assembly graph boundary
+### `missile.rs`
 
-The current graph stores parent-child relationships and connection kinds as metadata. It validates topology but does not solve connector alignment, rigid-body transforms or joint kinematics. Those capabilities should be introduced later as an independent constraint-solving layer, keeping serialized design data independent from Bevy.
+Owns the workshop editing session and the Bevy presentation of the staged vehicle. It handles part selection, stage changes, parameter editing, presets, validation feedback and the 3D preview. The authoritative serializable vehicle model lives in `omega-rules`.
 
-## Future boundaries
+### `program_editor.rs`
 
-The `sim-core` crate is now independent of Bevy. The next separation should be the geometry/mesh pipeline and the result-visualization pipeline. The solver should keep consuming explicit numerical meshes and material maps rather than depending directly on Bevy entities. Bevy should consume immutable result data and downsample fields for display.
+Owns the interactive editing session for the abstract onboard program. The rules crate remains the source of truth for block definitions and validation. The application presents available blocks, thread and memory usage, editing actions and validation results.
 
-A scientific result should carry at least:
-- model identifier and version;
-- input parameters and units;
-- solver configuration;
-- convergence / termination status;
-- validity domain;
-- uncertainty or known limitations;
-- software version and timestamp.
+### `trials.rs`
 
-The interactive simulation should use precomputed data only when the requested state is inside the recorded validity domain. Extrapolation must be explicit and marked as uncertain, not silently treated as a measured result. The current finite-volume solver is transient and explicit; an implicit scheme, convergence harness and experimental reference data remain future work.
+Owns the trial screen and its presentation state: run configuration, deterministic seed, plots, event timeline, anomalies, batch progress and A/B comparison. Long batch work is kept off the main update path and results are associated with the inputs used to create them.
 
+### `revisions.rs`
 
-## Sequence module (0.6)
+Tracks missile design revisions and change summaries. Revision records are persisted separately from the current vehicle and program.
 
-`sequence::model` stores a small typed control-flow program. Each block has a stable numeric ID; branch blocks refer to IDs rather than list indices so reordering does not silently retarget a jump. Validation checks the fixed Start/End boundaries, unique IDs, numeric ranges and branch references. Programs are persisted independently as JSON.
+### `save.rs`
 
-`sequence::runtime` executes blocks deterministically. Single-step mode advances one block, including a complete logical wait. Run mode consumes wait durations against simulation time and processes a bounded number of non-wait blocks per frame. A global instruction budget prevents an infinite branch loop. The included chamber model is a first-order gameplay demonstrator only and is not presented as a validated engineering solver.
+Provides the application-level boundary around `omega-data::SaveSlot`. It maps application save types to paths inside the active slot and handles the one-time import of supported legacy campaign files.
 
-`sequence::mod` exposes the typed program editor and status HUD. `sequence::graph` renders the program as draggable Bevy UI nodes with sequential and conditional links. `sequence::expression` evaluates a bounded scalar arithmetic grammar without dynamic code execution. The runtime supports variable watches, breakpoints and trace export. Program edits are rejected during active playback; edits made while paused reset the runtime to avoid executing stale instruction positions.
+### `interface.rs`, `scene.rs` and `ui_kit.rs`
 
-## Scientific crate boundary (0.11.0)
+Own navigation/action dispatch, island and camera presentation, shared UI primitives and interaction state. They should not become alternate sources of gameplay rules.
 
-The root application depends on `omega-sim-core` through a local path dependency. The numerical crate owns its material, boundary, grid/time-step validation, solver and result types. It has no Bevy types and can be tested independently with `cargo test -p omega-sim-core`. The `src/jobs/thermal.rs` module is now only a compatibility re-export so the job manager can continue to schedule numerical jobs without owning solver implementation.
+## Data and rules crates
 
+### `omega-data`
 
-## Structural solver boundary (0.11.0)
+Provides content hashing, atomic file replacement with a previous-generation backup, a versioned save-slot manifest, per-file integrity checks, validation of paths relative to the slot and import support for the documented legacy save layout.
 
-`omega-sim-core::mechanics` implements a standalone planar pin-jointed civil truss solver. It receives an explicit node/element/support/load input deck and does not read the Bevy assembly model. This separation is intentional: the current workshop components are coarse visual primitives and do not define a validated finite-element mesh or joint model. The solver writes its own JSON result through the `truss_study` example. The game UI and geometry coupling can be considered only after the numerical model and its reference tests are established.
+The manifest is committed after the data files so it identifies a consistent saved generation. The application must report unreadable or corrupt data rather than silently treating it as a valid new campaign.
 
+### `omega-rules`
 
-# Facility routing (0.26.0)
+Contains the serializable domain models and deterministic rules used by the game: staged vehicle model and validation; abstract program blocks, threads and resource validation; seeded trial calculations and result records; research tree, prerequisites and capability grants; contract families, requirements, offer generation and active-contract rules; evidence evaluation, dossier construction and input comparison.
 
-The campus routes to six navigation views plus the island: Contract Office, Research Centre,
-Programming Studio, Computation Centre, the missile workshop (`CampusView::Missile`, the WORKSHOP
-tab) and the legacy assembly bench (`CampusView::Construction`, the LEGACY BENCH tab). The missile
-workshop owns new vehicle design; the legacy bench keeps the 3D primitive assembly editor, the
-polygon sketch, the instrument profile and the sequence editor entry point that the civil contract
-loop still uses. Programming owns the 0.6 visual sequencer; Computation owns scientific worker jobs
-and their reports.
+These rules should remain testable without Bevy or UI state.
 
-Facility selection is available through the island cards, the building hitboxes, the persistent
-navigation bar and F1-F5 (F1 contracts, F2 legacy bench, F3 research, F4 programming, F5
-computation; the missile workshop is opened from the WORKSHOP tab). Escape returns to the island,
-except when an active modal editor consumes it. All views share campaign state and the same save
-slot; there are still no separate serialized Bevy worlds or interior 3D scenes.
+### `omega-sim-core`
 
-Research and development are gameplay layers only: `omega_rules` values are abstract and are not
-physical performance data.
+A separate Bevy-free scientific library. It is retained for independent use and historical continuity, but it is not part of the missile game's runtime dependency path. Its scientific solvers must not be presented as validated weapon-design tools.
 
+## Persistence layout
 
-# Data and rules crates (0.26.0)
+The application stores its active campaign under `saves/slot_1/`. The manifest indexes the files in the slot and records their hashes.
 
-Two Bevy-independent crates sit beside `sim-core`:
+| File | Purpose |
+|---|---|
+| `campaign.json` | credits, research progression and campaign day |
+| `designs/vehicle.json` | current staged vehicle |
+| `designs/revisions.json` | missile design revision history |
+| `programs/missile.json` | current abstract program |
+| `contracts/missile.json` | offers, active/completed contracts and evidence |
 
-- `omega-data`: content hashing, atomic file writes and the v2 save slot (`manifest.json`
-  committed last; per-file hashes verified on read; unsafe relative paths rejected). Legacy 0.21
-  files can be imported without modifying the source directory.
-- `omega-rules`: two halves. The civil verification half provides requirements, evidence, the
-  verification matrix, dossier generation and geometry-derived metrics; a requirement is only
-  *Verified* when its whole uncertainty band satisfies the limit, and evidence becomes *Stale* when
-  the design or program hash changes. The missile half provides `vehicle` (parts, stages, mass,
-  thrust, TWR, delta-v, computer limits, sensor-to-block mapping, research requirements), `program`
-  (seven blocks, threads, hardware and computer validation), `flight` (seeded abstract flight test
-  with events, anomalies and a lock roll), `research` (13 technologies, five departments, grants,
-  costs, durations, prerequisites) and `diff` (design comparison).
+The exact schema version belongs to each data model and must be changed only with an explicit migration and tests.
 
-The application uses:
+## Runtime and threading
 
-- `vehicle`, `research` and `PartSpec` capability checks in the missile workshop and the Research
-  Centre (through `missile.rs` and `campus/board.rs`); `ResearchState` and the day counter are part
-  of `CampaignSave`.
-- `metrics`/`requirement` for the geometry-derived balance requirement in `campus::evaluate_design`
-  and in verification evidence (`design/metrics.rs`).
-- `dossier` through `campus/verification.rs` for dossier-gated delivery.
-- `SaveSlot` through `src/save.rs` for all six persistent files (campaign, assembly, polygon sketch,
-  program, revisions, vehicle).
+The Bevy application owns interaction and rendering. Deterministic game rules are called through the rules crate. Expensive batch trial work must not run synchronously inside a frame update; progress and completed results are returned to the application and displayed there.
 
-`program` and `flight` are implemented and tested but not yet connected to any UI. All metrics and
-cost constants are abstract gameplay values, not physical or real-world performance data.
+Keep worker inputs and outputs owned and explicit. Do not let worker tasks mutate Bevy world state directly.
 
-# Target architecture: missile-only loop
+## Change boundaries
 
-The finished game is built on missile design alone. The convergence path is:
+- Put game rules in `omega-rules`, not in UI callbacks.
+- Put file integrity and slot mechanics in `omega-data`, not in individual screens.
+- Keep Bevy types out of the data and rules crates.
+- Treat hashes as provenance identifiers, not as proof that a simulation is physically valid.
+- Any change to persisted structures requires a migration or a documented reason why no migration is needed.
+- Any change to trial inputs must preserve deterministic replay and invalidate dependent evidence.
 
-```text
-Research Centre ---> capabilities ---> Missile Workshop ---> vehicle revision
-                                            |                      |
-                                            v                      v
-                                     Programming Studio      verification evidence
-                                            |                      |
-                                            v                      v
-                                     seeded flight trials --> plan delivery / dossier
-```
+## Historical documentation
 
-The legacy assembly bench, instrument profile, polygon sketch, mesh thermal studies, chamber
-sequencer and civil contract families are transitional. They stay as long as the civil loop is the
-only complete contract path, and are removed once missile-family contracts, trials and plan
-delivery replace it. `sim-core`, `omega-data` and the verification half of `omega-rules` remain
-reusable tooling; nothing in the target loop depends on Bevy except the views themselves.
+The former assembly editor, civil contract workflow, chamber sequencer and scientific-study UI are historical features. Their implementation notes remain in the archived documents and changelog, not in the current application architecture.

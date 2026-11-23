@@ -1,301 +1,124 @@
-# Omega — improvement plan
+# Omega — maintenance and release roadmap
 
-## The goal in one sentence
+## Product objective
 
-Make Omega a game where **a full play-through rests on missile design alone**: the player accepts a
-contract, assembles a staged vehicle, writes the onboard program, runs reproducible trials, builds a
-dossier of evidence and delivers a plan — without ever touching the civil assembly bench inherited
-from 0.6.
+Omega is a fictional, abstract game about completing military-themed design contracts. Its core loop is:
 
-That sentence is now true: the program editor, the trial screen, missile contracts with bound
-evidence and research-gated families all exist, and the civil loop has been deleted. The remaining
-lots make the interface honest, the saves robust and the performance measured.
+**contract → abstract vehicle workshop → program editor → deterministic trials → evidence dossier → delivery**
 
-## Starting point (0.26.0, verified)
+All values and outcomes are game mechanics. The project does not attempt to model real weapons, real targeting, guidance, navigation, seeker logic, warheads or real-world performance. This boundary is deliberate and is not a future feature.
 
-- **Research** — playable: 13 technologies in five departments, one project at a time, credits
-  charged when research starts, NEXT DAY button, research state and day saved.
-- **Missile workshop** — playable: 13 part types, 1 to 4 stages, ROCKET/CRUISE/EMPTY presets, `-`/`+`
-  editing, parts gated by research, saved to `designs/vehicle.json`.
-- **Missile rules (`omega-rules`)** — complete and tested but invisible in the game: `vehicle`,
-  `program` (7 blocks), `flight` (headless trials), `research`.
-- **Contracts** — civil only: they use neither the missile vehicle, nor the program, nor trials.
-- **Onboard program** — the Programming Studio still runs the 0.6 chamber sequencer.
-- **Trials** — no screen; `flight` is exercised by tests only.
-- **Research → contracts** — the `family:*` and `ExtraActiveProjects` grants are never consulted;
-  the two-project limit is hard-coded.
-- **Quality** — 253 passing tests, 69 Bevy deprecation warnings, no CI, no tagged release.
+## Current baseline (0.30.0)
 
-## Definition of done
+The following features are already present in the application:
 
-The project is finished when all five criteria hold, each verifiable by a test or a manual pass:
+- **Research:** 13 technologies across five departments, credit costs, prerequisites, a day clock and capability grants.
+- **Workshop:** staged vehicle editor, 13 part types, one to four stages, presets, editable parameters, derived game statistics, validation and persistence.
+- **Program editor:** parallel threads, seven abstract block types, hardware and computer-limit validation, editing, persistence and content hashing.
+- **Trials:** repeatable seeded runs, four result plots, event timeline, anomaly summaries, batch runs of 10/100/1,000 seeds, progress reporting and A/B comparison.
+- **Contracts:** mission and vehicle families, research-gated offers, active-contract limits, deadlines, hash-bound evidence dossiers and delivery rewards.
+- **Persistence:** versioned save slot, manifest, per-file hashes, atomic writes, backup copies and legacy campaign import.
+- **Quality:** GitHub Actions checks formatting, Clippy with warnings denied and workspace tests.
 
-1. **Complete loop** — a missile contract is carried out (accept → design → program → trial → dossier
-   → delivery) without opening the legacy bench.
-2. **No dead civil code** — the legacy bench, polygon sketch, instrument profile, chamber sequencer
-   and civil contracts are gone from the repository.
-3. **Bound evidence** — every delivery dossier references the vehicle, program and trial hashes;
-   changing any of them invalidates the evidence.
-4. **Research that restricts** — no contract family is offered without its technology; active-project
-   grants and Monte Carlo are actually consumed.
-5. **Presentable repository** — green CI on `main`, clean `clippy -D warnings`, a tagged `1.0.0`
-   release with notes, and a README that matches what the game does.
+The recent CI run on the current `main` commit is green. This is a repository baseline, not proof that every platform or user workflow has been manually tested.
+
+## Definition of done for 1.0
+
+1. A new player can complete the full contract loop without consulting source code.
+2. Every persistent file has an explicit schema and a tested failure/migration path.
+3. Core screens have consistent mouse and keyboard navigation, readable feedback and useful empty states.
+4. Gameplay-critical paths have regression tests, including a complete contract from acceptance to delivery.
+5. Performance claims are backed by repeatable measurements on documented hardware.
+6. The repository has a current README, changelog, installation instructions, CI and a tagged release.
 
 ## Work packages
 
-Each package lists a **purpose**, the **work**, and an **acceptance criterion**. They are ordered:
-each one unblocks the next. Version numbers follow the existing `CHANGELOG` (0.26 is current).
+### Lot 0 — Project consistency (0.30.0)
 
-### Lot 0 — Repository foundations (0.26.x)
+**Purpose:** establish one accurate description of the current project.
 
-**Purpose.** Make the public repository credible and verifiable before adding more game.
+- Align Cargo package version, lockfile, window title, README and changelog.
+- Rewrite the roadmap around completed missile-gameplay systems and remaining maintenance work.
+- Replace architecture and vision documentation that still describes deleted civil modules as active.
+- Keep historical changelog entries and archived documents intact.
 
-**Work.**
+**Acceptance:** current documentation matches the source tree and the current CI workflow; no gameplay or save format changes.
 
-- GitHub Actions on `ubuntu-latest`: Bevy system packages, Cargo cache, then
-  `cargo fmt --all -- --check`, `cargo check --workspace --all-targets` and `cargo test --workspace`.
-- Clear the Bevy deprecations and the dead code, then add
-  `cargo clippy --workspace --all-targets -- -D warnings` to CI.
-- Tag `v0.26.0` with notes drawn from the `CHANGELOG`, and add CI and version badges to the README.
-- Move `CAMPUS.md`, `ROADMAP.md`, `UX_CONTROLS.md` and `SEQUENCE_EDITOR.md` to `docs/archive/`
-  behind an "archived" header.
+### Lot 1 — Save reliability (0.30.1)
 
-**Acceptance.** Green badge on `main` in under ten minutes, zero `clippy -D warnings` output, a
-visible public release, and a README that no longer presents stale documents as current.
+**Purpose:** make campaign data resilient to interrupted writes, corruption and future versions.
 
-### Lot 1 — Missile program editor (0.27)
+- Audit manifest validation, relative-path validation, hash verification and atomic replacement.
+- Verify backup behavior and define what happens when the primary file is corrupt but a backup exists.
+- Add tests for truncated manifests, unsupported schemas, missing files, hash mismatches, unsafe paths, interrupted writes and legacy import.
+- Document recovery behavior clearly. Never silently overwrite a campaign that failed validation.
+- Keep migrations explicit and test each supported source schema.
 
-**Purpose.** Supply the missing half of design: after the vehicle, the behaviour. This is the highest
-leverage lot, because the rules are already written and tested but unreachable.
+**Acceptance:** every failure mode has a deterministic result and a regression test; valid existing saves continue to load.
 
-**Work.**
+### Lot 2 — Interface and controls (0.30.2)
 
-- New `src/program.rs` editing session behind the **PROGRAMMING** card, with the seven
-  `omega-rules::program` blocks as the only source of truth: `wait`, `ignite`, `separate`,
-  `throttle`, `hold speed`, `hold pressure`, `lock target`.
-- Palette **derived from the hardware actually installed** in the vehicle, with live thread and
-  memory meters for the onboard computer (which always lives in the last stage).
-- Per-thread editing: add, remove, reorder; validation on every change; error messages naming the
-  offending block and the missing resource.
-- Persist the program in the slot (`programs/missile.json`) through `SaveSlot`, with a content hash
-  ready for evidence.
-- Demote the 0.6 chamber sequencer to an explicitly labelled legacy tab instead of occupying the
-  "Programming Studio" name.
+**Purpose:** make the game understandable without reading the README.
 
-**Acceptance.** A valid program for a two-stage vehicle can be built in under two minutes without
-leaving the interface; an invalid program explains why; save and reload work; at least 8 tests cover
-the editing logic.
+- Audit every navigation card, shortcut and destination for consistency.
+- Ensure every screen is reachable by mouse and keyboard.
+- Add contextual help, clear empty states and visible feedback for refused actions.
+- Check scrolling, focus, panel bounds and readability at the supported window sizes.
+- Remove references to facilities or controls that no longer exist.
 
-**Status.** Done in the working tree: `program_editor.rs` behind the PROGRAM tab (`F4`), palette
-driven by the installed hardware, live thread and memory meters, per-block tuning and reordering,
-validation naming the thread and block, `programs/missile.json` persistence, content hash, and the
-0.6 sequencer demoted to a legacy SEQUENCER tab. Covered by 8 unit tests and verified on screen
-(palette gating, meters, validation, tuning, reordering, persistence and reload). The TRIALS screen
-(lot 2) now consumes the program; contracts consume it in lot 3.
+**Acceptance:** no dead shortcut or misleading navigation label; the main loop can be completed using the interface alone.
 
-### Lot 2 — Trial screen (0.28)
+### Lot 3 — Gameplay regression coverage (0.30.3)
 
-**Purpose.** Give the design a visible consequence. `omega-rules::flight` already produces complete
-results that nobody can see.
+**Purpose:** protect the complete game loop from regressions.
 
-**Work.**
+- Add integration-level tests for accepting a contract, editing a vehicle and program, recording trial evidence, invalidating stale evidence and delivering a valid dossier.
+- Test research unlocks, active-contract capacity, deadlines and save/reload boundaries.
+- Test that changes to vehicle/program inputs invalidate dependent results.
+- Keep tests deterministic and avoid relying on wall-clock timing.
 
-- **TRIALS** screen: choose the contract and vehicle, show and edit the seed, `RUN` button, four
-  plots (speed, altitude, mass, thrust), event timeline and anomalies named in plain language.
-- Monte Carlo batch mode: 10 / 100 / 1,000 seeds, outcome distribution (failure, separation, lock not
-  acquired), locked behind the existing `analysis:monte_carlo` grant.
-- A/B comparison of two designs over the same seed set, with metric deltas.
-- Visible determinism: same design, program and seed ⇒ same result, with the input hash shown.
+**Acceptance:** the critical gameplay loop is covered end-to-end and all failure paths produce stable, understandable outcomes.
 
-**Acceptance.** A two-stage trial shows the four plots; replaying a seed reproduces a result
-identical to a `omega-rules::flight` test; the batch refuses to start without the grant.
+### Lot 4 — Performance and resource use (0.30.4)
 
-**Status.** Done in the working tree: `trials.rs` behind a TRIALS tab (navigation bar and island
-card), seed stepper, vertical or air-launch profile, `RUN`, four plots, event timeline,
-plain-language anomalies, input hash with a stale marker, batches of 10 / 100 / 1,000 gated on
-`analysis:monte_carlo`, and A/B comparison over the same ten seeds with deltas. Covered by 8 unit
-tests and verified on screen with a two-stage solid rocket: the four plots and the full event
-timeline render, an empty program reports "no stage was ever ignited", the batch and A/B refuse
-without the grant, and igniting the second stage moves the A/B speed delta to +425 m/s on the same
-seeds. Vehicle/contract selection arrives with lot 3.
+**Purpose:** measure before optimizing.
 
-Batches fly on a worker thread: a 1,000-seed batch over a 546 s flight blocked the frame for ~290 ms
-and left a 31 MB peak when it kept every report; it now runs off the frame with a live progress line
-and folds each report into running totals, so the peak stays flat. A finished batch also remembers
-the input hash it was started with: stepping the seed, switching the profile or editing the vehicle
-or program afterwards marks its result `STALE` on the batch panel until it is flown again.
+- Record startup and campaign-load times, idle frame rate, workshop rebuild cost and batch-trial duration.
+- Measure memory use during long sessions and large batches.
+- Verify that long-running batch work does not block the render/update loop.
+- Document hardware, build profile, test scenario and measurement method.
+- Optimize only measured bottlenecks.
 
-The lock stays one seeded probability roll, which the setup panel predicts (`ROLL 0.11` vs the
-radar's 55 % reads `LOCK`), and a batch of 1,000 seeds reproduces that probability (549/1,000). A
-seed also spreads the hardware: ±3 % engine thrust and solid-motor burn time, ±5 % drag. The spread is
-symmetric, deterministic and published in the setup panel, so batch means still describe the design
-while the distribution above the lock (paths, top speeds, lift-off failures) now varies. No guidance,
-tracking or targeting is involved.
+**Acceptance:** a reproducible benchmark report exists; no performance target is claimed without a measurement.
 
-### Lot 3 — Missile contracts, evidence, plan delivery (0.29)
+### Lot 5 — Distribution and release candidate (0.31.0)
 
-**Purpose.** Close the loop. This is the lot that turns the demo into a game and makes the
-"missile design alone" sentence true.
+**Purpose:** make the game straightforward to install and test.
 
-**Work.**
+- Verify clean builds on supported Linux environments.
+- Provide concise dependency and launch instructions.
+- Add release packaging and versioned release notes.
+- Test a clean first launch, save creation, restart and upgrade from the previous supported save format.
+- Run a final manual play-through.
 
-- Missile contract families that reference a `Vehicle` as the current design, instead of the
-  assembly + instrument-profile pair.
-- Abstract missile requirements (range, accuracy, reliability, cost, deadline) evaluated with the
-  existing `evaluate_requirement` / `build_dossier` machinery.
-- Bound evidence: vehicle hash **and** program hash **and** trial hashes; any later change marks the
-  dossier `STALE`.
-- The missile design joins the design revisions (`designs/revisions.json`) and therefore the existing
-  diff.
-- Delivery: payment and a completed-contract counter, nothing more (no factory, no inventory).
+**Acceptance:** a tester can install, launch, play, save and update using only the release instructions.
 
-**Acceptance.** A complete loop is carried out without opening the legacy bench once; changing a
-part after a trial marks the dossier `STALE`; delivery is credited.
+### Stable release (1.0.0)
 
-**Status.** Done in the working tree: `src/procurement.rs` behind the CONTRACTS tab. The office
-offers four missile families and vehicle families; accepting one starts the evidence clock. Trials
-flown afterwards are recorded automatically, bound to the vehicle hash, the program hash and the
-seed. `ContractOffer::missile_requirements` turns family and difficulty into flight requirements
-(range, speed, mass, lift-off, separation and a hard lock for air-to-air/surface-to-air) and
-`ContractOffer::missile_dossier` evaluates them through `evaluate_requirement` / `build_dossier`.
-The dossier panel shows every row and the bound hashes; editing a part or the program marks all
-rows `STALE`, sets the score to 0 and disables delivery, and reverting restores it. Delivery pays
-the reward, increments the delivered counter and generates a new board; a passed deadline refuses
-delivery. Missile designs join `designs/revisions.json` (schema 2, legacy schema 1 still loads) with
-a head hash, a change summary and a record button in the workshop. Verified in game on a two-stage
-solid rocket against a ballistic offer: accept, fly, dossier 100 %, add a pitot → `STALE` and the
-button disabled, remove it → current again, deliver → +8,000 cr and one completed contract
-(22,500 → 30,500 cr). The civil office and bench are unchanged but reachable only through an
-explicit `CIVIL (LEGACY)` toggle, ready for lot 5.
+Publish only after all work packages pass, CI is green and the full play-through has been manually verified.
 
-### Lot 4 — Research that actually constrains
+## Explicitly out of scope
 
-**Purpose.** The research grants exist in the data but are consulted nowhere: progression is
-decorative.
+- Realistic weapon engineering, real targeting or guidance, navigation laws, seeker logic or warhead modelling.
+- Manufacturing, factories, inventories, staffing or a complex economic simulation.
+- Multiplayer or networking.
+- Large-scale island expansion.
+- New simulation complexity that does not improve the abstract game loop.
 
-**Work.**
+## Working rules
 
-- Filter offer generation by `family:*` capabilities: an unresearched family offers no contracts.
-- Honour `ExtraActiveProjects` instead of the hard-coded `2`.
-- Consume `analysis:monte_carlo` (lot 2).
-
-**Acceptance.** Without a family technology, zero offers from that family; the `Parallel project
-management` grant raises the number of active contracts; each rule is covered by a test.
-
-**Status.** Done in the working tree. `ContractOffer::required_family_capabilities` maps mission
-and vehicle families to `family:*` capabilities, and `generate_available_board` emits one offer per
-researched family only, clamping surface-to-surface difficulty until the anti-ship family is owned.
-`Procurement::sync_offers` follows the research tree: a completion adds the newly unlocked family
-to the board without disturbing the offers already there, and a delivery refills the delivered
-family. The office holds one contract per slot and the slot count is
-`ResearchState::max_active_projects(default_tree(), 1)`, so `Parallel project management` takes it to
-two. Accepting an offer for an unresearched family (only possible from an older save) is refused by
-technology name, an over-capacity acceptance is refused with the slot count, and the empty state
-lists every family still to research. Trials feed every active contract. Covered by new tests in
-`omega-rules::contracts`, `omega-rules::research`, `src/procurement.rs` and `src/campus.rs`. In game:
-the fresh office shows only the two ballistic families with the four missing ones named; accepting a
-second contract is refused at 1/1; researching Parallel project management opens the second slot
-and two contracts list side by side with separate dossiers; researching the surface-to-air family
-adds a SURFACE-TO-AIR offer to the board.
-
-### Lot 5 — Remove the inherited civil loop
-
-**Purpose.** Delete what no longer has a reason to exist. As long as the legacy bench is the only
-complete path, the README cannot tell the truth.
-
-**Work.**
-
-- Remove from the game: legacy assembly bench, polygon sketch, instrument profile, chamber sequencer,
-  civil contracts and their jobs.
-- Keep `sim-core` as a standalone library (thermal, truss, meshing) and decide explicitly whether the
-  missile game still uses it; otherwise take it off the critical path.
-- Slot v3: legacy files are no longer read and the migration ignores them cleanly.
-
-**Acceptance.** No code reference to the civil loop remains; all tests pass; a 0.26 save loads without
-error; the README mentions no inherited tool.
-
-**Status.** Done in the working tree. Deleted: `src/design/` (assembly model, editor, inspector,
-sketch, meshing, metrics, storage), `src/jobs/` (thermal/truss workers and reports),
-`src/sequence/` (chamber sequencer), `src/campus/verification.rs` and every civil contract type and
-board. The revision log moved to `src/revisions.rs`, missile-only, schema 3; assembly-era logs load
-as empty. `SaveFile` no longer knows the civil files, the app no longer depends on `omega-sim-core`
-(kept as a standalone workspace library), and `crossbeam-channel`/`rayon` left the app. The
-interface keeps six views, four clickable facilities and one help-free workshop. A campaign schema 1
-(0.26) save still loads its credits, research and day; contract schema 1 keeps its active contract.
-In game: island, contract office, research, workshop, program and trial boards all render and work
-without a single inherited tab. Tests: 203.
-
-### Lot 6 — Interface and controls
-
-**Purpose.** The game must be usable without reading the README.
-
-**Work.**
-
-- Fix the known inconsistency: the island card for "MISSILE WORKSHOP" advertises `F2`, but `F2`
-  opens the legacy bench.
-- Consistent per-view shortcuts, contextual help, explicit empty states, full keyboard navigation,
-  checked contrast and font sizes.
-- Visible feedback for every refused action (credits, research, validation).
-
-**Acceptance.** No card advertises a wrong key; every screen is reachable by keyboard and mouse; no
-action happens without feedback.
-
-### Lot 7 — Data robustness
-
-**Purpose.** A public game receives saves from different versions.
-
-**Work.**
-
-- Explicit schema version and migrations tested from 0.26 to the current version.
-- A corrupted file: clear message, `.bak` preserved, nothing lost.
-- Drop the pre-0.22 import once 0.29 ships.
-
-**Acceptance.** Automated migration tests; a corrupted-file scenario is covered.
-
-### Lot 8 — Performance and finish
-
-**Purpose.** Measure rather than assume.
-
-**Work.**
-
-- A 60 fps budget on integrated graphics, load times, Monte Carlo batch cost, worker-thread sizing.
-- Before/after measurements recorded in `docs/`.
-
-**Acceptance.** A table of measured numbers, not an assertion.
-
-## Out of scope (deliberate)
-
-These are excluded so the goal stays attainable:
-
-- Real or certified physical models, experimental validation, serious CFD/FEA.
-- Guidance, tracking, navigation law, seeker, warhead: the lock remains a seeded probability roll.
-- Multiplayer, networking, a complex economy, staff, inventory, island expansion.
-- Audio, translations, dark mode: not a priority while the missile loop is incomplete.
-
-## Milestones
-
-| Version | Objective | Exit state |
-|---|---|---|
-| 0.26.x | Foundations | Green CI, clean clippy |
-| 0.27 | Editable program | Vehicle and program designed in-game |
-| 0.28 | Trials | Trials visible and replayable |
-| 0.29 | Missile contracts | Complete loop, research gating, legacy loop removed |
-| 1.0 | Finish | Measured performance, tagged release |
-
-## Risks
-
-- **Removing the legacy loop regresses the game** → remove only in 0.29, after the missile loop
-  passes end-to-end tests.
-- **Bevy pinned at `=0.20.1` with deprecations** → handle the warnings in lot 0, before piling on
-  interface code.
-- **Scope drift** (factories, economy, graphics) → the out-of-scope list is authoritative; any
-  addition must serve one of the five criteria of "done".
-- **Balancing abstract values** → accept the abstraction, do not chase realism, tune through rule
-  tests.
-
-## Success measure
-
-The goal is reached when someone who clones the repository can, without reading the code: launch the
-game, accept a missile contract, assemble a vehicle, write its program, run a trial, deliver the plan,
-and see that CI is green and a release is published. None of the five criteria of "done" depends on a
-tool inherited from 0.6.
+- Each lot is developed on its own branch and submitted as a pull request.
+- A lot is not considered complete until its acceptance criteria and CI checks pass.
+- Do not combine unrelated gameplay changes with maintenance work.
+- Preserve save compatibility unless a deliberate, tested migration is part of the lot.
+- Update this roadmap and the changelog when scope or status changes.
