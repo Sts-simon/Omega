@@ -5,13 +5,9 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
 **Version 0.26.0** — a Rust + Bevy engineering sandbox shaped like a fictional island research
-campus. You build a staged missile in a 3D workshop, unlock parts through a research tree that
-advances with a day clock, and queue scientific studies that run on background worker threads.
-
-The missile loop is complete: accept a family contract, design the vehicle, write its program, fly
-the trial and deliver a hash-bound dossier for credits. The older civil contract loop (civilian
-instrument assembly, instrument profile, dossier, field test) is kept as legacy behind a
-**CIVIL (LEGACY)** toggle until lot 5 removes it.
+campus. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
+research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
+credits.
 
 Everything in this project is fictional and abstract. Every mass, thrust, cost, duration and
 probability is a gameplay value, not physical or real-world performance data. The project
@@ -20,22 +16,20 @@ a target lock is a single seeded probability roll. See `docs/VISION_MISSILES.md`
 
 ## Direction
 
-The finished game rests on **missile design alone**: contract → staged vehicle → program built from
-installed hardware → seeded trials → delivery of a plan (design, program and evidence; nothing is
-produced).
+The game rests on **missile design alone**: contract → staged vehicle → program built from installed
+hardware → seeded trials → delivery of a plan (design, program and evidence; nothing is produced).
 
-Missile contracts, trials and plan delivery now exist, so the remaining transitional tooling — the
-legacy assembly bench, polygon sketch, instrument profile, chamber sequencer and civil contract
-families — is reachable only through explicitly labelled legacy views. Lot 5 removes it once a
-0.26 save still loads and the missile loop passes end to end.
+The inherited civil tooling — assembly bench, polygon sketch, instrument profile, chamber sequencer,
+thermal and structural studies, civil contracts — has been removed. `omega-sim-core` stays in the
+workspace as a standalone, Bevy-free scientific library, but the game no longer depends on it.
 
 The project is published as the public repository <https://github.com/Sts-simon/Omega> on the
 `main` branch, under the MIT licence. `target/`, `saves/`, `results/` and the local `.freebuff/`
 workspace folder are ignored.
 
-## What works in 0.26.0
+## What works
 
-### Research Centre (playable)
+### Research Centre
 
 - 13 technologies in five departments (missile families, propulsion and structures, sensors and
   electronics, onboard computing, design and test tools), each with a credit cost, a duration in
@@ -43,12 +37,18 @@ workspace folder are ignored.
 - One research project at a time. Credits are deducted when research starts; the **NEXT DAY**
   button advances the game clock, shown as `DAY n` in the navigation bar. Finishing a project
   grants its capabilities and prints the technology name.
-- Research state and the day counter are saved in the campaign (older campaigns load with the
-  defaults).
+- **Research gates the contract office.** A mission family only appears on the offer board once its
+  technology is researched: air-to-surface and surface-to-surface work needs the starting ballistic
+  family, surface-to-air and air-to-air need their own family, a cruiser needs the cruise family,
+  and difficulty 4–5 surface-to-surface offers need the anti-ship family. The board lists what is
+  still missing, by technology name.
+- **`Parallel project management` raises the number of active contracts** from one to two. Trying to
+  accept a second contract without it is refused with a readable message.
+- The laboratory still runs one project at a time; it cannot start a second while one is running.
 - Parts in the missile workshop are gated by capabilities: locked parts are greyed out and the
   message names the technology to research, not an internal id.
 
-### Missile workshop (playable, mouse-driven)
+### Missile workshop
 
 - A staged vehicle built from 13 part types: solid motor, fuel tank, liquid engine, turbofan,
   pitot tube, barometer, basic radar, active radar, three flight computers, decoupler and mission
@@ -66,10 +66,11 @@ workspace folder are ignored.
   research still missing; and design validation messages.
 - The 3D stack is rebuilt on change, with a highlighted selected part and a nose cone; the camera
   centres on the vehicle when the workshop opens.
-- The vehicle is saved to `designs/vehicle.json` on every change and reloaded at startup. Saved
-  parts are validated on load; invalid parts are rejected.
+- The vehicle is saved to `designs/vehicle.json` on every change and reloaded at startup.
+- Missile designs join the revision log (`designs/revisions.json`). The workshop shows the head
+  hash, the change summary since it, the latest revisions and a `RECORD REVISION` button.
 
-### Missile program editor (playable, 0.27 work)
+### Missile program editor
 
 - The **PROGRAM** tab (`F4`) composes the onboard program as parallel threads of the seven blocks of
   `omega-rules::program`. The palette enables only what the fitted hardware unlocks: pitot tube →
@@ -80,12 +81,10 @@ workspace folder are ignored.
 - Blocks are appended to the selected thread, selected, moved up or down, tuned with `-` / `+`
   (wait, stage number, throttle, speed, pressure) and removed. `Lock target` has no value and must
   close its thread.
-- The program is saved to `programs/missile.json` on every change, reloaded at startup, and shown
-  with a content hash ready to bind trial evidence. Blocks are refused when the computer memory or
-  the parallel-thread limit is reached.
-- The 0.6 chamber sequencer is now the **SEQUENCER** tab, explicitly labelled legacy.
+- The program is saved to `programs/missile.json` on every change and reloaded at startup; its
+  content hash is shown so a trial can be bound to it.
 
-### Trial screen (playable, 0.28 work)
+### Trials
 
 - The **TRIALS** tab flies the saved vehicle with its onboard program and shows four bar plots
   (speed, altitude, mass, thrust), the event timeline (ignition, lift-off, pitch-over, separation,
@@ -100,78 +99,44 @@ workspace folder are ignored.
   panel shows what the current seed does before a run: `ROLL 0.11` against the radar's 55 % reads
   `LOCK` and flips to `NO LOCK` as the seed changes, next to the thrust/burn/drag spread, and a
   warning says so when no radar or no `LOCK TARGET` block is fitted.
-- Monte Carlo batches of 10 / 100 / 1,000 seeds summarize the outcome distribution (runs without
-  lift-off, runs without separation, lock acquisition, mean speed, path and time) and stay locked
-  until the "Batch trials" research node grants `analysis:monte_carlo`. A batch flies on a worker
-  thread and shows its progress, so a thousand seeds never block the frame, and each report is
-  folded into the running totals instead of being kept, so the memory footprint stays flat. A
-  finished batch remembers the inputs it was flown with: changing the vehicle, the program, the
-  profile or the seed marks its result `STALE` on the batch panel until it is flown again.
+- Monte Carlo batches of 10 / 100 / 1,000 seeds summarize the outcome distribution and stay locked
+  until the "Batch trials" research grants `analysis:monte_carlo`. A batch flies on a worker thread
+  with a live progress line, and each report is folded into running totals so memory stays flat. A
+  finished batch marks its result `STALE` when the vehicle, program, profile or seed changes.
 - A/B comparison stores snapshot A, flies the edited design over the same ten seeds and prints the
   deltas for path, maximum speed and lock rate.
-- The session (seed, reports, batch, snapshot) is in memory only; the vehicle and program it flies
-  are the saved ones.
+- With active contracts, every trial is recorded automatically as evidence, bound to the vehicle
+  hash, the program hash and the seed.
 
-### Missile contracts (playable, 0.29 work)
+### Missile contracts
 
-- The **CONTRACTS** tab opens the missile procurement office: four offers, each naming a mission
-  family (air-to-air, air-to-surface, surface-to-air, surface-to-surface) and a vehicle family
-  (ballistic, cruise, short-range) with a difficulty. Accepting one closes the offer and starts the
-  evidence clock; one contract is active at a time.
-- The requirements are abstract flight figures, not typed-in paperwork: path length, top speed,
-  launch mass, lift-off and stage separation, plus a hard target lock on air-to-air and
-  surface-to-air offers. They are evaluated by the shared `omega-rules` requirement and dossier
-  machinery.
-- The dossier is built from the trials flown while the contract is active. Every proof carries the
-  vehicle hash, the program hash and the trial seed, and the panel shows the bound hashes. Edit a
-  part or a block after the trial and all rows turn `STALE`, the score drops to 0 and delivery is
-  disabled; reverting the edit restores the dossier.
-- Delivering an accepted dossier pays the reward, increments the delivered counter and generates a
-  fresh offer board. A passed deadline or an incomplete dossier keeps the contract.
-- Missile designs join the same revision log as the legacy assembly (`designs/revisions.json`,
-  schema 2). The workshop shows the head hash, the change summary since it and a `RECORD REVISION`
-  button.
+- The **CONTRACTS** tab opens the missile procurement office: one offer per researched mission
+  family (air-to-air, air-to-surface, surface-to-air, surface-to-surface) with a vehicle family
+  (ballistic, cruise, short-range), a difficulty, a reward and a deadline. Accepting one closes the
+  offer and starts its evidence clock.
+- Two contracts can be active at once once `Parallel project management` is researched; each is
+  listed with its own status and due day, and clicking `SELECT` shows its dossier.
+- Requirements are abstract flight figures, not typed-in paperwork: path length, top speed, launch
+  mass, lift-off and stage separation, plus a hard target lock on air-to-air and surface-to-air
+  offers. They are evaluated by the shared `omega-rules` requirement and dossier machinery.
+- Every proof carries the vehicle hash, the program hash and the trial seed, and the panel shows the
+  bound hashes. Edit a part or a block after the trial and all rows turn `STALE`, the score drops to
+  0 and delivery is disabled; reverting the edit restores the dossier.
+- Deliver a current dossier with the reward paid, the delivered counter incremented and a fresh
+  offer for that family. A passed deadline or an incomplete dossier refuses delivery and keeps the
+  contract.
 
-### Legacy civil loop (playable via `CIVIL (LEGACY)`, transitional)
+## Not implemented
 
-- Contract Office (legacy toggle): five randomized civilian/scientific domains, one offer each, with
-  unit quantities, mass/power/temperature/uptime/data/storage limits, budgets, rewards and deadlines.
-  Up to two active projects.
-- Full phase path: accept → design → instrument profile → submit (design checks, geometry-derived
-  centre-of-gravity balance limit) → background thermal analysis → deterministic 1,000-sample field
-  test → hash-bound evidence → dossier-gated delivery with production cost and payout. A design or
-  profile change makes the stored snapshot and evidence stale.
-- Legacy assembly bench: 3D primitive assembly editor (panel, beam, enclosure, platform, cylinder),
-  mouse picking, translate/rotate gizmos, numeric inspector, movement grid, parent-child metadata
-  links, in-memory undo/redo, JSON persistence, design revisions, polygon sketch with vertex
-  editing, and the instrument-profile editor.
-- Legacy sequencer: the 0.6 visual sequence editor (chamber demonstrator) is kept as the
-  SEQUENCER tab. Computation Centre: thermal finite-volume study, civil truss study, mesh thermal
-  studies from the assembly or the polygon sketch (optionally locally refined), field test, HTML/SVG
-  report opening and cancellation.
-
-### Scientific core
-
-- `omega-sim-core`, Bevy-free: transient 2D finite-volume heat conduction; 2D linear-elastic
-  pin-jointed truss; triangular meshing of coplanar rectangles and concave polygon regions with
-  holes, conforming local refinement and quality metrics; transient triangular-finite-element heat
-  conduction on those meshes; HTML/SVG + CSV report export.
-- `omega-data`, Bevy-free: content hashing, atomic writes and the versioned save slot.
-- `omega-rules`, Bevy-free: missile vehicle, program, flight test, research, requirements,
-  evidence, dossier, metrics and design diff.
-
-## Not implemented in 0.26.0
-
-- **Research does not gate contract families yet.** Every family is offered from the start; the
-  `family:*` capabilities and the `ExtraActiveProjects` grant are not checked anywhere.
-- **The civil loop is still in the repository.** It is reachable only through the explicitly
-  labelled legacy toggle and legacy views; lot 5 deletes it, the legacy bench, the sequencer and the
-  civil contract data.
-- Deadlines are a delivery gate but do not expire or fail a contract on their own, and the office
-  does not model reputation, penalties or multiple simultaneous contracts.
-- No production scheduling, staffing, inventory or island expansion.
-- No arbitrary 3D CAD meshing, bending/buckling/fatigue/dynamic structural mechanics, implicit time
-  integration or certified engineering validation. Connection kinds remain graph metadata only.
+- **Research still gates families only through their technology.** There is no reputation, no
+  penalties, and a passed deadline refuses delivery instead of failing the contract.
+- The office does not model production scheduling, staffing, inventory or island expansion.
+- `analysis:monte_carlo` is consumed by the trial screen; the other grants are part and sensor
+  capabilities.
+- No arbitrary 3D CAD, no bending/buckling/fatigue/dynamic structural mechanics, no implicit time
+  integration and no certified engineering validation.
+- `omega-sim-core` (thermal finite volume, truss, meshing, mesh thermal, reports) is not wired to the
+  game; it remains a standalone library with its own tests.
 
 ## Requirements (Linux Mint)
 
@@ -207,16 +172,11 @@ The first build compiles Bevy and its dependencies and takes several minutes; de
 built with `opt-level = 3` even in the dev profile. `saves/` and `results/` are created on demand and
 ignored by git, as is `target/`.
 
-Scientific studies run on a dedicated worker thread with a Rayon pool. Worker threads default to
-detected logical CPUs minus one, capped at 16; override with `OMEGA_WORKER_THREADS`, for example
-`OMEGA_WORKER_THREADS=16 cargo run --release`.
-
 ## Interface and controls
 
 The top bar switches views: **ISLAND**, **CONTRACTS**, **WORKSHOP** (missile workshop), **RESEARCH**,
-**PROGRAM** (missile program), **COMPUTE**, **SEQUENCER** (legacy 0.6 editor), **LEGACY BENCH**. The
-right side of the bar shows the message lane and
-`DAY n | credits | active projects | completed`. The island shows five facility cards; clicking a
+**PROGRAM** (missile program), **TRIALS**. The right side of the bar shows the message lane and
+`DAY n | credits | active contracts | delivered`. The island shows five facility cards; clicking a
 card opens it.
 
 | Input | Action |
@@ -225,17 +185,13 @@ card opens it.
 | `F2` | Missile workshop |
 | `F3` | Research Centre |
 | `F4` | Missile program editor |
-| `F5` | Computation Centre |
-| `Escape` | Return to the island (closes the profile editor or an open editor first) |
-
-The legacy assembly bench and the legacy sequencer have no keyboard shortcut: use the navigation bar
-(`LEGACY BENCH`, `SEQUENCER`) or the active-project card.
+| `Escape` | Return to the island |
 
 ### Missile workshop
 
 Editing is mouse-only: presets, part palette (locked parts greyed), stage buttons and `+ STAGE` /
-`- STAGE`, the part list per stage, `-` / `+` on the selected part's adjustable values, and
-`REMOVE PART`. Stage figures and validation update immediately.
+`- STAGE`, the part list per stage, `-` / `+` on the selected part's adjustable values,
+`REMOVE PART` and `RECORD REVISION`. Stage figures and validation update immediately.
 
 ### Research Centre
 
@@ -246,136 +202,80 @@ project at a time.
 
 | Input | Action |
 |---|---|
-| `1`–`4` | Accept the corresponding missile offer |
-| `V` | Deliver the active missile contract when its dossier is current and accepted |
-| `N`, `Tab`, `Shift+Tab`, `1`–`5` | Legacy civil office only (`CIVIL (LEGACY)`): refresh, select project, accept |
+| `1`–`4` | Accept the corresponding offer, if a slot is free and the family is researched |
+| `V` | Deliver the selected contract when its dossier is current and accepted |
 
-### Legacy assembly bench
-
-| Input | Action |
-|---|---|
-| `T` / `R` | Translate / rotate gizmo mode |
-| `P` / `Shift+P` | Connect the selected part to the nearest eligible part / remove its links |
-| `Ctrl+Tab`, `Ctrl+Shift+Tab` | Switch the selected active project |
-| `Ctrl+Enter` | Evaluate and submit the design |
-| `F11` | Instrument-profile editor |
-| `Ctrl+S` / `Ctrl+L` | Save / load the assembly |
-| `H` | Toggle the shortcut help overlay |
-
-The left tool shelf mirrors add, select, move, rotate, resize, link, history, save/load, revisions,
-sketch and profile actions. Polygon sketch editing, vertex dragging, the numeric inspector and the
-sequence editor have their own key tables in `docs/UX_CONTROLS.md`, `docs/CAMPUS.md` and
-`docs/SEQUENCE_EDITOR.md`; those documents were written before 0.26 and describe the legacy tools.
-
-### Programming Studio
-
-`F6` opens or closes the visual sequence graph. Its full key table is in
-`docs/SEQUENCE_EDITOR.md`.
-
-### Computation Centre
-
-| Input | Action |
-|---|---|
-| `R` | Queue thermal screening for the selected contract (generic thermal study if none) |
-| `T` | Run the contract field test after a successful analysis |
-| `M` | Mesh supported workshop plates/panels and queue a thermal study |
-| `Shift+M` | Refine a central region of that mesh, then queue the study |
-| `G` | Queue the civil truss reference study |
-| `P` | Mesh the persisted polygon sketch and queue a thermal study |
-| `O` | Open the latest HTML report |
-| `C` | Cancel the newest active job |
-
-The shelf provides the same actions as buttons (mesh assembly, mesh sketch, analyse project, field
-test, open report, cancel).
+Each active contract has its own `SELECT`, `GO TO TRIALS` and `DELIVER` buttons; the dossier panel
+follows the selected one.
 
 ### Camera
 
 Right-drag orbits, middle-drag pans, wheel or touchpad scroll zooms; WASD/arrows pan and `Q`/`E`
-change height. The camera is disabled while an editor overlay is open or the pointer is over an
-interactive panel.
+change height. The camera is disabled on the contract, research and program boards or while the
+pointer is over an interactive panel.
 
-## Saves and reports
+## Saves
 
 All persistent files go through `src/save.rs` and `omega_data::SaveSlot`:
 
 ```text
 saves/slot_1/
   manifest.json                 committed last; read verifies every file hash
-  campaign.json                 credits, civil offers/projects, research, day, PRNG
-  contracts/missile.json        missile offers, active contract, evidence, deliveries (0.29)
-  designs/assembly.json         legacy assembly
-  designs/polygon-sketch.json   legacy polygon sketch
-  designs/revisions.json        design revisions, legacy assembly and missile (schema 2)
-  designs/vehicle.json          missile vehicle (0.26)
-  programs/missile.json         missile program (0.27)
-  programs/lab_sequence.json    chamber sequence program (legacy)
+  campaign.json                 credits, research, day (schema 2; schema 1 still loads)
+  contracts/missile.json        offers, active contracts, evidence, deliveries (schema 2)
+  designs/revisions.json        missile design revisions (schema 3)
+  designs/vehicle.json          missile vehicle
+  programs/missile.json         missile program
 ```
 
 Writes are atomic (temporary file, fsync, rename) and a damaged file is reported instead of loaded,
 with the previous generation kept as `<name>.bak`. Files from the pre-0.22 layout (`saves/*.json`)
-are imported once without being modified. Field-test and solver reports, meshes and HTML/CSV
-exports are written to `results/`.
+are imported once without being modified. Earlier saves load: campaign schema 1 keeps its credits,
+contract schema 1 keeps its single active contract, and an assembly-era revision log (schema 1–2)
+opens empty because those snapshots can no longer be restored.
 
 ## Project structure
 
 ```text
 src/
   main.rs              Bevy app, orbit camera, ordered system chain
-  campus.rs            views, campaign, civil contracts (legacy), research, day, save
-  campus/board.rs      card boards: island, missile contracts, research, workshop, project
-  campus/verification.rs  legacy assembly evidence and dossier
-  procurement.rs       missile offers, trial evidence, dossier, delivery, persistence
+  campus.rs            views, campaign (credits, research, day), island picking, save
+  campus/board.rs      card boards: island, contracts, research, workshop, program, trials
+  procurement.rs       offers, active contracts, trial evidence, dossier, delivery, persistence
+  revisions.rs         missile design revision log
   missile.rs           missile workshop session, parts, stages, 3D stack, change summary
   program_editor.rs    missile program session, validation, persistence
-  interface.rs         navigation bar, tool shelves, UiAction dispatch
+  trials.rs            seeded trial session, batches, comparison
+  interface.rs         navigation bar, UiAction dispatch
   save.rs              SaveSlot access and 0.21 import
   ui_kit.rs            UI primitives (cards, chips, buttons, palette)
-  scene.rs             procedural low-poly island
-  design/              legacy assembly model/editor, inspector, gizmos, polygon sketch,
-                       meshing adapter, metrics, revisions, storage
-  jobs/                worker thread, queue, cancellation, HUD, report writing
-  sequence/            chamber sequencer: model, runtime, graph, expressions
+  scene.rs             procedural low-poly island and facilities
 crates/
-  sim-core/            Bevy-free solvers: thermal FV, truss, mesh, mesh thermal, reports
-  omega-data/        content hashes, atomic writes, versioned save slot
-  omega-rules/       vehicle, program, flight, research, contracts, requirements, dossier,
-                     metrics, diff
-docs/                  architecture, vision, roadmap, changelog, model notes, legacy UX docs
+  sim-core/            standalone Bevy-free solvers: thermal FV, truss, mesh, mesh thermal, reports
+  omega-data/          content hashes, atomic writes, versioned save slot
+  omega-rules/         vehicle, program, flight, research, contracts, requirements, dossier,
+                       metrics, diff
+docs/                  architecture, vision, roadmap, changelog, model notes
 examples/              sample assembly, chamber program, polygon sketch
 ```
 
 ## Scientific models and limitations
 
-The thermal finite-volume solver (`sim-core::thermal`) uses SI dimensions, per-cell materials,
-harmonic face conductivity, insulated or fixed-temperature boundaries, a volumetric source and an
-explicit stability bound; it reports energy balance and a deterministic input fingerprint. The
-triangular mesh solver (`mesh_thermal`) adds per-element thickness on conforming planar meshes. The
-truss solver (`mechanics`) covers small-displacement linear-elastic pin-jointed 2D structures only.
-
-None of these models is validated against experimental data or certified for engineering use, and
-none is coupled to the missile vehicle in 0.26. The mesh path accepts only coplanar plates and drawn
-planar polygon regions, not arbitrary solid CAD. Solver jobs report progress and support cooperative
-cancellation, and every result carries model/solver metadata and its input configuration.
-
 The missile figures (mass, thrust, burn time, TWR, delta-v) come from abstract part coefficients in
 `omega-rules::vehicle`. The flight test integrates speed along a path with thrust, drag and, for a
 vertical launch, gravity; altitude only changes air density. There is no steering, trajectory
-optimisation, tracking or guidance law, and the lock is one seeded probability roll.
+optimisation, tracking or guidance law, and the lock is one seeded probability roll. The
+manufacturing spread is a deterministic multiplier per seed (±3 % thrust and burn time, ±5 % drag),
+not a validated tolerance model.
 
-## Tests and quality
+The contract requirements and dossier are an abstract game rubric: range, speed, mass, lift-off,
+separation and lock are read from the trial and compared to limits derived from the offer's family
+and difficulty. They are not engineering verification.
 
-The workspace contains unit tests in all four crates (application logic in `src/`, plus
-`sim-core`, `omega-data` and `omega-rules`), including headless solver checks, save-slot
-integrity, research/vehicle/program/flight rules, sketch validation and revision handling. Run them
-with `cargo test --workspace`; `cargo test -p omega-sim-core` runs the numerical crate alone.
+`omega-sim-core` keeps its Bevy-free thermal finite-volume, truss, meshing and mesh-thermal solvers
+with their own tests; none of it is coupled to the missile game, and none is validated against
+experimental data or certified for engineering use.
 
-Every change is checked by the GitHub Actions workflow in `.github/workflows/ci.yml`: formatting,
-`clippy -D warnings` and the full test suite.
+## Licence
 
-## Documentation status
-
-`docs/CHANGELOG.md` is the authoritative release history. `docs/VISION_MISSILES.md` and
-`docs/ARCHITECTURE.md` describe the 0.26 state, and `docs/ROADMAP_OMEGA.md` is the improvement plan
-that carries the project to a missile-only loop. `docs/CAMPUS.md`, `docs/ROADMAP.md`,
-`docs/UX_CONTROLS.md` and `docs/SEQUENCE_EDITOR.md` were written before 0.26 and now live in
-`docs/archive/`: they are kept for historical reference only and no longer describe the project.
+MIT. See `LICENSE`.

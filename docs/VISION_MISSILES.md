@@ -49,15 +49,15 @@ Not implemented yet in the application:
 
 - The missile program editor, trial screen, seeded batches and A/B comparison are playable, and the
   CONTRACTS tab runs missile offers whose dossier is bound to the vehicle, program and trial hashes.
-- Research does not gate contract families or the number of active projects yet: the `family:*`
-  capabilities and the `ExtraActiveProjects` grant are unused (lot 4).
-- The legacy civil loop (assembly bench, instrument profile, field test, dossier) is still in the
-  repository, reachable only through the `CIVIL (LEGACY)` toggle, and is removed in lot 5.
+- Research gates the contract office: an offer only appears for a researched mission family (and
+  vehicle family), and `Parallel project management` raises the number of active contracts.
+- The civil loop, the assembly bench, the instrument profile, the chamber sequencer and the
+  scientific studies are gone; `omega-sim-core` remains a standalone library.
 
 ## Roadmap
 - 0.25 Research: game clock, research board, persistence, capability checks. **Done.**
 - 0.26 Workshop v2: missile parts, stages, resize, derived-stats panel, locked parts. **Done.**
 - 0.27 Programming v2: palette from hardware, thread view, computer limit meters, program stored with the design revision.
-- 0.28 Trials: run the flight test from the UI, graphs, events, anomalies, seeds, comparison of designs.
-- 0.29 Contracts v3: missile families and requirement sets, plan delivery with trial evidence, deadlines. Remove the civil loop and the legacy bench.
+- 0.28 Trials: run the flight test from the UI, graphs, events, anomalies, seeds, comparison of designs. **Done.**
+- 0.29 Contracts v3: missile families and requirement sets, plan delivery with trial evidence, deadlines, research-gated families. The civil loop and the legacy bench are removed. **Done.**
 - 0.30 Balancing, tutorial contract, performance.

@@ -1,13 +1,11 @@
 mod campus;
-mod design;
 mod interface;
-mod jobs;
 mod missile;
 mod procurement;
 mod program_editor;
+mod revisions;
 mod save;
 mod scene;
-mod sequence;
 mod trials;
 mod ui_kit;
 
@@ -15,7 +13,6 @@ use crate::ui_kit::UiInteraction;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use campus::{CampusState, CampusView};
-use design::DesignSession;
 
 fn main() {
     App::new()
@@ -28,36 +25,19 @@ fn main() {
             ..default()
         }))
         .init_resource::<CampusState>()
-        .init_resource::<DesignSession>()
-        .init_resource::<design::PolygonSketchSession>()
-        .init_resource::<design::RevisionLog>()
-        .init_resource::<ui_kit::UiState>()
+        .init_resource::<revisions::RevisionLog>()
         .insert_resource(missile::MissileSession::new_default())
-        .init_resource::<design::InspectorState>()
-        .init_resource::<jobs::JobManager>()
         .init_resource::<program_editor::MissileProgramSession>()
         .init_resource::<trials::TrialSession>()
         .init_resource::<procurement::Procurement>()
-        .init_resource::<sequence::SequenceWorkspace>()
         .add_systems(
             Startup,
             (
                 scene::setup,
-                campus::setup_ui,
                 campus::setup_boards,
                 missile::setup_missile,
                 missile::load_missile,
                 program_editor::load_program,
-                design::setup_ui,
-                design::setup_inspector_ui,
-                design::initialize_editor,
-                design::initialize_polygon_sketch,
-                design::initialize_revision_log,
-                design::initialize_polygon_sketch_visuals,
-                design::setup_polygon_sketch_ui,
-                jobs::setup_ui,
-                sequence::setup_ui,
-                sequence::setup_graph_ui,
                 interface::setup,
             ),
         )
@@ -67,32 +47,15 @@ fn main() {
                 (
                     interface::handle_actions,
                     campus::handle_extra_actions,
+                    procurement::sync_offers,
                     procurement::record_trial_evidence,
-                    design::handle_inspector_input,
-                    design::handle_inspector_text_input,
                     campus::handle_input,
-                    campus::handle_computation_input,
-                    design::handle_gizmo_input,
-                    design::pick_part_with_mouse,
-                    design::handle_keyboard,
-                    design::handle_revision_input,
-                    design::handle_polygon_sketch_input,
-                    poll_jobs,
-                    campus::sync_jobs,
                 )
                     .chain(),
                 (
                     campus::persist_campaign,
                     procurement::persist_procurement,
-                    jobs::update_hud,
                     move_camera,
-                    design::sync_part_visuals,
-                    design::sync_gizmo_visuals,
-                    design::update_gizmo_visuals,
-                    design::sync_polygon_sketch_visuals,
-                    design::update_polygon_sketch_drag_visuals,
-                    design::update_hud,
-                    design::update_inspector_ui,
                     campus::sync_boards,
                     campus::scroll_program_list,
                     missile::sync_missile_visuals,
@@ -101,16 +64,6 @@ fn main() {
                     campus::poll_trial_batch,
                     campus::update_batch_progress,
                     campus::update_nav_status,
-                )
-                    .chain(),
-                (
-                    design::update_polygon_sketch_hud,
-                    sequence::handle_keyboard,
-                    sequence::graph_input,
-                    sequence::sync_graph_ui,
-                    sequence::tick,
-                    sequence::update_hud,
-                    campus::update_hud,
                     interface::sync_layout,
                 )
                     .chain(),
@@ -120,12 +73,6 @@ fn main() {
         .run();
 }
 
-fn poll_jobs(mut jobs: ResMut<jobs::JobManager>) {
-    for message in jobs.collect_updates() {
-        info!("{message}");
-    }
-}
-
 fn move_camera(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -133,27 +80,13 @@ fn move_camera(
     mouse_scroll: Res<AccumulatedMouseScroll>,
     time: Res<Time>,
     campus: Res<CampusState>,
-    sequence: Res<sequence::SequenceWorkspace>,
-    sketch: Res<design::PolygonSketchSession>,
-    gizmo: Res<design::GizmoState>,
-    inspector: Res<design::InspectorState>,
     ui_buttons: Query<&UiInteraction>,
     mut cameras: Query<(&mut Transform, &mut scene::OrbitCameraRig), With<Camera3d>>,
 ) {
-    if gizmo.pointer_captured
-        || inspector.is_editing()
-        || matches!(
-            campus.view,
-            CampusView::Contracts
-                | CampusView::Research
-                | CampusView::Programming
-                | CampusView::Program
-                | CampusView::Computation
-        )
-        || campus.profile_editor_open
-        || sequence.graph_is_open()
-        || sketch.active
-    {
+    if matches!(
+        campus.view,
+        CampusView::Contracts | CampusView::Research | CampusView::Program
+    ) {
         return;
     }
     let Ok((mut transform, mut rig)) = cameras.single_mut() else {
@@ -180,7 +113,6 @@ fn move_camera(
         }
         if mouse_scroll.delta.y != 0.0 {
             // Mouse wheels usually report lines; touchpads often report pixels.
-            // Normalize both so a small trackpad gesture does not jump several metres.
             let scroll_lines = match mouse_scroll.unit {
                 MouseScrollUnit::Line => mouse_scroll.delta.y,
                 MouseScrollUnit::Pixel => mouse_scroll.delta.y / 100.0,

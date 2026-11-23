@@ -10,12 +10,9 @@ members = ["crates/sim-core", "crates/omega-data", "crates/omega-rules"]
 resolver = "3"
 
 [dependencies]
-omega-sim-core = { path = "crates/sim-core" }
 omega-data = { path = "crates/omega-data" }
 omega-rules = { path = "crates/omega-rules" }
 bevy = "=0.20.1"
-crossbeam-channel = "0.5"
-rayon = "1.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 

@@ -4300,11 +4300,8 @@ name = "omega"
 version = "0.26.0"
 dependencies = [
  "bevy",
- "crossbeam-channel",
  "omega-data",
  "omega-rules",
- "omega-sim-core",
- "rayon",
  "serde",
  "serde_json",
 ]

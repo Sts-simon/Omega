@@ -8,6 +8,7 @@ use crate::flight::FlightReport;
 use crate::requirement::{Comparator, Estimate, Evidence, Requirement, VerificationMethod};
 use omega_data::ContentHash;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -34,6 +35,18 @@ impl MissionFamily {
             Self::SurfaceToSurface => "SURFACE-TO-SURFACE",
         }
     }
+
+    /// Research capability that unlocks offers for this mission family. A ballistic vehicle is
+    /// the starting family; hard surface-to-surface work needs the anti-ship family.
+    pub fn capability(self, difficulty: u8) -> &'static str {
+        match self {
+            Self::AirToAir => "family:air_to_air",
+            Self::AirToSurface => "family:ballistic",
+            Self::SurfaceToAir => "family:surface_to_air",
+            Self::SurfaceToSurface if difficulty >= 4 => "family:anti_ship",
+            Self::SurfaceToSurface => "family:ballistic",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -52,6 +65,15 @@ impl VehicleFamily {
             Self::Ballistic => "BALLISTIC",
             Self::Cruise => "CRUISE",
             Self::ShortRange => "SHORT-RANGE",
+        }
+    }
+
+    /// Research capability a cruiser needs; ballistic and short-range work from day one.
+    pub fn capability(self) -> Option<&'static str> {
+        match self {
+            Self::Ballistic => Some("family:ballistic"),
+            Self::Cruise => Some("family:cruise"),
+            Self::ShortRange => None,
         }
     }
 }
@@ -105,6 +127,22 @@ pub struct ContractOffer {
 }
 
 impl ContractOffer {
+    /// Every research capability this offer needs. An offer without them is not put on the board,
+    /// and accepting one that slipped through from an older save is refused by name.
+    pub fn required_family_capabilities(&self) -> Vec<&'static str> {
+        let mut required = vec![self.mission_family.capability(self.difficulty)];
+        if let Some(capability) = self.vehicle_family.capability() {
+            required.push(capability);
+        }
+        required
+    }
+
+    pub fn is_available(&self, owned: &BTreeSet<String>) -> bool {
+        self.required_family_capabilities()
+            .iter()
+            .all(|capability| owned.contains(*capability))
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.id == 0 {
             return Err("contract id must be non-zero".to_string());
@@ -205,56 +243,119 @@ impl ContractRng {
     }
 }
 
+impl MissionFamily {
+    fn client(self) -> &'static str {
+        match self {
+            Self::AirToAir => "Aster Defence Directorate",
+            Self::AirToSurface => "Meridian Strategic Systems",
+            Self::SurfaceToAir => "Northstar Defence Office",
+            Self::SurfaceToSurface => "Orion Procurement Bureau",
+        }
+    }
+}
+
+fn make_offer(id: u32, mission_family: MissionFamily, vehicle_family: VehicleFamily, difficulty: u8) -> ContractOffer {
+    let d = u64::from(difficulty);
+    ContractOffer {
+        id: id.max(1),
+        mission_family,
+        vehicle_family,
+        title: format!("{} development programme", mission_family.label()),
+        client: mission_family.client().to_string(),
+        brief: format!(
+            "Submit a validated fictional {} vehicle programme. The review evaluates design completeness, software quality and repeatable simulation evidence.",
+            vehicle_family.label().to_lowercase()
+        ),
+        requirements: ContractRequirements {
+            min_design_score: (55 + difficulty * 5).min(95),
+            min_program_score: (50 + difficulty * 6).min(95),
+            min_trial_score: (55 + difficulty * 5).min(95),
+            required_capabilities: if difficulty >= 4 {
+                vec!["research:advanced_validation".to_string()]
+            } else {
+                Vec::new()
+            },
+        },
+        reward_credits: 4_000 + d * 2_500,
+        deadline_days: 35_u16.saturating_sub(u16::from(difficulty) * 3),
+        difficulty,
+    }
+}
+
 /// Generate one offer for each mission family, then shuffle the board deterministically.
 pub fn generate_contract_board(seed: u64, first_id: u32) -> Vec<ContractOffer> {
+    let all: BTreeSet<String> = [
+        "family:ballistic",
+        "family:cruise",
+        "family:surface_to_air",
+        "family:air_to_air",
+        "family:anti_ship",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    generate_available_board(seed, first_id, &all)
+}
+
+/// One offer per mission family the player has researched, in a deterministic shuffled order.
+/// Unresearched families are simply absent from the board; a cruise offer also needs the cruise
+/// family, and a hard surface-to-surface offer needs the anti-ship family (difficulty is clamped
+/// so an available family never produces an offer it cannot staff).
+pub fn generate_available_board(seed: u64, first_id: u32, owned: &BTreeSet<String>) -> Vec<ContractOffer> {
     let mut rng = ContractRng::new(seed);
     let mut families = MissionFamily::ALL;
     for index in (1..families.len()).rev() {
         let other = rng.range(0, index as u32) as usize;
         families.swap(index, other);
     }
-
-    families
+    let vehicle_families: Vec<VehicleFamily> = VehicleFamily::ALL
         .into_iter()
-        .enumerate()
-        .map(|(index, mission_family)| {
-            let difficulty = rng.range(1, 5) as u8;
-            let vehicle_family = rng.choose(&VehicleFamily::ALL);
-            let d = u64::from(difficulty);
-            let title = format!("{} development programme", mission_family.label());
-            let client = match mission_family {
-                MissionFamily::AirToAir => "Aster Defence Directorate",
-                MissionFamily::AirToSurface => "Meridian Strategic Systems",
-                MissionFamily::SurfaceToAir => "Northstar Defence Office",
-                MissionFamily::SurfaceToSurface => "Orion Procurement Bureau",
-            };
-            let brief = format!(
-                "Submit a validated fictional {} vehicle programme. The review evaluates design completeness, software quality and repeatable simulation evidence.",
-                vehicle_family.label().to_lowercase()
-            );
-            ContractOffer {
-                id: first_id.wrapping_add(index as u32).max(1),
-                mission_family,
-                vehicle_family,
-                title,
-                client: client.to_string(),
-                brief,
-                requirements: ContractRequirements {
-                    min_design_score: (55 + difficulty * 5).min(95),
-                    min_program_score: (50 + difficulty * 6).min(95),
-                    min_trial_score: (55 + difficulty * 5).min(95),
-                    required_capabilities: if difficulty >= 4 {
-                        vec!["research:advanced_validation".to_string()]
-                    } else {
-                        Vec::new()
-                    },
-                },
-                reward_credits: 4_000 + d * 2_500,
-                deadline_days: 35_u16.saturating_sub(u16::from(difficulty) * 3),
-                difficulty,
-            }
-        })
-        .collect()
+        .filter(|family| family.capability().is_none_or(|capability| owned.contains(capability)))
+        .collect();
+
+    let mut offers = Vec::new();
+    for mission_family in families {
+        // Each family rolls its own difficulty and vehicle before the board is filtered, so a
+        // seeded board stays deterministic per family.
+        let mut difficulty = rng.range(1, 5) as u8;
+        while difficulty > 1 && !owned.contains(mission_family.capability(difficulty)) {
+            difficulty -= 1;
+        }
+        if !owned.contains(mission_family.capability(difficulty)) {
+            continue;
+        }
+        let vehicle_family = if vehicle_families.is_empty() {
+            VehicleFamily::ShortRange
+        } else {
+            rng.choose(&vehicle_families)
+        };
+        offers.push(make_offer(
+            first_id.wrapping_add(offers.len() as u32).max(1),
+            mission_family,
+            vehicle_family,
+            difficulty,
+        ));
+    }
+    offers
+}
+
+/// One fresh offer for a mission family, used when newly researched families join the board.
+pub fn offer_for_family(seed: u64, id: u32, mission_family: MissionFamily, owned: &BTreeSet<String>) -> ContractOffer {
+    let mut rng = ContractRng::new(seed ^ u64::from(id));
+    let vehicle_families: Vec<VehicleFamily> = VehicleFamily::ALL
+        .into_iter()
+        .filter(|family| family.capability().is_none_or(|capability| owned.contains(capability)))
+        .collect();
+    let mut difficulty = rng.range(1, 5) as u8;
+    while difficulty > 1 && !owned.contains(mission_family.capability(difficulty)) {
+        difficulty -= 1;
+    }
+    let vehicle_family = if vehicle_families.is_empty() {
+        VehicleFamily::ShortRange
+    } else {
+        rng.choose(&vehicle_families)
+    };
+    make_offer(id, mission_family, vehicle_family, difficulty)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -623,6 +724,50 @@ mod tests {
         );
         let dossier = offer.missile_dossier(&[too_short, good], &vehicle, &program);
         assert!(offer.accepts_dossier(&dossier));
+    }
+
+    fn owned(capabilities: &[&str]) -> BTreeSet<String> {
+        capabilities.iter().map(|c| (*c).to_string()).collect()
+    }
+
+    #[test]
+    fn unresearched_families_offer_nothing_and_research_adds_them() {
+        let fresh = owned(&["family:ballistic"]);
+        let board = generate_available_board(5, 1, &fresh);
+        assert!(!board.is_empty());
+        assert!(board.iter().all(|offer| {
+            offer.mission_family != MissionFamily::SurfaceToAir && offer.mission_family != MissionFamily::AirToAir
+        }));
+        assert!(board.iter().all(|offer| offer.vehicle_family != VehicleFamily::Cruise));
+
+        let researched = owned(&[
+            "family:ballistic",
+            "family:surface_to_air",
+            "family:air_to_air",
+            "family:cruise",
+        ]);
+        let board = generate_available_board(5, 1, &researched);
+        assert_eq!(board.len(), MissionFamily::ALL.len());
+        for offer in &board {
+            assert!(offer.is_available(&researched), "{offer:?}");
+        }
+    }
+
+    #[test]
+    fn hard_surface_to_surface_offers_need_the_anti_ship_family() {
+        let without = owned(&["family:ballistic"]);
+        let with = owned(&["family:ballistic", "family:anti_ship"]);
+        for seed in 1..40 {
+            for offer in generate_available_board(seed, 1, &without) {
+                assert!(offer.difficulty <= 3 || offer.mission_family != MissionFamily::SurfaceToSurface);
+            }
+        }
+        let hard = generate_available_board(3, 1, &with)
+            .into_iter()
+            .find(|offer| offer.mission_family == MissionFamily::SurfaceToSurface)
+            .unwrap();
+        assert!(hard.is_available(&with));
+        assert!(hard.difficulty < 4 || hard.required_family_capabilities().contains(&"family:anti_ship"));
     }
 
     #[test]

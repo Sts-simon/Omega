@@ -30,12 +30,6 @@ pub const PURPLE: Color = Color::srgb(0.58, 0.46, 0.86);
 #[derive(Component)]
 pub struct NavStatus;
 
-#[derive(Resource, Default)]
-pub struct UiState {
-    /// Keyboard/mouse cheat sheet in the workshop inspector.
-    pub help_open: bool,
-}
-
 /// Visual weight of a button.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonTone {

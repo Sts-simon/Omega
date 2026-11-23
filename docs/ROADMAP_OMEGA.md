@@ -7,9 +7,9 @@ contract, assembles a staged vehicle, writes the onboard program, runs reproduci
 dossier of evidence and delivers a plan — without ever touching the civil assembly bench inherited
 from 0.6.
 
-Today that sentence is false in three places: the missile program cannot be edited in the game, there
-is no trial screen, and the only complete contracts are civil ones that run on the legacy bench.
-Everything below exists to make the sentence true, then to make it pleasant and reliable.
+That sentence is now true: the program editor, the trial screen, missile contracts with bound
+evidence and research-gated families all exist, and the civil loop has been deleted. The remaining
+lots make the interface honest, the saves robust and the performance measured.
 
 ## Starting point (0.26.0, verified)
 
@@ -179,8 +179,24 @@ decorative.
 - Honour `ExtraActiveProjects` instead of the hard-coded `2`.
 - Consume `analysis:monte_carlo` (lot 2).
 
-**Acceptance.** Without a family technology, zero offers from that family; with two grants, three
-active projects are possible; each rule is covered by a test.
+**Acceptance.** Without a family technology, zero offers from that family; the `Parallel project
+management` grant raises the number of active contracts; each rule is covered by a test.
+
+**Status.** Done in the working tree. `ContractOffer::required_family_capabilities` maps mission
+and vehicle families to `family:*` capabilities, and `generate_available_board` emits one offer per
+researched family only, clamping surface-to-surface difficulty until the anti-ship family is owned.
+`Procurement::sync_offers` follows the research tree: a completion adds the newly unlocked family
+to the board without disturbing the offers already there, and a delivery refills the delivered
+family. The office holds one contract per slot and the slot count is
+`ResearchState::max_active_projects(default_tree(), 1)`, so `Parallel project management` takes it to
+two. Accepting an offer for an unresearched family (only possible from an older save) is refused by
+technology name, an over-capacity acceptance is refused with the slot count, and the empty state
+lists every family still to research. Trials feed every active contract. Covered by new tests in
+`omega-rules::contracts`, `omega-rules::research`, `src/procurement.rs` and `src/campus.rs`. In game:
+the fresh office shows only the two ballistic families with the four missing ones named; accepting a
+second contract is refused at 1/1; researching Parallel project management opens the second slot
+and two contracts list side by side with separate dossiers; researching the surface-to-air family
+adds a SURFACE-TO-AIR offer to the board.
 
 ### Lot 5 — Remove the inherited civil loop
 
@@ -197,6 +213,17 @@ complete path, the README cannot tell the truth.
 
 **Acceptance.** No code reference to the civil loop remains; all tests pass; a 0.26 save loads without
 error; the README mentions no inherited tool.
+
+**Status.** Done in the working tree. Deleted: `src/design/` (assembly model, editor, inspector,
+sketch, meshing, metrics, storage), `src/jobs/` (thermal/truss workers and reports),
+`src/sequence/` (chamber sequencer), `src/campus/verification.rs` and every civil contract type and
+board. The revision log moved to `src/revisions.rs`, missile-only, schema 3; assembly-era logs load
+as empty. `SaveFile` no longer knows the civil files, the app no longer depends on `omega-sim-core`
+(kept as a standalone workspace library), and `crossbeam-channel`/`rayon` left the app. The
+interface keeps six views, four clickable facilities and one help-free workshop. A campaign schema 1
+(0.26) save still loads its credits, research and day; contract schema 1 keeps its active contract.
+In game: island, contract office, research, workshop, program and trial boards all render and work
+without a single inherited tab. Tests: 203.
 
 ### Lot 6 — Interface and controls
 
@@ -252,7 +279,7 @@ These are excluded so the goal stays attainable:
 | 0.26.x | Foundations | Green CI, clean clippy |
 | 0.27 | Editable program | Vehicle and program designed in-game |
 | 0.28 | Trials | Trials visible and replayable |
-| 0.29 | Missile contracts | Complete loop, legacy loop removed |
+| 0.29 | Missile contracts | Complete loop, research gating, legacy loop removed |
 | 1.0 | Finish | Measured performance, tagged release |
 
 ## Risks

@@ -401,6 +401,21 @@ pub fn default_tree() -> Vec<TechNode> {
     ]
 }
 
+/// The technology that grants a capability, so a refusal can name what to research instead of an
+/// internal id such as `family:surface_to_air`.
+pub fn technology_granting(capability: &str) -> Option<TechNode> {
+    default_tree().into_iter().find(|node| {
+        node.grants
+            .iter()
+            .any(|grant| matches!(grant, Grant::Capability(name) if name == capability))
+    })
+}
+
+/// Readable name for a capability: the technology label, or the identifier if nothing grants it.
+pub fn capability_label(capability: &str) -> String {
+    technology_granting(capability).map_or_else(|| capability.to_string(), |tech| tech.label)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,6 +580,14 @@ mod tests {
         state.start(&tree, "parallel_projects", 10_000).unwrap();
         state.advance_days(8);
         assert_eq!(state.max_active_projects(&tree, 2), 3);
+    }
+
+    #[test]
+    fn capabilities_can_be_traced_back_to_their_technology() {
+        let tech = technology_granting("family:surface_to_air").expect("granted by a node");
+        assert_eq!(tech.label, "Surface-to-air family");
+        assert_eq!(capability_label("family:cruise"), "Cruise family");
+        assert_eq!(capability_label("family:unknown"), "family:unknown");
     }
 
     #[test]

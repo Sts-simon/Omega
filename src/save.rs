@@ -1,7 +1,8 @@
 //! Application-level access to the versioned save slot (`saves/slot_1/`).
 //!
-//! Every persistent file (campaign, assembly, polygon sketch, program) goes through here so that
-//! writes are atomic, listed in a manifest committed last, and verified by hash when read.
+//! Every persistent file (campaign, vehicle, missile program, revisions, contracts) goes through
+//! here so that writes are atomic, listed in a manifest committed last, and verified by hash when
+//! read.
 //! Saves from 0.21 (`saves/*.json`) are imported once, without being modified or deleted.
 
 use bevy::log::{info, warn};
@@ -15,9 +16,6 @@ const GAME_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SaveFile {
     Campaign,
-    Assembly,
-    PolygonSketch,
-    Program,
     MissileProgram,
     Revisions,
     Vehicle,
@@ -28,9 +26,6 @@ impl SaveFile {
     pub fn rel(self) -> &'static str {
         match self {
             Self::Campaign => "campaign.json",
-            Self::Assembly => "designs/assembly.json",
-            Self::PolygonSketch => "designs/polygon-sketch.json",
-            Self::Program => "programs/lab_sequence.json",
             Self::MissileProgram => "programs/missile.json",
             Self::Revisions => "designs/revisions.json",
             Self::Vehicle => "designs/vehicle.json",
@@ -104,7 +99,7 @@ mod tests {
             read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(),
             b"{\"credits\":5}"
         );
-        assert_eq!(read_from(&slot, &legacy, SaveFile::Assembly).unwrap(), None);
+        assert_eq!(read_from(&slot, &legacy, SaveFile::Vehicle).unwrap(), None);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -113,23 +108,18 @@ mod tests {
         let dir = temp_dir("legacy");
         let legacy = dir.join("saves");
         fs::create_dir_all(&legacy).unwrap();
-        fs::write(legacy.join("assembly.json"), b"{\"old\":true}").unwrap();
-        fs::write(legacy.join("lab_sequence.json"), b"{\"prog\":1}").unwrap();
+        fs::write(legacy.join("campaign.json"), b"{\"credits\":9}").unwrap();
         let slot = SaveSlot::new(dir.join("slot_1"));
         assert_eq!(
-            read_from(&slot, &legacy, SaveFile::Assembly).unwrap().unwrap(),
-            b"{\"old\":true}"
+            read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(),
+            b"{\"credits\":9}"
         );
-        assert_eq!(
-            read_from(&slot, &legacy, SaveFile::Program).unwrap().unwrap(),
-            b"{\"prog\":1}"
-        );
-        assert!(legacy.join("assembly.json").exists());
+        assert!(legacy.join("campaign.json").exists());
         // Later changes to the legacy file are ignored once the slot exists.
-        fs::write(legacy.join("assembly.json"), b"{\"old\":false}").unwrap();
+        fs::write(legacy.join("campaign.json"), b"{\"credits\":11}").unwrap();
         assert_eq!(
-            read_from(&slot, &legacy, SaveFile::Assembly).unwrap().unwrap(),
-            b"{\"old\":true}"
+            read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(),
+            b"{\"credits\":9}"
         );
         let _ = fs::remove_dir_all(dir);
     }
@@ -141,7 +131,7 @@ mod tests {
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("campaign.json"), b"{\"credits\":1}").unwrap();
         let slot = SaveSlot::new(dir.join("slot_1"));
-        write_to(&slot, &legacy, SaveFile::Assembly, b"{\"a\":1}").unwrap();
+        write_to(&slot, &legacy, SaveFile::Vehicle, b"{\"a\":1}").unwrap();
         assert_eq!(
             read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(),
             b"{\"credits\":1}"

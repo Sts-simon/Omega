@@ -105,22 +105,6 @@ pub fn setup(
         Vec3::new(12.5, 0.3, 9.5),
     );
 
-    // Computation centre: scientific solvers and simulation jobs.
-    spawn_facility_box(
-        &mut commands,
-        &mut meshes,
-        lab.clone(),
-        Vec3::new(5.0, 2.2, -20.0),
-        Vec3::new(10.0, 4.4, 7.0),
-        FacilityKind::Computation,
-    );
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        dark.clone(),
-        Vec3::new(5.0, 4.5, -20.0),
-        Vec3::new(10.5, 0.3, 7.5),
-    );
     spawn_facility_box(
         &mut commands,
         &mut meshes,
@@ -137,7 +121,7 @@ pub fn setup(
         Vec3::new(8.5, 0.3, 8.5),
     );
 
-    // Small coloured markers make the five interactive facilities easy to identify.
+    // Small coloured markers make the four interactive facilities easy to identify.
     spawn_box(
         &mut commands,
         &mut meshes,
