@@ -156,6 +156,18 @@ rustup update stable
 `Cargo.toml` and selects the current stable toolchain through `rust-toolchain.toml` (with rustfmt
 and clippy). Cargo 1.100 / Rust 1.100 is known to build the workspace.
 
+## Prebuilt Linux release
+
+Tagged releases publish an x86_64 Linux archive containing the game binary, README, licence and
+product vision. Download the archive from
+[GitHub Releases](https://github.com/Sts-simon/Omega/releases), verify its SHA-256 file, extract it,
+and run the `omega` binary from a graphical desktop session. The release archive is not a
+self-contained AppImage: the system's graphics, audio and windowing runtime libraries are still
+required.
+
+The release workflow checks that the Git tag matches the Cargo package version before publishing.
+Only Linux x86_64 is packaged at this stage.
+
 ## Build, run and verify
 
 ```bash

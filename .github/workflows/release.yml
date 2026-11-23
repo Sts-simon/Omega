@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    name: Build Linux x86_64 release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Bevy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config build-essential \
+            libasound2-dev libudev-dev \
+            libx11-dev libxkbcommon-x11-0 libxkbcommon-dev \
+            libwayland-dev mesa-vulkan-drivers
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag matches Cargo package version
+        shell: bash
+        run: |
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          test -n "$VERSION"
+          test "$VERSION" = "$TAG_VERSION" || {
+            echo "Tag v$TAG_VERSION does not match Cargo version $VERSION"
+            exit 1
+          }
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Package binary and checksums
+        shell: bash
+        run: |
+          PACKAGE="omega-${GITHUB_REF_NAME}-linux-x86_64"
+          mkdir -p "dist/$PACKAGE"
+          install -m 0755 target/release/omega "dist/$PACKAGE/omega"
+          install -m 0644 README.md LICENSE "dist/$PACKAGE/"
+          install -m 0644 docs/VISION_MISSILES.md "dist/$PACKAGE/"
+          tar -C dist -czf "dist/$PACKAGE.tar.gz" "$PACKAGE"
+          (cd dist && sha256sum "$PACKAGE.tar.gz" > "$PACKAGE.tar.gz.sha256")
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/omega-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/omega-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
