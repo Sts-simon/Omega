@@ -46,7 +46,10 @@ fn main() {
     let start = Instant::now();
     let mut total_samples = 0usize;
     for seed in WARMUP_RUNS..WARMUP_RUNS + MEASURED_RUNS {
-        let config = FlightConfig { seed, ..FlightConfig::default() };
+        let config = FlightConfig {
+            seed,
+            ..FlightConfig::default()
+        };
         let report = black_box(simulate(&vehicle, &program, config).expect("valid benchmark input"));
         total_samples += report.samples.len();
     }
