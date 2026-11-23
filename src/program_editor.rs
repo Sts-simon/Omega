@@ -288,7 +288,7 @@ impl MissileProgramSession {
                 let Some(index) = self.block else {
                     return Err("Select a block first.".to_string());
                 };
-                let stages = vehicle.stages.len();
+                let stages = vehicle.stage_count();
                 let thread = self.current_thread_mut();
                 let Some(block) = thread.get(index).copied() else {
                     return Err("Select a block first.".to_string());
@@ -366,10 +366,7 @@ mod tests {
                 spec: PartSpec::Sensor { kind },
             });
         }
-        Vehicle {
-            name: "test".into(),
-            stages: vec![Stage { parts }, Stage::default()],
-        }
+        Vehicle::from_stages("test", vec![Stage { parts }])
     }
 
     fn basic() -> Vehicle {
@@ -409,7 +406,7 @@ mod tests {
     fn a_vehicle_without_a_computer_cannot_be_programmed() {
         let vehicle = Vehicle {
             name: "empty".into(),
-            stages: vec![Stage::default()],
+            parts: Vec::new(),
         };
         let mut session = MissileProgramSession::default();
         let error = session.apply(ProgramAction::AddThread, &vehicle).unwrap_err();
@@ -466,12 +463,10 @@ mod tests {
         session.apply(ProgramAction::Adjust(-1), &vehicle).unwrap();
         assert_eq!(session.selected_block(), Some(&Block::IgniteStage { stage: 0 }));
         session.apply(ProgramAction::Adjust(1), &vehicle).unwrap();
-        assert_eq!(session.selected_block(), Some(&Block::IgniteStage { stage: 1 }));
-        session.apply(ProgramAction::Adjust(1), &vehicle).unwrap();
         assert_eq!(
             session.selected_block(),
-            Some(&Block::IgniteStage { stage: 1 }),
-            "no third stage"
+            Some(&Block::IgniteStage { stage: 0 }),
+            "no second stage on a single-stage vehicle"
         );
     }
 

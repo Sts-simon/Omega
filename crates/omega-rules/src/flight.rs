@@ -5,8 +5,9 @@
 //! trajectory optimisation, no tracking and no guidance law. A target lock is a single seeded
 //! probability roll that depends on the radar class and the speed at that moment.
 
+use crate::assembly::Vehicle;
 use crate::program::{Block, Program, validate_program};
-use crate::vehicle::{AIR_BREATHING_MIN_SPEED_MS, G0, PartSpec, RadarClass, Vehicle};
+use crate::vehicle::{AIR_BREATHING_MIN_SPEED_MS, G0, PartSpec, RadarClass};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LaunchMode {
@@ -151,12 +152,14 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
 
     let dt = config.dt_s;
     let spread = dispersion(config.seed);
-    let stage_count = vehicle.stages.len();
+    // The stages are derived from the attachment tree; the flight model keeps consuming the same
+    // flat stage views it always did.
+    let stages = vehicle.stage_views();
+    let stage_count = stages.len();
     let mut attached = vec![true; stage_count];
     let mut ignited = vec![false; stage_count];
     // Remaining propellant per part.
-    let mut remaining: Vec<Vec<f64>> = vehicle
-        .stages
+    let mut remaining: Vec<Vec<f64>> = stages
         .iter()
         .map(|s| s.parts.iter().map(|p| p.spec.stats().propellant_kg).collect())
         .collect();
@@ -191,8 +194,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
     let mut max_speed = speed;
 
     let attached_mass = |attached: &[bool], remaining: &[Vec<f64>]| -> f64 {
-        vehicle
-            .stages
+        stages
             .iter()
             .enumerate()
             .filter(|(i, _)| attached[*i])
@@ -222,7 +224,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                         break;
                     }
                     Block::IgniteStage { stage } => {
-                        let has_engine = vehicle.stages[stage].parts.iter().any(|p| {
+                        let has_engine = stages[stage].parts.iter().any(|p| {
                             matches!(
                                 p.spec,
                                 PartSpec::SolidMotor { .. }
@@ -242,12 +244,9 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                             ever_ignited = true;
                             events.push((t, format!("Stage {} ignited", stage + 1)));
                             if first_ignition_twr.is_none() {
-                                let thrust: f64 = vehicle.stages[stage]
-                                    .parts
-                                    .iter()
-                                    .map(|p| p.spec.stats().thrust_n)
-                                    .sum::<f64>()
-                                    * spread.thrust;
+                                let thrust: f64 =
+                                    stages[stage].parts.iter().map(|p| p.spec.stats().thrust_n).sum::<f64>()
+                                        * spread.thrust;
                                 first_ignition_twr = Some(thrust / (attached_mass(&attached, &remaining) * G0));
                             }
                         }
@@ -321,8 +320,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         // --- environment and controller ---
         let rho = air_density(altitude);
         let diameter = {
-            let d = vehicle
-                .stages
+            let d = stages
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| attached[*i])
@@ -349,7 +347,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
             if !attached[stage] || !ignited[stage] {
                 continue;
             }
-            let tank_pool: f64 = vehicle.stages[stage]
+            let tank_pool: f64 = stages[stage]
                 .parts
                 .iter()
                 .enumerate()
@@ -358,7 +356,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                 .sum();
             let mut drawn = 0.0;
             let mut any_active = false;
-            for (j, part) in vehicle.stages[stage].parts.iter().enumerate() {
+            for (j, part) in stages[stage].parts.iter().enumerate() {
                 let stats = part.spec.stats();
                 match part.spec {
                     PartSpec::SolidMotor { burn_time_s, .. } => {
@@ -384,7 +382,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
             }
             if drawn > 0.0 {
                 let mut to_remove = drawn;
-                for (j, part) in vehicle.stages[stage].parts.iter().enumerate() {
+                for (j, part) in stages[stage].parts.iter().enumerate() {
                     if matches!(part.spec, PartSpec::FuelTank { .. }) && to_remove > 0.0 {
                         let take = remaining[stage][j].min(to_remove);
                         remaining[stage][j] -= take;
@@ -484,8 +482,8 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vehicle::tests::{part, sounding_rocket};
-    use crate::vehicle::{ComputerClass, SensorKind, Stage};
+    use crate::assembly::tests::sounding_rocket;
+    use crate::vehicle::{ComputerClass, SensorKind};
 
     fn two_stage_program(separate_at: f64) -> Program {
         Program::single(vec![
@@ -497,39 +495,42 @@ mod tests {
     }
 
     fn cruise_vehicle() -> Vehicle {
-        Vehicle {
-            name: "Cruiser".into(),
-            stages: vec![Stage {
+        Vehicle::from_stages(
+            "Cruiser",
+            vec![crate::vehicle::Stage {
                 parts: vec![
-                    part(
-                        "tank",
-                        PartSpec::FuelTank {
+                    crate::vehicle::Part {
+                        id: "tank".into(),
+                        spec: PartSpec::FuelTank {
                             length_m: 1.5,
                             diameter_m: 0.3,
                         },
-                    ),
-                    part("engine", PartSpec::AirBreathing { scale: 1.0 }),
-                    part(
-                        "pc",
-                        PartSpec::Computer {
+                    },
+                    crate::vehicle::Part {
+                        id: "engine".into(),
+                        spec: PartSpec::AirBreathing { scale: 1.0 },
+                    },
+                    crate::vehicle::Part {
+                        id: "pc".into(),
+                        spec: PartSpec::Computer {
                             class: ComputerClass::Basic,
                         },
-                    ),
-                    part(
-                        "pitot",
-                        PartSpec::Sensor {
+                    },
+                    crate::vehicle::Part {
+                        id: "pitot".into(),
+                        spec: PartSpec::Sensor {
                             kind: SensorKind::Pitot,
                         },
-                    ),
-                    part(
-                        "radar",
-                        PartSpec::Sensor {
+                    },
+                    crate::vehicle::Part {
+                        id: "radar".into(),
+                        spec: PartSpec::Sensor {
                             kind: SensorKind::Radar(RadarClass::Basic),
                         },
-                    ),
+                    },
                 ],
             }],
-        }
+        )
     }
 
     fn air(speed: f64) -> FlightConfig {
@@ -589,11 +590,14 @@ mod tests {
     fn a_faster_burning_motor_gives_a_higher_liftoff_twr() {
         let build = |burn| {
             let mut v = sounding_rocket();
-            v.stages[0].parts[0].spec = PartSpec::SolidMotor {
-                length_m: 2.0,
-                diameter_m: 0.4,
-                burn_time_s: burn,
-            };
+            v.replace_part(
+                "booster",
+                PartSpec::SolidMotor {
+                    length_m: 2.0,
+                    diameter_m: 0.4,
+                    burn_time_s: burn,
+                },
+            );
             v
         };
         let program = Program::single(vec![Block::IgniteStage { stage: 0 }]);
@@ -605,12 +609,15 @@ mod tests {
     #[test]
     fn a_vehicle_too_heavy_for_its_motor_cannot_lift_off() {
         let mut vehicle = sounding_rocket();
-        vehicle.stages[1].parts[3].spec = PartSpec::MissionModule { mass_kg: 300.0 };
-        vehicle.stages[0].parts[0].spec = PartSpec::SolidMotor {
-            length_m: 0.5,
-            diameter_m: 0.2,
-            burn_time_s: 60.0,
-        };
+        vehicle.replace_part("module", PartSpec::MissionModule { mass_kg: 300.0 });
+        vehicle.replace_part(
+            "booster",
+            PartSpec::SolidMotor {
+                length_m: 0.5,
+                diameter_m: 0.2,
+                burn_time_s: 60.0,
+            },
+        );
         let report = simulate(
             &vehicle,
             &Program::single(vec![Block::IgniteStage { stage: 0 }]),
@@ -652,12 +659,14 @@ mod tests {
     #[test]
     fn hold_pressure_sets_the_altitude_from_the_pressure_level() {
         let mut vehicle = cruise_vehicle();
-        vehicle.stages[0].parts.push(part(
-            "baro",
-            PartSpec::Sensor {
-                kind: SensorKind::Barometer,
-            },
-        ));
+        vehicle
+            .add_to_top(
+                "baro",
+                PartSpec::Sensor {
+                    kind: SensorKind::Barometer,
+                },
+            )
+            .unwrap();
         let program = Program::single(vec![
             Block::IgniteStage { stage: 0 },
             Block::HoldPressure { hpa: 900.0 },
@@ -747,12 +756,16 @@ mod tests {
     #[test]
     fn a_radar_dropped_with_its_stage_cannot_lock() {
         let mut vehicle = sounding_rocket();
-        vehicle.stages[0].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: SensorKind::Radar(RadarClass::Basic),
-            },
-        ));
+        vehicle
+            .add_attached(
+                "radar",
+                PartSpec::Sensor {
+                    kind: SensorKind::Radar(RadarClass::Basic),
+                },
+                "booster",
+                crate::assembly::NodeId::Radial(0),
+            )
+            .unwrap();
         let program = Program::single(vec![
             Block::IgniteStage { stage: 0 },
             Block::Wait { seconds: 21.0 },

@@ -101,3 +101,21 @@ Keep worker inputs and outputs owned and explicit. Do not let worker tasks mutat
 ## Historical documentation
 
 The former assembly editor, civil contract workflow, chamber sequencer and scientific-study UI are historical features. Their implementation notes remain in the archived documents and changelog, not in the current application architecture.
+
+
+## Workshop assembly graph (0.31.1)
+
+`crates/omega-rules/src/assembly.rs` owns the design tree. A `Vehicle` is a list of `PlacedPart`s,
+each with an optional `Attach { parent, node, angle_deg, separation }`; `NodeId` is `Top`, `Bottom`
+or `Radial(0..3)`. Stage indices are derived by walking the tree from the single root: an edge
+starts a new stage when its `separation` flag is set or when the parent is a decoupler.
+
+`Vehicle::stage_views()` rebuilds the flat `Vec<Stage>` that the program validator, `flight::simulate`
+and the dossier already consume, so those rules and their figures are unchanged. `validate()` refuses
+cycles, occupied nodes, unknown parents, multiple roots, an engine without a tank in its stage and a
+computer outside the last stage; `warnings()` reports diameter steps without blocking the design.
+
+`src/missile.rs` keeps only the session (selection by part id, palette additions, parameter edits),
+the 3D layout built from `Vehicle::poses()` and the revision diff. Save files carry
+`schema_version: 3`; deserialization accepts the old stage list and migrates it, and refuses a newer
+schema with an error instead of guessing.

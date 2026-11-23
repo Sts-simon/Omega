@@ -1,13 +1,14 @@
+use omega_rules::Vehicle;
 use omega_rules::flight::{FlightConfig, simulate};
 use omega_rules::program::{Block, Program};
-use omega_rules::vehicle::{ComputerClass, Part, PartSpec, Stage, Vehicle};
+use omega_rules::vehicle::{ComputerClass, Part, PartSpec, Stage};
 use std::hint::black_box;
 use std::time::Instant;
 
 fn benchmark_vehicle() -> Vehicle {
-    Vehicle {
-        name: "Benchmark vehicle".to_string(),
-        stages: vec![Stage {
+    Vehicle::from_stages(
+        "Benchmark vehicle",
+        vec![Stage {
             parts: vec![
                 Part {
                     id: "motor".to_string(),
@@ -25,7 +26,7 @@ fn benchmark_vehicle() -> Vehicle {
                 },
             ],
         }],
-    }
+    )
 }
 
 fn main() {

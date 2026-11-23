@@ -989,7 +989,7 @@ fn build_missile(
                     );
                     ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
                 });
-            heading(panel, format!("ADD TO STAGE {}", session.active_stage + 1));
+            heading(panel, "ADD PART");
             let rows: [&[PartTemplate]; 6] = [
                 &[PartTemplate::SolidMotor, PartTemplate::FuelTank],
                 &[PartTemplate::LiquidEngine, PartTemplate::AirBreathing],
@@ -1028,52 +1028,10 @@ fn build_missile(
             }
             ui_kit::label(
                 panel,
-                "Greyed parts need research. The computer sits in the last stage.",
+                "Greyed parts need research. New parts attach above the selected one; a decoupler starts a stage.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
-            heading(panel, "STAGES");
-            panel
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for index in 0..vehicle.stages.len() {
-                        let tone = if index == session.active_stage {
-                            ButtonTone::Primary
-                        } else {
-                            ButtonTone::Secondary
-                        };
-                        ui_kit::button_row_item(
-                            row,
-                            format!("{}", index + 1),
-                            UiAction::Missile(MissileAction::ActiveStage(index)),
-                            tone,
-                        );
-                    }
-                });
-            panel
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    ui_kit::button_row_item(
-                        row,
-                        "+ STAGE",
-                        UiAction::Missile(MissileAction::NewStage),
-                        ButtonTone::Secondary,
-                    );
-                    ui_kit::button_row_item(
-                        row,
-                        "- STAGE",
-                        UiAction::Missile(MissileAction::RemoveStage),
-                        ButtonTone::Danger,
-                    );
-                });
             heading(panel, "REVISIONS");
             ui_kit::label(panel, log.missile_hud_text(vehicle), 9.0, ui_kit::TEXT_DIM);
             ui_kit::button(
@@ -1207,6 +1165,10 @@ fn build_missile(
                     .spawn(Node::default())
                     .with_children(|c| ui_kit::chip(c, "DESIGN VALID", ui_kit::GOOD));
             }
+            for warning in vehicle.warnings().iter().take(3) {
+                ui_kit::label(panel, format!("- {warning}"), 9.5, ui_kit::WARN);
+            }
+            if false {}
         });
     });
 
@@ -1220,31 +1182,34 @@ fn build_missile(
     .with_children(|right| {
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         right.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "PARTS BY STAGE", 12.0, ui_kit::ACCENT);
-            for (s, stage) in vehicle.stages.iter().enumerate() {
-                let marker = if s == session.active_stage {
-                    "  (receives new parts)"
+            ui_kit::label(panel, "PARTS BY STAGE (DERIVED)", 12.0, ui_kit::ACCENT);
+            ui_kit::label(
+                panel,
+                "Stages come from the assembly: a decoupler starts a new one.",
+                9.5,
+                ui_kit::TEXT_DIM,
+            );
+            if vehicle.parts.is_empty() {
+                ui_kit::label(panel, "No parts yet: add one from the palette.", 10.0, ui_kit::TEXT_DIM);
+            }
+            let mut stage = usize::MAX;
+            for (index, part) in vehicle.parts() {
+                if index != stage {
+                    stage = index;
+                    heading(panel, format!("STAGE {}", stage + 1));
+                }
+                let tone = if session.selected.as_deref() == Some(part.id.as_str()) {
+                    ButtonTone::Primary
                 } else {
-                    ""
+                    ButtonTone::Ghost
                 };
-                heading(panel, format!("STAGE {}{}", s + 1, marker));
-                if stage.parts.is_empty() {
-                    ui_kit::label(panel, "empty", 10.0, ui_kit::TEXT_DIM);
-                }
-                for (p, part) in stage.parts.iter().enumerate() {
-                    let tone = if session.selected == Some((s, p)) {
-                        ButtonTone::Primary
-                    } else {
-                        ButtonTone::Ghost
-                    };
-                    ui_kit::button(
-                        panel,
-                        spec_summary(&part.spec),
-                        UiAction::Missile(MissileAction::Select { stage: s, part: p }),
-                        tone,
-                        Val::Percent(100.0),
-                    );
-                }
+                ui_kit::button(
+                    panel,
+                    format!("{}  {}", part.id, spec_summary(&part.spec)),
+                    UiAction::Missile(MissileAction::Select { id: part.id.clone() }),
+                    tone,
+                    Val::Percent(100.0),
+                );
             }
         });
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
@@ -2220,7 +2185,7 @@ fn signature(
         BoardKind::Missile => format!(
             "{:?}|{:?}|{}|{:?}|{:?}",
             missile.vehicle,
-            (missile.selected, missile.active_stage),
+            missile.selected,
             campus.credits,
             campus.research,
             log.head().map(|revision| revision.hash.clone())
@@ -2404,7 +2369,7 @@ pub(crate) fn handle_extra_actions(
         if *interaction != UiInteraction::Pressed {
             continue;
         }
-        match button.0 {
+        match button.0.clone() {
             UiAction::RecordMissileRevision => {
                 campus.message = match log.commit_vehicle(&missile.vehicle) {
                     Ok(id) => match log

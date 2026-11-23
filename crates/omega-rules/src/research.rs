@@ -552,16 +552,18 @@ mod tests {
 
     #[test]
     fn a_design_is_blocked_until_its_research_is_done() {
-        use crate::vehicle::tests::{part, sounding_rocket};
+        use crate::assembly::tests::sounding_rocket;
         use crate::vehicle::{PartSpec, RadarClass, SensorKind};
         let tree = default_tree();
         let mut vehicle = sounding_rocket();
-        vehicle.stages[1].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: SensorKind::Radar(RadarClass::Basic),
-            },
-        ));
+        vehicle
+            .add_to_top(
+                "radar",
+                PartSpec::Sensor {
+                    kind: SensorKind::Radar(RadarClass::Basic),
+                },
+            )
+            .unwrap();
         let mut state = ResearchState::default();
         assert_eq!(
             vehicle.missing_research(&state.owned_capabilities(&tree)),

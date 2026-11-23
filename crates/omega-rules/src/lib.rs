@@ -3,6 +3,7 @@
 //! The crate answers one question: *given a design, what has actually been proven about it,
 //! and does that satisfy a contract?* All quantities are abstract gameplay values.
 
+pub mod assembly;
 pub mod contracts;
 pub mod diff;
 pub mod dossier;
@@ -13,6 +14,7 @@ pub mod requirement;
 pub mod research;
 pub mod vehicle;
 
+pub use assembly::{Attach, NodeId, PartPose, PlacedPart, VEHICLE_SCHEMA, Vehicle};
 pub use contracts::{
     ContractEvaluation, ContractOffer, ContractPhase, ContractProgress, ContractRequirements, MissionFamily,
     VehicleFamily, generate_contract_board,
@@ -30,4 +32,4 @@ pub use research::{
     ActiveResearch, Department, Grant, ResearchError, ResearchState, TechNode, default_tree, starting_capabilities,
     validate_tree,
 };
-pub use vehicle::{ComputerClass, Part, PartSpec, PartStats, RadarClass, SensorKind, Stage, StageReport, Vehicle};
+pub use vehicle::{ComputerClass, Part, PartSpec, PartStats, RadarClass, SensorKind, Stage, StageReport};

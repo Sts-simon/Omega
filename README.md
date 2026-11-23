@@ -54,8 +54,13 @@ workspace folder are ignored.
 - A staged vehicle built from 13 part types: solid motor, fuel tank, liquid engine, turbofan,
   pitot tube, barometer, basic radar, active radar, three flight computers, decoupler and mission
   module. Each part is resizable within validated ranges.
-- One to four stages. New parts go to the selected stage. The single flight computer always sits in
-  the last stage and moves there automatically when a stage is added or removed.
+- **The vehicle is an attachment tree.** A part is mounted on a node of another part (`top`,
+  `bottom`, or one of four radial mounts on motors, tanks and modules); the stages are derived from
+  that tree, so a decoupler starts a new stage instead of a separate stage editor. The tree is saved
+  as `designs/vehicle.json` schema 3; older stage-list files are migrated when read.
+- The palette adds above the selected part when its top node is free, otherwise above the highest
+  part. A second flight computer replaces the first in place, so the single computer stays in the
+  last stage. A diameter step between a part and its mount is reported as a warning, not refused.
 - Presets: two-stage rocket, cruise vehicle, or an empty vehicle. Presets whose parts are not yet
   researched are refused with the missing technologies.
 - Selected part resizing with `-` / `+`: length and diameter (motors, tanks), burn time (solid
@@ -238,7 +243,7 @@ saves/slot_1/
   campaign.json                 credits, research, day (schema 2; schema 1 still loads)
   contracts/missile.json        offers, active contracts, evidence, deliveries (schema 2)
   designs/revisions.json        missile design revisions (schema 3)
-  designs/vehicle.json          missile vehicle
+  designs/vehicle.json          missile vehicle (schema 3, schema 1-2 migrated)
   programs/missile.json         missile program
 ```
 
@@ -257,7 +262,7 @@ src/
   campus/board.rs      card boards: island, contracts, research, workshop, program, trials
   procurement.rs       offers, active contracts, trial evidence, dossier, delivery, persistence
   revisions.rs         missile design revision log
-  missile.rs           missile workshop session, parts, stages, 3D stack, change summary
+  missile.rs           missile workshop session, parts, attachment tree view, 3D layout
   program_editor.rs    missile program session, validation, persistence
   trials.rs            seeded trial session, batches, comparison
   interface.rs         navigation bar, UiAction dispatch
@@ -267,8 +272,8 @@ src/
 crates/
   sim-core/            standalone Bevy-free solvers: thermal FV, truss, mesh, mesh thermal, reports
   omega-data/          content hashes, atomic writes, versioned save slot
-  omega-rules/         vehicle, program, flight, research, contracts, requirements, dossier,
-                       metrics, diff
+  omega-rules/         assembly graph, vehicle parts, program, flight, research, contracts,
+                       requirements, dossier, metrics, diff
 docs/                  architecture, vision, roadmap, changelog, model notes
 examples/              sample assembly, chamber program, polygon sketch
 ```

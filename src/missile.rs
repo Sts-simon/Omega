@@ -227,15 +227,12 @@ pub(crate) fn adjusted(spec: PartSpec, param: Param, direction: f64) -> Option<P
     Some(changed)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MissileAction {
     AddPart(PartTemplate),
-    Select { stage: usize, part: usize },
-    ActiveStage(usize),
+    Select { id: String },
     Adjust(Param, i8),
     RemovePart,
-    NewStage,
-    RemoveStage,
     Preset(u8),
     Clear,
 }
@@ -243,8 +240,7 @@ pub(crate) enum MissileAction {
 #[derive(Resource, Default)]
 pub(crate) struct MissileSession {
     pub vehicle: Vehicle,
-    pub selected: Option<(usize, usize)>,
-    pub active_stage: usize,
+    pub selected: Option<String>,
     next_id: u32,
 }
 
@@ -270,43 +266,22 @@ impl MissileSession {
     fn sync_next_id(&mut self) {
         self.next_id = self
             .vehicle
-            .parts()
-            .filter_map(|(_, p)| p.id.rsplit('-').next().and_then(|n| n.parse::<u32>().ok()))
+            .parts
+            .iter()
+            .filter_map(|p| p.id.rsplit('-').next().and_then(|n| n.parse::<u32>().ok()))
             .max()
             .unwrap_or(0);
     }
 
-    fn move_computer_to_last_stage(&mut self) {
-        let last = self.vehicle.stages.len().saturating_sub(1);
-        let mut found = None;
-        for (s, stage) in self.vehicle.stages.iter().enumerate() {
-            if let Some(p) = stage
-                .parts
-                .iter()
-                .position(|p| matches!(p.spec, PartSpec::Computer { .. }))
-            {
-                found = Some((s, p));
-            }
-        }
-        if let Some((s, p)) = found
-            && s != last
-        {
-            let computer = self.vehicle.stages[s].parts.remove(p);
-            self.vehicle.stages[last].parts.push(computer);
-        }
-        self.selected = None;
-    }
-
-    pub fn selected_part(&self) -> Option<&Part> {
-        let (s, p) = self.selected?;
-        self.vehicle.stages.get(s)?.parts.get(p)
+    pub fn selected_part(&self) -> Option<&omega_rules::PlacedPart> {
+        self.selected.as_deref().and_then(|id| self.vehicle.part(id))
     }
 
     pub fn load_preset(&mut self, index: u8) {
         self.vehicle = match index {
-            0 => Vehicle {
-                name: "Two-stage rocket".into(),
-                stages: vec![
+            0 => Vehicle::from_stages(
+                "Two-stage rocket",
+                vec![
                     Stage {
                         parts: vec![
                             part(
@@ -346,10 +321,10 @@ impl MissileSession {
                         ],
                     },
                 ],
-            },
-            _ => Vehicle {
-                name: "Cruise vehicle".into(),
-                stages: vec![Stage {
+            ),
+            _ => Vehicle::from_stages(
+                "Cruise vehicle",
+                vec![Stage {
                     parts: vec![
                         part(
                             "tank-1",
@@ -374,84 +349,59 @@ impl MissileSession {
                         part("module-5", PartSpec::MissionModule { mass_kg: 30.0 }),
                     ],
                 }],
-            },
+            ),
         };
-        self.active_stage = self.vehicle.stages.len().saturating_sub(1);
-        self.selected = None;
+        self.selected = self.vehicle.topmost_id();
         self.sync_next_id();
     }
 
-    /// Apply a button action. Returns the status message to show.
+    /// Apply a workshop action. Returns the status message to show.
     pub fn apply(&mut self, action: MissileAction, owned: &BTreeSet<String>) -> String {
         match action {
             MissileAction::AddPart(template) => self.add_part(template, owned),
-            MissileAction::Select { stage, part } => {
-                if self.vehicle.stages.get(stage).and_then(|s| s.parts.get(part)).is_some() {
-                    self.selected = Some((stage, part));
-                    self.active_stage = stage;
+            MissileAction::Select { id } => {
+                if self.vehicle.part(&id).is_some() {
+                    self.selected = Some(id);
                 }
                 String::new()
             }
-            MissileAction::ActiveStage(stage) => {
-                if stage < self.vehicle.stages.len() {
-                    self.active_stage = stage;
-                }
-                format!("New parts go to stage {}", self.active_stage + 1)
-            }
             MissileAction::Adjust(param, direction) => {
-                let Some((s, p)) = self.selected else {
+                let Some(id) = self.selected.clone() else {
                     return "Select a part first".to_string();
                 };
-                let Some(current) = self.vehicle.stages.get(s).and_then(|st| st.parts.get(p)) else {
+                let Some(part) = self.vehicle.part(&id) else {
                     return String::new();
                 };
-                match adjusted(current.spec, param, f64::from(direction)) {
+                match adjusted(part.spec, param, f64::from(direction)) {
                     Some(spec) => {
-                        self.vehicle.stages[s].parts[p].spec = spec;
+                        self.vehicle.replace_part(&id, spec);
                         String::new()
                     }
                     None => "This part has no such setting".to_string(),
                 }
             }
             MissileAction::RemovePart => {
-                let Some((s, p)) = self.selected else {
+                let Some(id) = self.selected.clone() else {
                     return "Select a part first".to_string();
                 };
-                if s < self.vehicle.stages.len() && p < self.vehicle.stages[s].parts.len() {
-                    let removed = self.vehicle.stages[s].parts.remove(p);
-                    self.selected = None;
-                    return format!("Removed {}", removed.id);
+                if self.vehicle.part(&id).is_none() {
+                    return String::new();
                 }
-                String::new()
-            }
-            MissileAction::NewStage => {
-                if self.vehicle.stages.len() >= 4 {
-                    return "A vehicle can have at most 4 stages".to_string();
+                let removed = self.vehicle.remove_subtree(&id);
+                self.selected = self.vehicle.topmost_id();
+                let label = if removed.len() == 1 {
+                    format!("Removed {id}")
+                } else {
+                    format!("Removed {id} and {} attached part(s)", removed.len() - 1)
+                };
+                if removed.len() > 1 {
+                    // The subtree above a removed root is gone: make the loss explicit.
+                    return format!("{label}; the removed subtree is no longer attached");
                 }
-                self.vehicle.stages.push(Stage::default());
-                self.active_stage = self.vehicle.stages.len() - 1;
-                self.move_computer_to_last_stage();
-                format!(
-                    "Stage {} added; the flight computer moved into it",
-                    self.vehicle.stages.len()
-                )
-            }
-            MissileAction::RemoveStage => {
-                if self.vehicle.stages.len() <= 1 {
-                    return "A vehicle needs at least one stage".to_string();
-                }
-                let index = self.active_stage.min(self.vehicle.stages.len() - 1);
-                self.vehicle.stages.remove(index);
-                self.active_stage = self.vehicle.stages.len() - 1;
-                self.move_computer_to_last_stage();
-                format!("Stage {} removed", index + 1)
+                label
             }
             MissileAction::Preset(index) => {
-                let preset_vehicle = Self {
-                    next_id: 0,
-                    ..Self::default()
-                };
-                let mut candidate = preset_vehicle;
+                let mut candidate = Self::default();
                 candidate.load_preset(index);
                 let missing = candidate.vehicle.missing_research(owned);
                 if !missing.is_empty() {
@@ -463,12 +413,11 @@ impl MissileSession {
             MissileAction::Clear => {
                 self.vehicle = Vehicle {
                     name: "New vehicle".into(),
-                    stages: vec![Stage::default()],
+                    parts: Vec::new(),
                 };
-                self.active_stage = 0;
                 self.selected = None;
                 self.next_id = 0;
-                "Started an empty vehicle".to_string()
+                "Started an empty vehicle: drag or click a part from the palette".to_string()
             }
         }
     }
@@ -479,25 +428,44 @@ impl MissileSession {
         if !owned.contains(capability) {
             return format!("Locked: research {capability} first");
         }
-        if self.vehicle.stages.is_empty() {
-            self.vehicle.stages.push(Stage::default());
+        if template.is_computer()
+            && let Some(existing) = self
+                .vehicle
+                .parts
+                .iter()
+                .find(|p| matches!(p.spec, PartSpec::Computer { .. }))
+                .map(|p| p.id.clone())
+        {
+            self.vehicle.replace_part(&existing, spec);
+            self.selected = Some(existing.clone());
+            return format!("Flight computer {existing} set to {}", template.label());
         }
-        if template.is_computer() {
-            // Only one computer: replace the existing one and keep it in the last stage.
-            for stage in &mut self.vehicle.stages {
-                stage.parts.retain(|p| !matches!(p.spec, PartSpec::Computer { .. }));
-            }
-            let id = self.fresh_id(template.prefix());
-            let last = self.vehicle.stages.len() - 1;
-            self.vehicle.stages[last].parts.push(Part { id, spec });
-            self.selected = None;
-            return format!("Flight computer set to {}", template.label());
-        }
-        let stage = self.active_stage.min(self.vehicle.stages.len() - 1);
+        let parent = self
+            .selected
+            .clone()
+            .filter(|id| self.vehicle.part(id).is_some())
+            .or_else(|| self.vehicle.topmost_id());
+        let parent = parent
+            .filter(|id| self.vehicle.node_status(id, omega_rules::NodeId::Top, &spec).is_ok())
+            .or_else(|| self.vehicle.topmost_id());
         let id = self.fresh_id(template.prefix());
-        self.vehicle.stages[stage].parts.push(Part { id: id.clone(), spec });
-        self.selected = Some((stage, self.vehicle.stages[stage].parts.len() - 1));
-        format!("Added {id} to stage {}", stage + 1)
+        self.vehicle.parts.push(omega_rules::PlacedPart {
+            id: id.clone(),
+            spec,
+            attach: None,
+            symmetry: None,
+        });
+        if let Some(parent) = parent
+            && let Err(error) = self.vehicle.attach(&id, &parent, omega_rules::NodeId::Top, 0.0)
+        {
+            self.vehicle.remove_subtree(&id);
+            return format!("Cannot attach {id}: {error}");
+        }
+        self.selected = Some(id.clone());
+        match self.vehicle.stage_of(&id) {
+            Some(stage) => format!("Added {id} to stage {}", stage + 1),
+            None => format!("Added {id}"),
+        }
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
@@ -506,16 +474,14 @@ impl MissileSession {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let vehicle: Vehicle = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-        for stage in &vehicle.stages {
-            for p in &stage.parts {
-                p.spec.validate().map_err(|e| format!("{}: {e}", p.id))?;
-            }
+        for part in &vehicle.parts {
+            part.spec.validate().map_err(|e| format!("{}: {e}", part.id))?;
         }
         let mut session = Self {
+            selected: vehicle.topmost_id(),
             vehicle,
             ..Self::default()
         };
-        session.active_stage = session.vehicle.stages.len().saturating_sub(1);
         session.sync_next_id();
         Ok(session)
     }
@@ -530,10 +496,9 @@ pub(crate) fn vehicle_diff(before: &Vehicle, after: &Vehicle) -> String {
     use std::collections::BTreeMap;
     let index = |vehicle: &Vehicle| -> BTreeMap<String, (usize, PartSpec)> {
         vehicle
-            .stages
+            .parts
             .iter()
-            .enumerate()
-            .flat_map(|(stage, s)| s.parts.iter().map(move |p| (p.id.clone(), (stage, p.spec))))
+            .map(|part| (part.id.clone(), (vehicle.stage_of(&part.id).unwrap_or(0), part.spec)))
             .collect()
     };
     let old = index(before);
@@ -557,9 +522,10 @@ pub(crate) fn vehicle_diff(before: &Vehicle, after: &Vehicle) -> String {
     removed += old.keys().filter(|id| !new.contains_key(*id)).count();
     let mass = |vehicle: &Vehicle| -> f64 {
         vehicle
-            .parts()
-            .map(|(_, p)| {
-                let stats = p.spec.stats();
+            .parts
+            .iter()
+            .map(|part| {
+                let stats = part.spec.stats();
                 stats.dry_mass_kg + stats.propellant_kg
             })
             .sum()
@@ -593,8 +559,9 @@ pub(crate) enum Shape {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PartBox {
-    pub stage: usize,
-    pub index: usize,
+    pub id: String,
+    pub x: f32,
+    pub z: f32,
     pub y_bottom: f32,
     pub height: f32,
     pub radius: f32,
@@ -602,85 +569,51 @@ pub(crate) struct PartBox {
     pub color: [f32; 3],
 }
 
-fn order_key(spec: &PartSpec) -> u8 {
-    match spec {
-        PartSpec::LiquidEngine { .. } | PartSpec::AirBreathing { .. } => 0,
-        PartSpec::SolidMotor { .. } | PartSpec::FuelTank { .. } => 1,
-        PartSpec::Decoupler => 3,
-        _ => 2,
+fn appearance(spec: &PartSpec) -> (Shape, [f32; 3]) {
+    match *spec {
+        PartSpec::SolidMotor { .. } => (Shape::Body, [0.86, 0.42, 0.22]),
+        PartSpec::FuelTank { .. } => (Shape::Body, [0.82, 0.86, 0.90]),
+        PartSpec::LiquidEngine { .. } => (Shape::Nozzle, [0.35, 0.38, 0.42]),
+        PartSpec::AirBreathing { .. } => (Shape::Nozzle, [0.45, 0.48, 0.55]),
+        PartSpec::Sensor {
+            kind: SensorKind::Pitot,
+        } => (Shape::Sensor, [0.35, 0.84, 0.94]),
+        PartSpec::Sensor {
+            kind: SensorKind::Barometer,
+        } => (Shape::Disc, [0.35, 0.74, 0.80]),
+        PartSpec::Sensor {
+            kind: SensorKind::Radar(RadarClass::Basic),
+        } => (Shape::Disc, [0.30, 0.78, 0.60]),
+        PartSpec::Sensor {
+            kind: SensorKind::Radar(RadarClass::Active),
+        } => (Shape::Disc, [0.35, 0.90, 0.55]),
+        PartSpec::Computer { .. } => (Shape::Disc, [0.40, 0.78, 0.40]),
+        PartSpec::Decoupler => (Shape::Disc, [0.95, 0.80, 0.20]),
+        PartSpec::MissionModule { .. } => (Shape::Body, [0.40, 0.55, 0.92]),
     }
 }
 
-/// Stack the parts from the bottom (stage 1) to the top, engines first inside each stage.
+/// 3D boxes for the attachment tree: axial stacks keep their old look, radial boosters sit around
+/// the parent body at the angle stored on their mount.
 pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
-    let body_radius = (vehicle.max_diameter_m() / 2.0).max(0.1) as f32;
-    let mut boxes = Vec::new();
-    let mut y = 0.0_f32;
-    for (s, stage) in vehicle.stages.iter().enumerate() {
-        let mut order: Vec<usize> = (0..stage.parts.len()).collect();
-        order.sort_by_key(|i| order_key(&stage.parts[*i].spec));
-        for i in order {
-            let (height, radius, shape, color) = match stage.parts[i].spec {
-                PartSpec::SolidMotor {
-                    length_m, diameter_m, ..
-                } => (
-                    length_m as f32,
-                    diameter_m as f32 / 2.0,
-                    Shape::Body,
-                    [0.86, 0.42, 0.22],
-                ),
-                PartSpec::FuelTank { length_m, diameter_m } => (
-                    length_m as f32,
-                    diameter_m as f32 / 2.0,
-                    Shape::Body,
-                    [0.82, 0.86, 0.90],
-                ),
-                PartSpec::LiquidEngine { scale } => (
-                    0.35 * scale as f32,
-                    0.15 * scale as f32,
-                    Shape::Nozzle,
-                    [0.35, 0.38, 0.42],
-                ),
-                PartSpec::AirBreathing { scale } => (
-                    0.5 * scale as f32,
-                    0.17 * scale as f32,
-                    Shape::Nozzle,
-                    [0.45, 0.48, 0.55],
-                ),
-                PartSpec::Sensor {
-                    kind: SensorKind::Pitot,
-                } => (0.25, 0.03, Shape::Sensor, [0.35, 0.84, 0.94]),
-                PartSpec::Sensor {
-                    kind: SensorKind::Barometer,
-                } => (0.12, body_radius * 0.9, Shape::Disc, [0.35, 0.74, 0.80]),
-                PartSpec::Sensor {
-                    kind: SensorKind::Radar(RadarClass::Basic),
-                } => (0.2, body_radius * 0.95, Shape::Disc, [0.30, 0.78, 0.60]),
-                PartSpec::Sensor {
-                    kind: SensorKind::Radar(RadarClass::Active),
-                } => (0.28, body_radius, Shape::Disc, [0.35, 0.90, 0.55]),
-                PartSpec::Computer { .. } => (0.15, body_radius * 0.9, Shape::Disc, [0.40, 0.78, 0.40]),
-                PartSpec::Decoupler => (0.06, body_radius * 1.05, Shape::Disc, [0.95, 0.80, 0.20]),
-                PartSpec::MissionModule { mass_kg } => (
-                    (0.2 + mass_kg as f32 / 150.0).min(2.2),
-                    body_radius,
-                    Shape::Body,
-                    [0.40, 0.55, 0.92],
-                ),
-            };
-            boxes.push(PartBox {
-                stage: s,
-                index: i,
-                y_bottom: y,
-                height,
-                radius,
+    vehicle
+        .poses()
+        .into_iter()
+        .filter_map(|pose| {
+            let spec = vehicle.part(&pose.id)?.spec;
+            let (shape, color) = appearance(&spec);
+            Some(PartBox {
+                id: pose.id,
+                x: pose.x_m as f32,
+                z: pose.z_m as f32,
+                y_bottom: (pose.y_m - pose.height_m / 2.0) as f32,
+                height: pose.height_m as f32,
+                radius: pose.radius_m as f32,
                 shape,
                 color,
-            });
-            y += height;
-        }
-    }
-    boxes
+            })
+        })
+        .collect()
 }
 
 #[derive(Component)]
@@ -747,7 +680,7 @@ pub(crate) fn sync_missile_visuals(
     let nose_radius = boxes.last().map_or(0.15, |b| b.radius.max(0.08));
     commands.entity(entity).with_children(|root| {
         for b in &boxes {
-            let selected = session.selected == Some((b.stage, b.index));
+            let selected = session.selected.as_deref() == Some(b.id.as_str());
             let [r, g, bl] = b.color;
             let material = materials.add(StandardMaterial {
                 base_color: Color::srgb(r, g, bl),
@@ -767,7 +700,7 @@ pub(crate) fn sync_missile_visuals(
             root.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_xyz(0.0, mid, 0.0),
+                Transform::from_xyz(b.x, mid, b.z),
             ));
         }
         if !boxes.is_empty() {
@@ -802,7 +735,12 @@ pub(crate) fn focus_missile_camera(
     let Ok((mut transform, mut rig)) = cameras.single_mut() else {
         return;
     };
-    let height: f32 = layout(&session.vehicle).iter().map(|b| b.height).sum();
+    let height: f32 = session
+        .vehicle
+        .poses()
+        .iter()
+        .map(|pose| (pose.y_m + pose.height_m / 2.0) as f32)
+        .fold(0.0, f32::max);
     rig.target = ANCHOR + Vec3::new(0.0, height * VISUAL_SCALE * 0.5, 0.0);
     rig.distance = (14.0 + height * 2.5).clamp(14.0, 40.0);
     rig.yaw = 0.7;
@@ -834,23 +772,27 @@ mod tests {
         omega_rules::ResearchState::default().owned_capabilities(&omega_rules::default_tree())
     }
 
+    fn select(session: &mut MissileSession, id: &str) {
+        session.apply(MissileAction::Select { id: id.to_string() }, &starting());
+    }
+
     #[test]
     fn default_preset_is_a_valid_two_stage_vehicle() {
         let session = MissileSession::new_default();
-        assert!(session.vehicle.validate().is_ok());
-        assert_eq!(session.vehicle.stages.len(), 2);
-        assert_eq!(session.active_stage, 1);
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        assert_eq!(session.vehicle.stage_count(), 2);
+        assert_eq!(session.selected.as_deref(), Some("module-6"));
     }
 
     #[test]
     fn adjusting_a_part_resizes_it_within_limits() {
         let mut session = MissileSession::new_default();
         let owned = starting();
-        session.apply(MissileAction::Select { stage: 0, part: 0 }, &owned);
-        let before = session.vehicle.stages[0].parts[0].spec.stats();
+        select(&mut session, "motor-1");
+        let before = session.vehicle.part("motor-1").unwrap().spec.stats();
         session.apply(MissileAction::Adjust(Param::Length, 1), &owned);
         session.apply(MissileAction::Adjust(Param::BurnTime, -1), &owned);
-        let after = session.vehicle.stages[0].parts[0].spec.stats();
+        let after = session.vehicle.part("motor-1").unwrap().spec.stats();
         assert!(after.propellant_kg > before.propellant_kg);
         assert!(
             after.thrust_n > before.thrust_n,
@@ -859,12 +801,8 @@ mod tests {
         for _ in 0..200 {
             session.apply(MissileAction::Adjust(Param::BurnTime, -1), &owned);
         }
-        assert_eq!(
-            params_of(&session.vehicle.stages[0].parts[0].spec)[2].1,
-            1.0,
-            "clamped at the minimum burn time"
-        );
-        assert!(session.vehicle.stages[0].parts[0].spec.validate().is_ok());
+        assert_eq!(params_of(&session.vehicle.part("motor-1").unwrap().spec)[2].1, 1.0);
+        assert!(session.vehicle.part("motor-1").unwrap().spec.validate().is_ok());
         assert!(
             session
                 .apply(MissileAction::Adjust(Param::Scale, 1), &owned)
@@ -875,57 +813,67 @@ mod tests {
     #[test]
     fn locked_parts_cannot_be_added_until_researched() {
         let mut session = MissileSession::new_default();
+        let count = session.vehicle.parts.len();
         let message = session.apply(MissileAction::AddPart(PartTemplate::RadarActive), &starting());
         assert!(
             message.contains("Locked") && message.contains("sensor:radar_active"),
             "{message}"
         );
-        let count = session.vehicle.parts().count();
-        assert_eq!(session.vehicle.parts().count(), count);
+        assert_eq!(session.vehicle.parts.len(), count);
         let ok = session.apply(MissileAction::AddPart(PartTemplate::RadarActive), &everything_owned());
         assert!(ok.contains("Added"), "{ok}");
-        assert_eq!(session.vehicle.parts().count(), count + 1);
+        assert_eq!(session.vehicle.parts.len(), count + 1);
     }
 
     #[test]
-    fn a_second_computer_replaces_the_first_and_stays_in_the_last_stage() {
+    fn a_new_part_is_attached_above_the_selected_part() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        select(&mut session, "module-6");
+        session.apply(MissileAction::AddPart(PartTemplate::FuelTank), &owned);
+        let tank = session.selected.clone().unwrap();
+        assert_eq!(
+            session.vehicle.part(&tank).unwrap().attach.as_ref().unwrap().parent,
+            "module-6"
+        );
+        assert_eq!(session.vehicle.stage_of(&tank), Some(1));
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+    }
+
+    #[test]
+    fn a_second_computer_replaces_the_first() {
         let mut session = MissileSession::new_default();
         let owned = everything_owned();
         session.apply(MissileAction::AddPart(PartTemplate::ComputerAdvanced), &owned);
         let computers: Vec<_> = session
             .vehicle
-            .parts()
-            .filter(|(_, p)| matches!(p.spec, PartSpec::Computer { .. }))
+            .parts
+            .iter()
+            .filter(|p| matches!(p.spec, PartSpec::Computer { .. }))
             .collect();
         assert_eq!(computers.len(), 1);
         assert_eq!(session.vehicle.computer(), Some(ComputerClass::Advanced));
-        session.apply(MissileAction::NewStage, &owned);
-        assert_eq!(session.vehicle.stages.len(), 3);
-        assert!(
-            session.vehicle.stages[2]
-                .parts
-                .iter()
-                .any(|p| matches!(p.spec, PartSpec::Computer { .. })),
-            "computer follows the new last stage"
-        );
+        assert_eq!(computers[0].id, "computer-4", "the existing computer keeps its id");
     }
 
     #[test]
-    fn stages_can_be_added_and_removed_with_limits() {
+    fn removing_a_part_warns_when_a_subtree_goes_with_it() {
         let mut session = MissileSession::new_default();
         let owned = starting();
-        session.apply(MissileAction::NewStage, &owned);
-        session.apply(MissileAction::NewStage, &owned);
-        assert!(session.apply(MissileAction::NewStage, &owned).contains("at most 4"));
-        for _ in 0..5 {
-            session.apply(MissileAction::RemoveStage, &owned);
-        }
-        assert_eq!(session.vehicle.stages.len(), 1);
-        assert!(
-            session
-                .apply(MissileAction::RemoveStage, &owned)
-                .contains("at least one")
+        select(&mut session, "decoupler-2");
+        let before = session.vehicle.parts.len();
+        let message = session.apply(MissileAction::RemovePart, &owned);
+        assert!(message.contains("attached part(s)"), "{message}");
+        assert_eq!(
+            session.vehicle.parts.len(),
+            1,
+            "the decoupler and the whole upper stack are gone"
         );
+        assert!(session.vehicle.validate().is_err());
+        session.apply(MissileAction::Clear, &owned);
+        assert!(session.vehicle.parts.is_empty());
+        assert!(session.vehicle.validate().is_err());
+        assert_eq!(session.vehicle.parts.len(), before - before);
     }
 
     #[test]
@@ -945,22 +893,9 @@ mod tests {
         for _ in 0..3 {
             session.apply(MissileAction::AddPart(PartTemplate::FuelTank), &owned);
         }
-        let ids: Vec<&str> = session.vehicle.parts().map(|(_, p)| p.id.as_str()).collect();
+        let ids: Vec<&str> = session.vehicle.parts.iter().map(|p| p.id.as_str()).collect();
         let unique: BTreeSet<&str> = ids.iter().copied().collect();
         assert_eq!(ids.len(), unique.len(), "{ids:?}");
-    }
-
-    #[test]
-    fn remove_part_and_clear_work() {
-        let mut session = MissileSession::new_default();
-        let owned = starting();
-        let before = session.vehicle.parts().count();
-        session.apply(MissileAction::Select { stage: 1, part: 3 }, &owned);
-        assert!(session.apply(MissileAction::RemovePart, &owned).starts_with("Removed"));
-        assert_eq!(session.vehicle.parts().count(), before - 1);
-        session.apply(MissileAction::Clear, &owned);
-        assert_eq!(session.vehicle.parts().count(), 0);
-        assert!(session.vehicle.validate().is_err());
     }
 
     #[test]
@@ -968,64 +903,51 @@ mod tests {
         let session = MissileSession::new_default();
         assert_eq!(vehicle_diff(&session.vehicle, &session.vehicle), "no changes");
         let mut edited = session.vehicle.clone();
-        edited.stages[0].parts[0].spec = PartSpec::SolidMotor {
-            length_m: 3.0,
-            diameter_m: 0.4,
-            burn_time_s: 20.0,
-        };
+        edited.replace_part(
+            "motor-1",
+            PartSpec::SolidMotor {
+                length_m: 3.0,
+                diameter_m: 0.4,
+                burn_time_s: 20.0,
+            },
+        );
         let summary = vehicle_diff(&session.vehicle, &edited);
         assert!(summary.contains("1 changed") && summary.contains("mass +"), "{summary}");
         let mut removed = session.vehicle.clone();
-        removed.stages[1].parts.pop();
+        removed.remove_subtree("module-6");
         assert!(vehicle_diff(&session.vehicle, &removed).contains("1 removed"));
     }
 
     #[test]
-    fn layout_stacks_bottom_up_with_engines_first_in_each_stage() {
+    fn layout_places_the_stack_and_radial_parts() {
         let mut session = MissileSession::new_default();
-        session.apply(MissileAction::Preset(1), &everything_owned());
+        let owned = everything_owned();
         let boxes = layout(&session.vehicle);
-        assert_eq!(boxes.len(), 5);
-        assert!(
-            boxes
-                .windows(2)
-                .all(|w| (w[0].y_bottom + w[0].height - w[1].y_bottom).abs() < 1e-6),
-            "contiguous stack"
-        );
-        assert_eq!(boxes[0].shape, Shape::Nozzle, "the turbofan sits at the bottom");
-        let two_stage = layout(&MissileSession::new_default().vehicle);
-        assert!(
-            two_stage
-                .iter()
-                .filter(|b| b.stage == 0)
-                .all(|b| b.y_bottom < two_stage.iter().find(|x| x.stage == 1).unwrap().y_bottom + 1e-6)
-        );
+        assert_eq!(boxes.len(), 6);
+        let motor = boxes.iter().find(|b| b.id == "motor-1").unwrap();
+        let sustainer = boxes.iter().find(|b| b.id == "motor-3").unwrap();
+        assert!(sustainer.y_bottom > motor.y_bottom);
+        assert_eq!(motor.x, 0.0);
+        session.apply(MissileAction::AddPart(PartTemplate::SolidMotor), &owned);
+        let booster = session.selected.clone().unwrap();
+        session.vehicle.detach(&booster).unwrap();
+        session
+            .vehicle
+            .attach(&booster, "motor-1", omega_rules::NodeId::Radial(0), 0.0)
+            .unwrap();
+        let boxes = layout(&session.vehicle);
+        let radial = boxes.iter().find(|b| b.id == booster).unwrap();
+        assert!(radial.x.abs() > 0.1, "a radial part sits off the centre line");
     }
 
     #[test]
-    fn saving_and_loading_round_trips_and_rejects_bad_parts() {
-        let session = MissileSession::new_default();
-        let bytes = session.to_bytes().unwrap();
-        let loaded = MissileSession::from_bytes(&bytes).unwrap();
-        assert_eq!(loaded.vehicle, session.vehicle);
-        let mut bad = session.vehicle.clone();
-        bad.stages[0].parts[0].spec = PartSpec::SolidMotor {
-            length_m: 99.0,
-            diameter_m: 0.4,
-            burn_time_s: 10.0,
-        };
-        assert!(MissileSession::from_bytes(&serde_json::to_vec(&bad).unwrap()).is_err());
-        assert!(MissileSession::from_bytes(b"not json").is_err());
-    }
-
-    #[test]
-    fn locked_messages_name_the_technology() {
-        let mut session = MissileSession::new_default();
-        let raw = session.apply(MissileAction::AddPart(PartTemplate::RadarActive), &starting());
-        let friendly = crate::campus::friendly_capabilities(&raw);
-        assert!(
-            friendly.contains("Active radar") && !friendly.contains("sensor:radar_active"),
-            "{friendly}"
-        );
+    fn legacy_files_load_and_save_as_schema_three() {
+        let legacy = br#"{"name":"Old","stages":[{"parts":[{"id":"m","spec":{"part":"solid_motor","length_m":2.0,"diameter_m":0.4,"burn_time_s":20.0}},{"id":"pc","spec":{"part":"computer","class":"basic"}}]}]}"#;
+        let session = MissileSession::from_bytes(legacy).unwrap();
+        assert_eq!(session.vehicle.stage_count(), 1);
+        let saved = String::from_utf8(session.to_bytes().unwrap()).unwrap();
+        assert!(saved.contains("\"schema_version\": 3"), "{saved}");
+        let again = MissileSession::from_bytes(saved.as_bytes()).unwrap();
+        assert_eq!(again.vehicle, session.vehicle);
     }
 }

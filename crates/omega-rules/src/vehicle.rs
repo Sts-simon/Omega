@@ -6,7 +6,6 @@
 //! to any real system and the module contains no guidance, targeting or warhead modelling.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 pub const G0: f64 = 9.80665;
 
@@ -256,12 +255,6 @@ pub struct Stage {
 }
 
 /// Stages in firing order: `stages[0]` is the first to burn and the first to be dropped.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Vehicle {
-    pub name: String,
-    pub stages: Vec<Stage>,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct StageReport {
     pub index: usize,
@@ -299,234 +292,9 @@ impl RadarClass {
     }
 }
 
-impl Vehicle {
-    pub fn validate(&self) -> Result<(), Vec<String>> {
-        let mut issues = Vec::new();
-        if self.stages.is_empty() {
-            issues.push("the vehicle has no stages".to_string());
-        }
-        let mut ids = BTreeSet::new();
-        for (index, stage) in self.stages.iter().enumerate() {
-            let has_tank = stage.parts.iter().any(|p| matches!(p.spec, PartSpec::FuelTank { .. }));
-            for part in &stage.parts {
-                if !ids.insert(part.id.as_str()) {
-                    issues.push(format!("duplicate part id '{}'", part.id));
-                }
-                if let Err(error) = part.spec.validate() {
-                    issues.push(format!("{} (stage {}): {error}", part.id, index + 1));
-                }
-                if matches!(part.spec, PartSpec::LiquidEngine { .. } | PartSpec::AirBreathing { .. }) && !has_tank {
-                    issues.push(format!(
-                        "{} (stage {}): needs a fuel tank in the same stage",
-                        part.id,
-                        index + 1
-                    ));
-                }
-            }
-        }
-        let computers: Vec<(usize, &Part)> = self
-            .stages
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| {
-                s.parts
-                    .iter()
-                    .filter(|p| matches!(p.spec, PartSpec::Computer { .. }))
-                    .map(move |p| (i, p))
-            })
-            .collect();
-        match computers.as_slice() {
-            [] => issues.push("the vehicle needs a flight computer".to_string()),
-            [(index, part)] => {
-                if *index + 1 != self.stages.len() {
-                    issues.push(format!(
-                        "{} would be dropped with stage {}: put the computer in the last stage",
-                        part.id,
-                        index + 1
-                    ));
-                }
-            }
-            _ => issues.push("only one flight computer is allowed".to_string()),
-        }
-        if issues.is_empty() { Ok(()) } else { Err(issues) }
-    }
-
-    pub fn parts(&self) -> impl Iterator<Item = (usize, &Part)> {
-        self.stages
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| s.parts.iter().map(move |p| (i, p)))
-    }
-
-    pub fn computer(&self) -> Option<ComputerClass> {
-        self.parts().find_map(|(_, p)| match p.spec {
-            PartSpec::Computer { class } => Some(class),
-            _ => None,
-        })
-    }
-
-    /// Best radar installed, if any.
-    pub fn best_radar(&self, min_stage: usize) -> Option<RadarSpec> {
-        self.parts()
-            .filter(|(stage, _)| *stage >= min_stage)
-            .filter_map(|(_, p)| match p.spec {
-                PartSpec::Sensor {
-                    kind: SensorKind::Radar(class),
-                } => Some(class.spec()),
-                _ => None,
-            })
-            .max_by(|a, b| a.base_lock_probability.total_cmp(&b.base_lock_probability))
-    }
-
-    /// Programming blocks the installed hardware allows (see `program::BlockKind`).
-    pub fn available_blocks(&self) -> BTreeSet<&'static str> {
-        let mut blocks: BTreeSet<&'static str> = ["wait", "ignite_stage", "set_throttle"].into_iter().collect();
-        if self.stages.len() >= 2 {
-            blocks.insert("separate_stage");
-        }
-        for (_, part) in self.parts() {
-            if let PartSpec::Sensor { kind } = part.spec {
-                match kind {
-                    SensorKind::Pitot => blocks.insert("hold_speed"),
-                    SensorKind::Barometer => blocks.insert("hold_pressure"),
-                    SensorKind::Radar(_) => blocks.insert("lock_target"),
-                };
-            }
-        }
-        blocks
-    }
-
-    /// Research capabilities this design needs that are not owned yet.
-    pub fn missing_research(&self, owned: &BTreeSet<String>) -> Vec<String> {
-        let needed: BTreeSet<&str> = self.parts().map(|(_, p)| p.spec.required_capability()).collect();
-        needed
-            .into_iter()
-            .filter(|c| !owned.contains(*c))
-            .map(str::to_string)
-            .collect()
-    }
-
-    pub fn max_diameter_m(&self) -> f64 {
-        self.parts().map(|(_, p)| p.spec.stats().diameter_m).fold(0.0, f64::max)
-    }
-
-    fn stage_wet_mass(stage: &Stage) -> f64 {
-        stage
-            .parts
-            .iter()
-            .map(|p| {
-                let s = p.spec.stats();
-                s.dry_mass_kg + s.propellant_kg
-            })
-            .sum()
-    }
-
-    pub fn total_wet_mass_kg(&self) -> f64 {
-        self.stages.iter().map(Self::stage_wet_mass).sum()
-    }
-
-    pub fn stage_reports(&self) -> Vec<StageReport> {
-        let mut reports = Vec::new();
-        for (index, stage) in self.stages.iter().enumerate() {
-            let above: f64 = self.stages[index + 1..].iter().map(Self::stage_wet_mass).sum();
-            let wet = Self::stage_wet_mass(stage);
-            let ignition_mass = wet + above;
-            let mut thrust = 0.0;
-            let mut propellant = 0.0;
-            let mut mass_flow_weight = 0.0;
-            let mut burn_time: Option<f64> = None;
-            for part in &stage.parts {
-                let s = part.spec.stats();
-                thrust += s.thrust_n;
-                propellant += s.propellant_kg;
-                if s.thrust_n > 0.0 && s.isp_s > 0.0 {
-                    mass_flow_weight += s.thrust_n / (s.isp_s * G0);
-                }
-                if let Some(bt) = s.burn_time_s {
-                    burn_time = Some(burn_time.map_or(bt, |b: f64| b.max(bt)));
-                }
-            }
-            let isp = if mass_flow_weight > 0.0 {
-                thrust / (mass_flow_weight * G0)
-            } else {
-                0.0
-            };
-            let burnout_mass = (ignition_mass - propellant).max(1e-9);
-            let delta_v = if isp > 0.0 {
-                isp * G0 * (ignition_mass / burnout_mass).ln()
-            } else {
-                0.0
-            };
-            reports.push(StageReport {
-                index,
-                stage_wet_mass_kg: wet,
-                ignition_mass_kg: ignition_mass,
-                thrust_n: thrust,
-                burn_time_s: burn_time,
-                twr_at_ignition: thrust / (ignition_mass * G0),
-                delta_v_ms: delta_v,
-            });
-        }
-        reports
-    }
-}
-
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-
-    pub fn part(id: &str, spec: PartSpec) -> Part {
-        Part {
-            id: id.to_string(),
-            spec,
-        }
-    }
-
-    pub fn sounding_rocket() -> Vehicle {
-        Vehicle {
-            name: "Test rocket".into(),
-            stages: vec![
-                Stage {
-                    parts: vec![
-                        part(
-                            "booster",
-                            PartSpec::SolidMotor {
-                                length_m: 2.0,
-                                diameter_m: 0.4,
-                                burn_time_s: 20.0,
-                            },
-                        ),
-                        part("dec1", PartSpec::Decoupler),
-                    ],
-                },
-                Stage {
-                    parts: vec![
-                        part(
-                            "sustainer",
-                            PartSpec::SolidMotor {
-                                length_m: 1.0,
-                                diameter_m: 0.3,
-                                burn_time_s: 25.0,
-                            },
-                        ),
-                        part(
-                            "pc",
-                            PartSpec::Computer {
-                                class: ComputerClass::Basic,
-                            },
-                        ),
-                        part(
-                            "pitot",
-                            PartSpec::Sensor {
-                                kind: SensorKind::Pitot,
-                            },
-                        ),
-                        part("module", PartSpec::MissionModule { mass_kg: 40.0 }),
-                    ],
-                },
-            ],
-        }
-    }
 
     #[test]
     fn solid_motor_burn_time_trades_thrust_for_duration_and_casing_mass() {
@@ -576,99 +344,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn stage_reports_compute_twr_and_delta_v_with_the_stack_above() {
-        let reports = sounding_rocket().stage_reports();
-        assert_eq!(reports.len(), 2);
-        assert!(reports[0].ignition_mass_kg > reports[0].stage_wet_mass_kg);
-        assert!(reports[0].twr_at_ignition > 1.0, "{}", reports[0].twr_at_ignition);
-        assert!(reports[1].twr_at_ignition > reports[1].thrust_n / (reports[0].ignition_mass_kg * G0));
-        assert!(reports[0].delta_v_ms > 0.0 && reports[1].delta_v_ms > 0.0);
-        assert_eq!(reports[0].burn_time_s, Some(20.0));
-    }
-
-    #[test]
-    fn valid_vehicle_passes_and_problems_are_listed() {
-        assert!(sounding_rocket().validate().is_ok());
-        let mut bad = sounding_rocket();
-        bad.stages[0].parts.push(part(
-            "pc2",
-            PartSpec::Computer {
-                class: ComputerClass::Basic,
-            },
-        ));
-        bad.stages[1].parts.push(part("booster", PartSpec::Decoupler));
-        let issues = bad.validate().unwrap_err().join(" | ");
-        assert!(issues.contains("only one flight computer"), "{issues}");
-        assert!(issues.contains("duplicate part id"), "{issues}");
-
-        let mut dropped = sounding_rocket();
-        let computer = dropped.stages[1].parts.remove(1);
-        dropped.stages[0].parts.push(computer);
-        assert!(dropped.validate().unwrap_err().join(" ").contains("last stage"));
-
-        let mut no_tank = sounding_rocket();
-        no_tank.stages[1]
-            .parts
-            .push(part("eng", PartSpec::LiquidEngine { scale: 1.0 }));
-        assert!(no_tank.validate().unwrap_err().join(" ").contains("fuel tank"));
-
-        let mut huge = sounding_rocket();
-        huge.stages[0].parts[0].spec = PartSpec::SolidMotor {
-            length_m: 20.0,
-            diameter_m: 0.4,
-            burn_time_s: 20.0,
-        };
-        assert!(huge.validate().is_err());
-        assert!(Vehicle::default().validate().is_err());
-    }
-
-    #[test]
-    fn installed_sensors_unlock_programming_blocks() {
-        let mut vehicle = sounding_rocket();
-        let blocks = vehicle.available_blocks();
-        assert!(blocks.contains("hold_speed") && !blocks.contains("lock_target") && !blocks.contains("hold_pressure"));
-        vehicle.stages[1].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: SensorKind::Radar(RadarClass::Active),
-            },
-        ));
-        vehicle.stages[1].parts.push(part(
-            "baro",
-            PartSpec::Sensor {
-                kind: SensorKind::Barometer,
-            },
-        ));
-        let blocks = vehicle.available_blocks();
-        assert!(blocks.contains("lock_target") && blocks.contains("hold_pressure"));
-        assert!(vehicle.best_radar(0).unwrap().class == RadarClass::Active);
-        let mut single = sounding_rocket();
-        single.stages.pop();
-        assert!(!single.available_blocks().contains("separate_stage"));
-    }
-
-    #[test]
-    fn missing_research_lists_only_what_is_not_owned() {
-        let mut vehicle = sounding_rocket();
-        vehicle.stages[1].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: SensorKind::Radar(RadarClass::Active),
-            },
-        ));
-        let owned: BTreeSet<String> = [
-            "part:solid_motor",
-            "part:decoupler",
-            "part:mission_module",
-            "computer:basic",
-            "sensor:pitot",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
-        assert_eq!(
-            vehicle.missing_research(&owned),
-            vec!["sensor:radar_active".to_string()]
+    fn part_ranges_are_enforced() {
+        assert!(
+            PartSpec::SolidMotor {
+                length_m: 20.0,
+                diameter_m: 0.4,
+                burn_time_s: 20.0
+            }
+            .validate()
+            .is_err()
         );
+        assert!(PartSpec::LiquidEngine { scale: 0.1 }.validate().is_err());
+        assert!(PartSpec::Decoupler.validate().is_ok());
     }
 }

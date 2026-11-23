@@ -1,3 +1,10 @@
+## Unreleased — Workshop assembly graph (0.31.1, first step)
+- **The missile is now a tree of parts.** `omega-rules::assembly` stores `PlacedPart`s attached to `top`, `bottom` or one of four radial nodes, refuses cycles, occupied nodes, unknown parents, multiple roots, an engine without a tank in its stage and a computer outside the last stage, and reports a diameter step as a warning. Stages are derived: a decoupler (or an explicit separation edge) starts a new one.
+- **`designs/vehicle.json` moves to schema 3.** Old stage-list files are migrated on read (chained bottom to top, separation edges at former stage boundaries) and keep their stage figures; a newer schema is refused with a message. Existing hash-bound evidence therefore goes stale, as expected and by design.
+- The workshop shows the derived stages and part tree, selects parts by id, adds parts above the selected part (or the highest one), replaces the flight computer in place and reuses the same 3D layout with radial offsets. The stage list no longer has "+ STAGE" buttons.
+- Not yet in this step: drag-and-drop, node picking, linked symmetry placement, undo/redo, direct dragging of parameters, live flight forecast and the contract requirement bar. `docs/DECISIONS.md` records the choices and the open interaction values.
+- Tests: 217 (57 application, 18 `omega-data`, 71 `omega-rules`, 71 `omega-sim-core`); fmt and clippy clean.
+
 ## Unreleased — Project consistency and maintenance baseline (0.30.0)
 - Align the package version, lockfile, window title, README and current roadmap at 0.30.0.
 - Replace outdated architecture and vision descriptions that still referred to the removed civil loop, legacy editor and pre-missile workflow.

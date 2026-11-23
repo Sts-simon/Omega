@@ -103,6 +103,21 @@ The recent CI run on the current `main` commit is green. This is a repository ba
 
 **Acceptance:** a tester can install, launch, play, save and update using only the release instructions.
 
+### Lot 6 — Workshop assembly graph (0.31.1, in progress)
+
+**Purpose:** replace the flat stage list with an attachment tree so radial boosters, free placement
+and a real build interaction become possible.
+
+- Done: `omega-rules::assembly` (nodes, attachments, symmetry slots, derived stages, validation,
+  diameter warnings, save schema 3 with migration), 3D layout from the tree, workshop UI showing
+  derived stages, part selection by id and palette additions above the selected part.
+- Remaining for this lot: drag-and-drop from the palette and between nodes, node picking in 3D,
+  symmetry placement linked by group, undo/redo, direct parameter dragging, live flight forecast and
+  the active-contract requirement bar.
+
+**Acceptance:** a new player builds a two-stage rocket with two radial boosters with the mouse only;
+old presets keep identical stage figures; every refusal has a message and a test.
+
 ### Stable release (1.0.0)
 
 Publish only after all work packages pass, CI is green and the full play-through has been manually verified.
