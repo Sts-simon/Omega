@@ -3,6 +3,7 @@
 //! The crate answers one question: *given a design, what has actually been proven about it,
 //! and does that satisfy a contract?* All quantities are abstract gameplay values.
 
+pub mod contracts;
 pub mod diff;
 pub mod dossier;
 pub mod flight;
@@ -12,6 +13,10 @@ pub mod requirement;
 pub mod research;
 pub mod vehicle;
 
+pub use contracts::{
+    ContractEvaluation, ContractOffer, ContractPhase, ContractProgress, ContractRequirements, MissionFamily,
+    VehicleFamily, generate_contract_board,
+};
 pub use diff::{DesignDiff, diff_parts};
 pub use dossier::{ACCEPTANCE_THRESHOLD, Dossier, DossierDecision, MatrixRow, build_dossier};
 pub use flight::{FlightConfig, FlightReport, LaunchMode, LockResult, Sample, simulate};
