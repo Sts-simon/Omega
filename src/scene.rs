@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::campus::{BuildingVisual, FacilityKind};
+use bevy::prelude::*;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct OrbitCameraRig {
@@ -73,30 +73,54 @@ pub fn setup(
 
     // Research centre: dedicated to technology development.
     spawn_facility_box(
-        &mut commands, &mut meshes, lab.clone(),
-        Vec3::new(12.0, 2.5, -10.0), Vec3::new(12.0, 5.0, 10.0),
+        &mut commands,
+        &mut meshes,
+        lab.clone(),
+        Vec3::new(12.0, 2.5, -10.0),
+        Vec3::new(12.0, 5.0, 10.0),
         FacilityKind::Research,
     );
-    spawn_box(&mut commands, &mut meshes, dark.clone(),
-        Vec3::new(12.0, 5.1, -10.0), Vec3::new(12.5, 0.3, 10.5));
+    spawn_box(
+        &mut commands,
+        &mut meshes,
+        dark.clone(),
+        Vec3::new(12.0, 5.1, -10.0),
+        Vec3::new(12.5, 0.3, 10.5),
+    );
 
     // Programming studio: separate building for the visual sequence editor.
     spawn_facility_box(
-        &mut commands, &mut meshes, hangar.clone(),
-        Vec3::new(-11.0, 2.2, 10.0), Vec3::new(12.0, 4.4, 9.0),
+        &mut commands,
+        &mut meshes,
+        hangar.clone(),
+        Vec3::new(-11.0, 2.2, 10.0),
+        Vec3::new(12.0, 4.4, 9.0),
         FacilityKind::Programming,
     );
-    spawn_box(&mut commands, &mut meshes, dark.clone(),
-        Vec3::new(-11.0, 4.5, 10.0), Vec3::new(12.5, 0.3, 9.5));
+    spawn_box(
+        &mut commands,
+        &mut meshes,
+        dark.clone(),
+        Vec3::new(-11.0, 4.5, 10.0),
+        Vec3::new(12.5, 0.3, 9.5),
+    );
 
     // Computation centre: scientific solvers and simulation jobs.
     spawn_facility_box(
-        &mut commands, &mut meshes, lab.clone(),
-        Vec3::new(5.0, 2.2, -20.0), Vec3::new(10.0, 4.4, 7.0),
+        &mut commands,
+        &mut meshes,
+        lab.clone(),
+        Vec3::new(5.0, 2.2, -20.0),
+        Vec3::new(10.0, 4.4, 7.0),
         FacilityKind::Computation,
     );
-    spawn_box(&mut commands, &mut meshes, dark.clone(),
-        Vec3::new(5.0, 4.5, -20.0), Vec3::new(10.5, 0.3, 7.5));
+    spawn_box(
+        &mut commands,
+        &mut meshes,
+        dark.clone(),
+        Vec3::new(5.0, 4.5, -20.0),
+        Vec3::new(10.5, 0.3, 7.5),
+    );
     spawn_facility_box(
         &mut commands,
         &mut meshes,
@@ -135,10 +159,20 @@ pub fn setup(
         Vec3::new(-10.0, 0.9, 1.5),
         Vec3::new(0.7, 1.8, 0.7),
     );
-    spawn_box(&mut commands, &mut meshes, hangar.clone(),
-        Vec3::new(-11.0, 0.9, 5.5), Vec3::new(0.7, 1.8, 0.7));
-    spawn_box(&mut commands, &mut meshes, lab.clone(),
-        Vec3::new(5.0, 0.9, -24.0), Vec3::new(0.7, 1.8, 0.7));
+    spawn_box(
+        &mut commands,
+        &mut meshes,
+        hangar.clone(),
+        Vec3::new(-11.0, 0.9, 5.5),
+        Vec3::new(0.7, 1.8, 0.7),
+    );
+    spawn_box(
+        &mut commands,
+        &mut meshes,
+        lab.clone(),
+        Vec3::new(5.0, 0.9, -24.0),
+        Vec3::new(0.7, 1.8, 0.7),
+    );
 
     // Generic test building and storage blocks. No flight or weapon systems are modelled.
     spawn_box(
@@ -179,8 +213,6 @@ pub fn setup(
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, -0.55, 0.0)),
     ));
-
-
 }
 
 fn spawn_facility_box(

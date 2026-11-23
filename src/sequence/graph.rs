@@ -1,5 +1,5 @@
-use super::model::{BlockKind, Program, ProgramBlock};
 use super::SequenceWorkspace;
+use super::model::{BlockKind, Program, ProgramBlock};
 use crate::campus::{CampusState, CampusView};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -177,13 +177,11 @@ pub fn handle_mouse(
         // Vec2 is Copy. Snapshot the offset before taking a mutable borrow of
         // the selected block in `workspace.program.blocks`.
         let drag_offset = workspace.drag_offset;
-        if let Some(id) = workspace.dragging_block {
-            if let Some(block) = workspace.program.blocks.iter_mut().find(|block| block.id == id) {
-                block.position.x = (local.x - drag_offset.x)
-                    .clamp(8.0, GRAPH_WIDTH - NODE_WIDTH - 20.0);
-                block.position.y = (local.y - drag_offset.y)
-                    .clamp(104.0, GRAPH_HEIGHT - NODE_HEIGHT - 95.0);
-            }
+        if let Some(id) = workspace.dragging_block
+            && let Some(block) = workspace.program.blocks.iter_mut().find(|block| block.id == id)
+        {
+            block.position.x = (local.x - drag_offset.x).clamp(8.0, GRAPH_WIDTH - NODE_WIDTH - 20.0);
+            block.position.y = (local.y - drag_offset.y).clamp(104.0, GRAPH_HEIGHT - NODE_HEIGHT - 95.0);
         }
     }
     if mouse.just_released(MouseButton::Left) {
@@ -219,7 +217,12 @@ pub fn sync(
     let mut existing_node_ids = HashSet::new();
     for (entity, visual, mut node, mut text, mut background) in &mut node_query {
         existing_node_ids.insert(visual.block_id);
-        if let Some(block) = workspace.program.blocks.iter().find(|block| block.id == visual.block_id) {
+        if let Some(block) = workspace
+            .program
+            .blocks
+            .iter()
+            .find(|block| block.id == visual.block_id)
+        {
             node.left = Val::Px(block.position.x);
             node.top = Val::Px(block.position.y);
             text.0 = format_node(block, &workspace.program);
@@ -240,9 +243,9 @@ pub fn sync(
     let mut existing_edge_keys = HashSet::new();
     for (entity, visual, mut node, mut background) in &mut edge_query {
         existing_edge_keys.insert((visual.from_id, visual.to_id, visual.kind, visual.segment));
-        let descriptor_exists = desired_edges.iter().any(|edge| {
-            edge.from_id == visual.from_id && edge.to_id == visual.to_id && edge.kind == visual.kind
-        });
+        let descriptor_exists = desired_edges
+            .iter()
+            .any(|edge| edge.from_id == visual.from_id && edge.to_id == visual.to_id && edge.kind == visual.kind);
         if !descriptor_exists {
             commands.entity(entity).despawn();
             continue;
@@ -291,15 +294,27 @@ pub fn sync(
         );
     }
     if let Ok(mut inspector) = inspector_query.single_mut() {
-        let selected = workspace.program.blocks.iter().find(|block| block.id == workspace.selected_block_id());
-        let selected_text = selected.map(|block| format!("Selected #{}: {}", block.id, block_summary(&block.kind)))
+        let selected = workspace
+            .program
+            .blocks
+            .iter()
+            .find(|block| block.id == workspace.selected_block_id());
+        let selected_text = selected
+            .map(|block| format!("Selected #{}: {}", block.id, block_summary(&block.kind)))
             .unwrap_or_else(|| "No node selected".to_string());
         let variables = if workspace.runtime.variables.is_empty() {
             "Variables: (none)".to_string()
         } else {
-            format!("Variables: {}", workspace.runtime.variables.iter()
-                .map(|(name, value)| format!("{name}={value:.3}"))
-                .collect::<Vec<_>>().join(" | "))
+            format!(
+                "Variables: {}",
+                workspace
+                    .runtime
+                    .variables
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value:.3}"))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            )
         };
         inspector.0 = format!(
             "{selected_text}   |   PC: {}   |   T: {:.2} C   |   heater: {:.0}%\n{variables}",
@@ -314,7 +329,10 @@ fn node_bundle(block: &ProgramBlock, program: &Program, selected_id: u32) -> imp
     let selected = block.id == selected_id;
     (
         Text::new(format_node(block, program)),
-        TextFont { font_size: FontSize::Px(12.0), ..default() },
+        TextFont {
+            font_size: FontSize::Px(12.0),
+            ..default()
+        },
         TextColor(Color::srgb(0.93, 0.95, 0.97)),
         Node {
             position_type: PositionType::Absolute,
@@ -326,7 +344,11 @@ fn node_bundle(block: &ProgramBlock, program: &Program, selected_id: u32) -> imp
             flex_direction: FlexDirection::Column,
             ..default()
         },
-        BackgroundColor(if selected { Color::srgb(0.10, 0.30, 0.35) } else { block_color(&block.kind) }),
+        BackgroundColor(if selected {
+            Color::srgb(0.10, 0.30, 0.35)
+        } else {
+            block_color(&block.kind)
+        }),
         GraphNodeVisual { block_id: block.id },
     )
 }
@@ -343,14 +365,23 @@ fn edge_bundle(edge: EdgeDescriptor, segment: u8) -> impl Bundle {
             EdgeKind::Flow => Color::srgb(0.20, 0.60, 0.72),
             EdgeKind::BranchTrue => Color::srgb(0.95, 0.58, 0.22),
         }),
-        GraphEdgeVisual { from_id: edge.from_id, to_id: edge.to_id, kind: edge.kind, segment },
+        GraphEdgeVisual {
+            from_id: edge.from_id,
+            to_id: edge.to_id,
+            kind: edge.kind,
+            segment,
+        },
     )
 }
 
 fn edge_descriptors(program: &Program) -> Vec<EdgeDescriptor> {
     let mut edges = Vec::new();
     for pair in program.blocks.windows(2) {
-        edges.push(EdgeDescriptor { from_id: pair[0].id, to_id: pair[1].id, kind: EdgeKind::Flow });
+        edges.push(EdgeDescriptor {
+            from_id: pair[0].id,
+            to_id: pair[1].id,
+            kind: EdgeKind::Flow,
+        });
     }
     for block in &program.blocks {
         let target = match &block.kind {
@@ -358,10 +389,14 @@ fn edge_descriptors(program: &Program) -> Vec<EdgeDescriptor> {
             | BlockKind::BranchVariable { target_block_id, .. } => Some(*target_block_id),
             _ => None,
         };
-        if let Some(target_id) = target {
-            if program.index_of(target_id).is_some() {
-                edges.push(EdgeDescriptor { from_id: block.id, to_id: target_id, kind: EdgeKind::BranchTrue });
-            }
+        if let Some(target_id) = target
+            && program.index_of(target_id).is_some()
+        {
+            edges.push(EdgeDescriptor {
+                from_id: block.id,
+                to_id: target_id,
+                kind: EdgeKind::BranchTrue,
+            });
         }
     }
     edges
@@ -372,8 +407,18 @@ fn edge_rect(from: &ProgramBlock, to: &ProgramBlock, segment: u8) -> (f32, f32, 
     let end = Vec2::new(to.position.x, to.position.y + NODE_HEIGHT * 0.5);
     let middle_x = (start.x + end.x) * 0.5;
     match segment {
-        0 => (start.x.min(middle_x), start.y - 1.5, (middle_x - start.x).abs().max(3.0), 3.0),
-        1 => (middle_x - 1.5, start.y.min(end.y), 3.0, (end.y - start.y).abs().max(3.0)),
+        0 => (
+            start.x.min(middle_x),
+            start.y - 1.5,
+            (middle_x - start.x).abs().max(3.0),
+            3.0,
+        ),
+        1 => (
+            middle_x - 1.5,
+            start.y.min(end.y),
+            3.0,
+            (end.y - start.y).abs().max(3.0),
+        ),
         _ => (middle_x.min(end.x), end.y - 1.5, (end.x - middle_x).abs().max(3.0), 3.0),
     }
 }
@@ -382,14 +427,24 @@ fn format_node(block: &ProgramBlock, program: &Program) -> String {
     let breakpoint = if block.breakpoint { "  [BREAKPOINT]" } else { "" };
     let title = block_summary(&block.kind);
     let outputs = match &block.kind {
-        BlockKind::BranchTemperature { target_block_id, .. }
-        | BlockKind::BranchVariable { target_block_id, .. } => {
-            let false_target = program.index_of(block.id).and_then(|index| program.blocks.get(index + 1)).map(|next| next.id);
-            format!("TRUE -> #{target_block_id:03}   FALSE -> {}", false_target.map(|id| format!("#{id:03}")).unwrap_or_else(|| "END".to_string()))
+        BlockKind::BranchTemperature { target_block_id, .. } | BlockKind::BranchVariable { target_block_id, .. } => {
+            let false_target = program
+                .index_of(block.id)
+                .and_then(|index| program.blocks.get(index + 1))
+                .map(|next| next.id);
+            format!(
+                "TRUE -> #{target_block_id:03}   FALSE -> {}",
+                false_target
+                    .map(|id| format!("#{id:03}"))
+                    .unwrap_or_else(|| "END".to_string())
+            )
         }
         BlockKind::End => "OUTPUT: none".to_string(),
-        _ => program.index_of(block.id).and_then(|index| program.blocks.get(index + 1))
-            .map(|next| format!("NEXT -> #{:03}", next.id)).unwrap_or_else(|| "NEXT -> END".to_string()),
+        _ => program
+            .index_of(block.id)
+            .and_then(|index| program.blocks.get(index + 1))
+            .map(|next| format!("NEXT -> #{:03}", next.id))
+            .unwrap_or_else(|| "NEXT -> END".to_string()),
     };
     format!("#{:03}  {}{}\n{}", block.id, title, breakpoint, outputs)
 }
@@ -400,14 +455,28 @@ fn block_summary(kind: &BlockKind) -> String {
         BlockKind::Wait { duration_s } => format!("WAIT  {duration_s:.2} s"),
         BlockKind::SetHeaterPower { fraction } => format!("SET HEATER  {:.0}%", fraction * 100.0),
         BlockKind::ReadTemperature { sensor_id } => format!("READ TEMP  {sensor_id}"),
-        BlockKind::BranchTemperature { comparison, threshold_c, target_block_id } => {
-            let op = match comparison { super::model::TemperatureComparison::GreaterOrEqual => ">=", super::model::TemperatureComparison::LessThan => "<" };
+        BlockKind::BranchTemperature {
+            comparison,
+            threshold_c,
+            target_block_id,
+        } => {
+            let op = match comparison {
+                super::model::TemperatureComparison::GreaterOrEqual => ">=",
+                super::model::TemperatureComparison::LessThan => "<",
+            };
             format!("IF TEMP {op} {threshold_c:.1} C  -> #{target_block_id:03}")
         }
         BlockKind::SetVariable { name, value } => format!("SET {name} = {value:.2}"),
-        BlockKind::SetVariableExpression { name, expression } => format!("SET {name} = {expression}"),
+        BlockKind::SetVariableExpression { name, expression } => {
+            format!("SET {name} = {expression}")
+        }
         BlockKind::AddVariable { name, delta } => format!("ADD {name} += {delta:.2}"),
-        BlockKind::BranchVariable { name, comparison, threshold, target_block_id } => {
+        BlockKind::BranchVariable {
+            name,
+            comparison,
+            threshold,
+            target_block_id,
+        } => {
             let op = match comparison {
                 super::model::NumericComparison::GreaterOrEqual => ">=",
                 super::model::NumericComparison::LessThan => "<",
@@ -415,7 +484,9 @@ fn block_summary(kind: &BlockKind) -> String {
             };
             format!("IF {name} {op} {threshold:.2} -> #{target_block_id:03}")
         }
-        BlockKind::Record { message } => format!("RECORD  {}", message.chars().take(20).collect::<String>()),
+        BlockKind::Record { message } => {
+            format!("RECORD  {}", message.chars().take(20).collect::<String>())
+        }
         BlockKind::End => "END".to_string(),
     }
 }

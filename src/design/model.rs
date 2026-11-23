@@ -58,8 +58,7 @@ impl Part {
     pub fn estimated_material_volume_m3(&self) -> f64 {
         match &self.kind {
             PartKind::Cylinder => {
-                std::f64::consts::PI * self.dimensions_m[0] * self.dimensions_m[2]
-                    * self.dimensions_m[1] / 4.0
+                std::f64::consts::PI * self.dimensions_m[0] * self.dimensions_m[2] * self.dimensions_m[1] / 4.0
             }
             _ => self.envelope_volume_m3(),
         }
@@ -172,7 +171,11 @@ impl Assembly {
             } else if !identifiers.insert(part.id.as_str()) {
                 issues.push(format!("Part identifier '{}' is duplicated", part.id));
             }
-            if part.dimensions_m.iter().any(|v| !v.is_finite() || *v <= 0.0 || *v > 100.0) {
+            if part
+                .dimensions_m
+                .iter()
+                .any(|v| !v.is_finite() || *v <= 0.0 || *v > 100.0)
+            {
                 issues.push(format!("Part '{}' has invalid dimensions", part.id));
             }
             if part.position_m.iter().any(|v| !v.is_finite() || v.abs() > 1_000.0) {
@@ -187,7 +190,10 @@ impl Assembly {
         let mut parent_by_child: HashMap<&str, &str> = HashMap::new();
         for connection in &self.connections {
             if connection.id.trim().is_empty() || !connection_ids.insert(connection.id.as_str()) {
-                issues.push(format!("Connection identifier '{}' is empty or duplicated", connection.id));
+                issues.push(format!(
+                    "Connection identifier '{}' is empty or duplicated",
+                    connection.id
+                ));
             }
             if connection.parent_part_id == connection.child_part_id {
                 issues.push(format!("Connection '{}' links a part to itself", connection.id));
@@ -230,7 +236,9 @@ impl Assembly {
     }
 
     pub fn has_parent(&self, part_id: &str) -> bool {
-        self.connections.iter().any(|connection| connection.child_part_id == part_id)
+        self.connections
+            .iter()
+            .any(|connection| connection.child_part_id == part_id)
     }
 
     pub fn can_add_parent_child(&self, parent_id: &str, child_id: &str) -> bool {

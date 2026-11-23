@@ -1,15 +1,16 @@
 mod campus;
 mod design;
-mod jobs;
 mod interface;
+mod jobs;
 mod missile;
 mod save;
-mod ui_kit;
 mod scene;
 mod sequence;
+mod ui_kit;
 
-use bevy::prelude::*;
+use crate::ui_kit::UiInteraction;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use bevy::prelude::*;
 use campus::{CampusState, CampusView};
 use design::DesignSession;
 
@@ -124,12 +125,15 @@ fn move_camera(
     sketch: Res<design::PolygonSketchSession>,
     gizmo: Res<design::GizmoState>,
     inspector: Res<design::InspectorState>,
-    ui_buttons: Query<&Interaction>,
+    ui_buttons: Query<&UiInteraction>,
     mut cameras: Query<(&mut Transform, &mut scene::OrbitCameraRig), With<Camera3d>>,
 ) {
     if gizmo.pointer_captured
         || inspector.is_editing()
-        || matches!(campus.view, CampusView::Contracts | CampusView::Research | CampusView::Programming | CampusView::Computation)
+        || matches!(
+            campus.view,
+            CampusView::Contracts | CampusView::Research | CampusView::Programming | CampusView::Computation
+        )
         || campus.profile_editor_open
         || sequence.graph_is_open()
         || sketch.active
@@ -140,9 +144,7 @@ fn move_camera(
         return;
     };
 
-    let pointer_over_button = ui_buttons
-        .iter()
-        .any(|interaction| *interaction != Interaction::None);
+    let pointer_over_button = ui_buttons.iter().any(|interaction| *interaction != UiInteraction::None);
     let mut changed = false;
 
     // CAD-like mouse navigation: right drag orbits, middle drag pans, wheel zooms.
@@ -209,7 +211,11 @@ fn move_camera(
     if changed {
         let horizontal = rig.pitch.cos() * rig.distance;
         transform.translation = rig.target
-            + Vec3::new(rig.yaw.sin() * horizontal, rig.pitch.sin() * rig.distance, rig.yaw.cos() * horizontal);
+            + Vec3::new(
+                rig.yaw.sin() * horizontal,
+                rig.pitch.sin() * rig.distance,
+                rig.yaw.cos() * horizontal,
+            );
         transform.look_at(rig.target, Vec3::Y);
     }
 }

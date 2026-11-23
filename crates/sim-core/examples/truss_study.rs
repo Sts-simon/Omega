@@ -24,7 +24,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("OMEGA Scientific Core | 2D civil truss statics");
     println!("Study: {}", config.name);
-    println!("Nodes: {} | members: {} | worker threads: {}", config.nodes.len(), config.elements.len(), threads);
+    println!(
+        "Nodes: {} | members: {} | worker threads: {}",
+        config.nodes.len(),
+        config.elements.len(),
+        threads
+    );
     let result = solve_truss(&config, &pool, |fraction| {
         let percent = (fraction * 100.0).round() as u32;
         if percent == 0 || percent == 85 || percent == 100 {
@@ -34,11 +39,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("\nCompleted in {:.3} s wall time", result.elapsed_ms as f64 / 1_000.0);
     println!("Maximum nodal displacement: {:.6e} m", result.max_displacement_m);
-    println!("Maximum absolute axial stress: {:.6e} Pa", result.max_absolute_stress_pa);
-    println!("Maximum absolute member force: {:.6e} N", result.max_absolute_axial_force_n);
-    println!("CG iterations: {} | relative residual: {:.3e}", result.diagnostics.iterations, result.diagnostics.relative_residual);
-    println!("Strain energy: {:.6e} J | external work: {:.6e} J", result.diagnostics.strain_energy_j, result.diagnostics.external_work_j);
-    println!("Energy consistency residual: {:.3e}", result.diagnostics.energy_balance_relative_error);
+    println!(
+        "Maximum absolute axial stress: {:.6e} Pa",
+        result.max_absolute_stress_pa
+    );
+    println!(
+        "Maximum absolute member force: {:.6e} N",
+        result.max_absolute_axial_force_n
+    );
+    println!(
+        "CG iterations: {} | relative residual: {:.3e}",
+        result.diagnostics.iterations, result.diagnostics.relative_residual
+    );
+    println!(
+        "Strain energy: {:.6e} J | external work: {:.6e} J",
+        result.diagnostics.strain_energy_j, result.diagnostics.external_work_j
+    );
+    println!(
+        "Energy consistency residual: {:.3e}",
+        result.diagnostics.energy_balance_relative_error
+    );
     println!("Input fingerprint: {}", result.metadata.input_fingerprint);
 
     let report_directory = PathBuf::from("results");
@@ -46,7 +66,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let timestamp = result.metadata.created_unix_ms;
     let mut collision = 0_u32;
     let report_path = loop {
-        let suffix = if collision == 0 { String::new() } else { format!("_{collision}") };
+        let suffix = if collision == 0 {
+            String::new()
+        } else {
+            format!("_{collision}")
+        };
         let path = report_directory.join(format!("truss_study_{timestamp}{suffix}.json"));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(file) => {

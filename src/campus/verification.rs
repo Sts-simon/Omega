@@ -5,9 +5,16 @@
 
 use super::*;
 use omega_data::ContentHash;
-use omega_rules::{build_dossier, Dossier, DossierDecision, Requirement, VerificationMethod};
+use omega_rules::{Dossier, DossierDecision, Requirement, VerificationMethod, build_dossier};
 
-fn requirement(id: &str, label: &str, metric: &str, cmp: Comparator, limit: f64, methods: &[VerificationMethod]) -> Requirement {
+fn requirement(
+    id: &str,
+    label: &str,
+    metric: &str,
+    cmp: Comparator,
+    limit: f64,
+    methods: &[VerificationMethod],
+) -> Requirement {
     Requirement {
         id: id.to_string(),
         label: label.to_string(),
@@ -26,29 +33,105 @@ pub(super) fn requirements_for(offer: &ContractOffer) -> Vec<Requirement> {
     use VerificationMethod::{Analysis, Test};
     let r = &offer.requirements;
     let mut list = vec![
-        requirement("MASS", "Unit mass (kg)", "mass_kg", AtMost, f64::from(r.max_unit_mass_kg), &[Analysis]),
-        requirement("COST", "Unit cost (cr)", "unit_cost_cr", AtMost, r.max_unit_cost_cr as f64, &[Analysis]),
-        requirement("POWER", "Power draw (W)", "power_draw_w", AtMost, f64::from(r.max_unit_power_w), &[Analysis]),
-        requirement("TEMP_MIN", "Operating minimum (C)", "temp_min_c", AtMost, f64::from(r.temperature_min_c), &[Analysis]),
-        requirement("TEMP_MAX", "Operating maximum (C)", "temp_max_c", AtLeast, f64::from(r.temperature_max_c), &[Analysis]),
-        requirement("STORAGE", "Storage (GB)", "storage_gb", AtLeast, f64::from(r.min_storage_gb), &[Analysis]),
-        requirement("UPTIME", "Uptime (%)", "uptime_percent", AtLeast, f64::from(r.min_uptime_percent), &[Test]),
-        requirement("DATA", "Data completeness (%)", "data_completeness_percent", AtLeast, f64::from(r.min_data_completeness_percent), &[Test]),
+        requirement(
+            "MASS",
+            "Unit mass (kg)",
+            "mass_kg",
+            AtMost,
+            f64::from(r.max_unit_mass_kg),
+            &[Analysis],
+        ),
+        requirement(
+            "COST",
+            "Unit cost (cr)",
+            "unit_cost_cr",
+            AtMost,
+            r.max_unit_cost_cr as f64,
+            &[Analysis],
+        ),
+        requirement(
+            "POWER",
+            "Power draw (W)",
+            "power_draw_w",
+            AtMost,
+            f64::from(r.max_unit_power_w),
+            &[Analysis],
+        ),
+        requirement(
+            "TEMP_MIN",
+            "Operating minimum (C)",
+            "temp_min_c",
+            AtMost,
+            f64::from(r.temperature_min_c),
+            &[Analysis],
+        ),
+        requirement(
+            "TEMP_MAX",
+            "Operating maximum (C)",
+            "temp_max_c",
+            AtLeast,
+            f64::from(r.temperature_max_c),
+            &[Analysis],
+        ),
+        requirement(
+            "STORAGE",
+            "Storage (GB)",
+            "storage_gb",
+            AtLeast,
+            f64::from(r.min_storage_gb),
+            &[Analysis],
+        ),
+        requirement(
+            "UPTIME",
+            "Uptime (%)",
+            "uptime_percent",
+            AtLeast,
+            f64::from(r.min_uptime_percent),
+            &[Test],
+        ),
+        requirement(
+            "DATA",
+            "Data completeness (%)",
+            "data_completeness_percent",
+            AtLeast,
+            f64::from(r.min_data_completeness_percent),
+            &[Test],
+        ),
     ];
     if let Some(limit) = r.max_cg_offset_ratio {
-        list.insert(1, requirement("BALANCE", "CG offset / length", "cg_offset_ratio", AtMost, limit, &[Analysis]));
+        list.insert(
+            1,
+            requirement(
+                "BALANCE",
+                "CG offset / length",
+                "cg_offset_ratio",
+                AtMost,
+                limit,
+                &[Analysis],
+            ),
+        );
     }
     list
 }
 
-fn evidence(id: &str, method: VerificationMethod, run_id: u64, design: &ContentHash, value: f64, uncertainty: f64) -> Evidence {
+fn evidence(
+    id: &str,
+    method: VerificationMethod,
+    run_id: u64,
+    design: &ContentHash,
+    value: f64,
+    uncertainty: f64,
+) -> Evidence {
     Evidence {
         requirement_id: id.to_string(),
         method,
         run_id,
         design: design.clone(),
         program: None,
-        estimate: Estimate { value, uncertainty: uncertainty.max(0.0) },
+        estimate: Estimate {
+            value,
+            uncertainty: uncertainty.max(0.0),
+        },
     }
 }
 
@@ -74,10 +157,17 @@ pub(super) fn analysis_evidence(
         evidence("TEMP_MAX", a, run_id, design, f64::from(profile.operating_max_c), 0.0),
         evidence("STORAGE", a, run_id, design, f64::from(profile.storage_gb), 0.0),
     ];
-    if offer.requirements.max_cg_offset_ratio.is_some() {
-        if let Some(balance) = metrics.get("cg_offset_ratio") {
-            list.push(evidence("BALANCE", a, run_id, design, balance.value, balance.uncertainty));
-        }
+    if offer.requirements.max_cg_offset_ratio.is_some()
+        && let Some(balance) = metrics.get("cg_offset_ratio")
+    {
+        list.push(evidence(
+            "BALANCE",
+            a,
+            run_id,
+            design,
+            balance.value,
+            balance.uncertainty,
+        ));
     }
     Ok(list)
 }
@@ -95,10 +185,22 @@ pub(super) fn proportion_standard_error(percent: f64, samples: u32) -> f64 {
 pub(super) fn field_test_evidence(report: &FieldTestReport, design: &ContentHash, run_id: u64) -> Vec<Evidence> {
     let t = VerificationMethod::Test;
     vec![
-        evidence("UPTIME", t, run_id, design, report.measured_uptime_percent,
-            proportion_standard_error(report.measured_uptime_percent, report.sample_count)),
-        evidence("DATA", t, run_id, design, report.measured_data_completeness_percent,
-            proportion_standard_error(report.measured_data_completeness_percent, report.sample_count)),
+        evidence(
+            "UPTIME",
+            t,
+            run_id,
+            design,
+            report.measured_uptime_percent,
+            proportion_standard_error(report.measured_uptime_percent, report.sample_count),
+        ),
+        evidence(
+            "DATA",
+            t,
+            run_id,
+            design,
+            report.measured_data_completeness_percent,
+            proportion_standard_error(report.measured_data_completeness_percent, report.sample_count),
+        ),
     ]
 }
 
@@ -114,16 +216,22 @@ pub(super) fn rebuild_evidence(
     design: &ContentHash,
 ) -> Vec<Evidence> {
     let mut list = analysis_evidence(&active.offer, assembly, profile, design, 1).unwrap_or_default();
-    if let Some(report) = &active.test_report {
-        if report.design_fingerprint == design.as_str() {
-            list.extend(field_test_evidence(report, design, 2));
-        }
+    if let Some(report) = &active.test_report
+        && report.design_fingerprint == design.as_str()
+    {
+        list.extend(field_test_evidence(report, design, 2));
     }
     list
 }
 
 pub(super) fn dossier_for(active: &ActiveContract, design: &ContentHash) -> Dossier {
-    build_dossier(active.offer.id, &requirements_for(&active.offer), &active.evidence, design, None)
+    build_dossier(
+        active.offer.id,
+        &requirements_for(&active.offer),
+        &active.evidence,
+        design,
+        None,
+    )
 }
 
 fn badge(status: &RequirementStatus) -> &'static str {
@@ -172,7 +280,10 @@ pub(super) fn matrix_view(active: &ActiveContract, design: &ContentHash) -> Matr
             Comparator::AtMost => "<=",
             Comparator::AtLeast => ">=",
         };
-        let proof = active.evidence.iter().find(|e| Some(e.run_id) == row.run_id && e.requirement_id == requirement.id);
+        let proof = active
+            .evidence
+            .iter()
+            .find(|e| Some(e.run_id) == row.run_id && e.requirement_id == requirement.id);
         let (value, detail) = match (proof, &row.status) {
             (Some(e), RequirementStatus::Stale) => (
                 "stale".to_string(),
@@ -180,16 +291,27 @@ pub(super) fn matrix_view(active: &ActiveContract, design: &ContentHash) -> Matr
             ),
             (Some(e), status) => {
                 let margin = match status {
-                    RequirementStatus::Verified { margin } | RequirementStatus::Marginal { margin } | RequirementStatus::Failed { margin } => *margin,
+                    RequirementStatus::Verified { margin }
+                    | RequirementStatus::Marginal { margin }
+                    | RequirementStatus::Failed { margin } => *margin,
                     _ => 0.0,
                 };
                 (
                     format!("{:.2} +/-{:.2}", e.estimate.value, e.estimate.uncertainty),
-                    format!("{:.2} +/-{:.2}, margin {:+.2} ({})", e.estimate.value, e.estimate.uncertainty, margin, method_name(e.method)),
+                    format!(
+                        "{:.2} +/-{:.2}, margin {:+.2} ({})",
+                        e.estimate.value,
+                        e.estimate.uncertainty,
+                        margin,
+                        method_name(e.method)
+                    ),
                 )
             }
             (None, _) => {
-                let need = requirement.allowed_methods.first().map_or("evidence", |m| method_name(*m));
+                let need = requirement
+                    .allowed_methods
+                    .first()
+                    .map_or("evidence", |m| method_name(*m));
                 (format!("needs {need}"), format!("needs {need}"))
             }
         };
@@ -205,7 +327,12 @@ pub(super) fn matrix_view(active: &ActiveContract, design: &ContentHash) -> Matr
         DossierDecision::Accepted { .. } => (true, 0),
         DossierDecision::Rejected { reasons } => (false, reasons.len()),
     };
-    MatrixView { rows, ready, score_percent: (dossier.score * 100.0).round().clamp(0.0, 100.0) as u8, open_items }
+    MatrixView {
+        rows,
+        ready,
+        score_percent: (dossier.score * 100.0).round().clamp(0.0, 100.0) as u8,
+        open_items,
+    }
 }
 
 /// Plain-text rendering of the matrix (used by tests and logs).
@@ -213,7 +340,10 @@ pub(super) fn matrix_lines(active: &ActiveContract, design: &ContentHash) -> Vec
     let view = matrix_view(active, design);
     let mut lines = vec!["    Verification matrix:".to_string()];
     for row in &view.rows {
-        lines.push(format!("      [{:<5}] {} {}: {}", row.badge, row.label, row.rule, row.detail));
+        lines.push(format!(
+            "      [{:<5}] {} {}: {}",
+            row.badge, row.label, row.rule, row.detail
+        ));
     }
     lines.push(if view.ready {
         format!("    Dossier: READY for delivery (score {}%)", view.score_percent)
@@ -225,12 +355,26 @@ pub(super) fn matrix_lines(active: &ActiveContract, design: &ContentHash) -> Vec
 
 /// Margin-too-thin issues for geometry-derived requirements at submission time. Outright failures
 /// of mass and cost are already reported by the direct limit checks, so only `Marginal` is added.
-pub(super) fn thin_margin_issues(offer: &ContractOffer, assembly: &Assembly, profile: &InstrumentProfile, issues: &mut Vec<String>) {
-    let Ok(design) = assembly_content_hash(assembly) else { return };
-    let Ok(list) = analysis_evidence(offer, assembly, profile, &design, 1) else { return };
+pub(super) fn thin_margin_issues(
+    offer: &ContractOffer,
+    assembly: &Assembly,
+    profile: &InstrumentProfile,
+    issues: &mut Vec<String>,
+) {
+    let Ok(design) = assembly_content_hash(assembly) else {
+        return;
+    };
+    let Ok(list) = analysis_evidence(offer, assembly, profile, &design, 1) else {
+        return;
+    };
     let requirements = requirements_for(offer);
-    for ev in list.iter().filter(|e| e.requirement_id == "MASS" || e.requirement_id == "COST") {
-        let Some(req) = requirements.iter().find(|r| r.id == ev.requirement_id) else { continue };
+    for ev in list
+        .iter()
+        .filter(|e| e.requirement_id == "MASS" || e.requirement_id == "COST")
+    {
+        let Some(req) = requirements.iter().find(|r| r.id == ev.requirement_id) else {
+            continue;
+        };
         if let RequirementStatus::Marginal { .. } = evaluate_requirement(req, Some(ev), &design, None) {
             issues.push(format!(
                 "{} margin is too thin: {:.2} +/-{:.2} against a limit of {:.2}",
@@ -328,11 +472,21 @@ mod tests {
         contract.evidence = analysis_evidence(&offer, &assembly, &profile, &design, 1).unwrap();
 
         let before = dossier_for(&contract, &design);
-        assert!(matches!(&before.decision, DossierDecision::Rejected { reasons } if reasons.len() == 2), "{:?}", before.decision);
+        assert!(
+            matches!(&before.decision, DossierDecision::Rejected { reasons } if reasons.len() == 2),
+            "{:?}",
+            before.decision
+        );
 
-        contract.evidence.extend(field_test_evidence(&report(97.0, 97.0, &design), &design, 2));
+        contract
+            .evidence
+            .extend(field_test_evidence(&report(97.0, 97.0, &design), &design, 2));
         let after = dossier_for(&contract, &design);
-        assert!(matches!(after.decision, DossierDecision::Accepted { .. }), "{:?}", after.decision);
+        assert!(
+            matches!(after.decision, DossierDecision::Accepted { .. }),
+            "{:?}",
+            after.decision
+        );
     }
 
     #[test]
@@ -343,9 +497,13 @@ mod tests {
         let mut contract = active(offer.clone());
         contract.evidence = analysis_evidence(&offer, &assembly, &InstrumentProfile::default(), &design, 1).unwrap();
         // 90.2% measured against a 90% limit: inside one standard error (~0.94 points).
-        contract.evidence.extend(field_test_evidence(&report(90.2, 97.0, &design), &design, 2));
+        contract
+            .evidence
+            .extend(field_test_evidence(&report(90.2, 97.0, &design), &design, 2));
         let dossier = dossier_for(&contract, &design);
-        assert!(matches!(&dossier.decision, DossierDecision::Rejected { reasons } if reasons.len() == 1 && reasons[0].contains("margin")));
+        assert!(
+            matches!(&dossier.decision, DossierDecision::Rejected { reasons } if reasons.len() == 1 && reasons[0].contains("margin"))
+        );
     }
 
     #[test]
@@ -355,13 +513,17 @@ mod tests {
         let design = assembly_content_hash(&assembly).unwrap();
         let mut contract = active(offer.clone());
         contract.evidence = analysis_evidence(&offer, &assembly, &InstrumentProfile::default(), &design, 1).unwrap();
-        contract.evidence.extend(field_test_evidence(&report(97.0, 97.0, &design), &design, 2));
+        contract
+            .evidence
+            .extend(field_test_evidence(&report(97.0, 97.0, &design), &design, 2));
 
         let mut edited = assembly.clone();
         edited.parts[1].position_m[0] -= 0.4;
         let new_hash = assembly_content_hash(&edited).unwrap();
         let dossier = dossier_for(&contract, &new_hash);
-        assert!(matches!(&dossier.decision, DossierDecision::Rejected { reasons } if reasons.iter().all(|r| r.contains("stale"))));
+        assert!(
+            matches!(&dossier.decision, DossierDecision::Rejected { reasons } if reasons.iter().all(|r| r.contains("stale")))
+        );
         let lines = matrix_lines(&contract, &new_hash);
         assert!(lines.iter().any(|l| l.contains("[STALE")));
     }
@@ -374,7 +536,10 @@ mod tests {
         let mut contract = active(offer);
         contract.test_report = Some(report(97.0, 97.0, &design));
         contract.evidence = rebuild_evidence(&contract, &assembly, &InstrumentProfile::default(), &design);
-        assert!(matches!(dossier_for(&contract, &design).decision, DossierDecision::Accepted { .. }));
+        assert!(matches!(
+            dossier_for(&contract, &design).decision,
+            DossierDecision::Accepted { .. }
+        ));
         assert_eq!(next_run_id(&contract.evidence), 3);
     }
 
@@ -386,7 +551,10 @@ mod tests {
         let mut contract = active(offer.clone());
         contract.evidence = analysis_evidence(&offer, &assembly, &InstrumentProfile::default(), &design, 1).unwrap();
         let lines = matrix_lines(&contract, &design).join("\n");
-        assert!(lines.contains("[OPEN ] Uptime (%) >= 90.00: needs field test"), "{lines}");
+        assert!(
+            lines.contains("[OPEN ] Uptime (%) >= 90.00: needs field test"),
+            "{lines}"
+        );
         assert!(lines.contains("NOT READY"));
         assert!(lines.contains("[OK   ] Unit mass (kg)"));
     }
@@ -403,7 +571,10 @@ mod tests {
         // A limit just above the estimate sits inside the cost uncertainty (85 cr/kg of mass error).
         offer.requirements.max_unit_cost_cr = cost + 5;
         thin_margin_issues(&offer, &assembly, &profile, &mut issues);
-        assert!(issues.iter().any(|i| i.contains("Unit cost")), "cost {cost}, {issues:?}");
+        assert!(
+            issues.iter().any(|i| i.contains("Unit cost")),
+            "cost {cost}, {issues:?}"
+        );
         // A limit below the estimate is a plain failure, reported by the direct limit check instead.
         issues.clear();
         offer.requirements.max_unit_cost_cr = cost - 1;

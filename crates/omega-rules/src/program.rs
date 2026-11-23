@@ -12,15 +12,27 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "block", rename_all = "snake_case")]
 pub enum Block {
     /// Pause this thread for some seconds.
-    Wait { seconds: f64 },
-    IgniteStage { stage: usize },
-    SeparateStage { stage: usize },
+    Wait {
+        seconds: f64,
+    },
+    IgniteStage {
+        stage: usize,
+    },
+    SeparateStage {
+        stage: usize,
+    },
     /// Throttle for liquid and air-breathing engines (solid motors cannot throttle).
-    SetThrottle { fraction: f64 },
+    SetThrottle {
+        fraction: f64,
+    },
     /// Needs a pitot tube.
-    HoldSpeed { speed_ms: f64 },
+    HoldSpeed {
+        speed_ms: f64,
+    },
     /// Needs a barometer: hold the altitude where the air pressure equals `hpa`.
-    HoldPressure { hpa: f64 },
+    HoldPressure {
+        hpa: f64,
+    },
     /// Needs a radar. Must be the last block of its thread (final phase).
     LockTarget,
 }
@@ -93,7 +105,10 @@ pub fn validate_program(program: &Program, vehicle: &Vehicle) -> Vec<String> {
         for (b, block) in thread.iter().enumerate() {
             let place = format!("thread {} block {}", t + 1, b + 1);
             if !available.contains(block.kind()) {
-                issues.push(format!("{place}: '{}' needs hardware this vehicle does not have", block.label()));
+                issues.push(format!(
+                    "{place}: '{}' needs hardware this vehicle does not have",
+                    block.label()
+                ));
             }
             match *block {
                 Block::Wait { seconds } if !(0.0..=3_600.0).contains(&seconds) || !seconds.is_finite() => {
@@ -114,7 +129,9 @@ pub fn validate_program(program: &Program, vehicle: &Vehicle) -> Vec<String> {
                 Block::LockTarget => {
                     locks += 1;
                     if b + 1 != thread.len() {
-                        issues.push(format!("{place}: 'Lock target' must be the last block of its thread (final phase)"));
+                        issues.push(format!(
+                            "{place}: 'Lock target' must be the last block of its thread (final phase)"
+                        ));
                     }
                 }
                 _ => {}
@@ -135,7 +152,12 @@ mod tests {
 
     fn with_radar() -> Vehicle {
         let mut v = sounding_rocket();
-        v.stages[1].parts.push(part("radar", PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Basic) }));
+        v.stages[1].parts.push(part(
+            "radar",
+            PartSpec::Sensor {
+                kind: SensorKind::Radar(RadarClass::Basic),
+            },
+        ));
         v
     }
 
@@ -154,15 +176,26 @@ mod tests {
     #[test]
     fn a_basic_computer_limits_threads_and_memory() {
         let vehicle = sounding_rocket(); // basic computer: 1 thread, 8 blocks
-        let program = Program { threads: vec![vec![Block::Wait { seconds: 1.0 }], vec![Block::Wait { seconds: 1.0 }]] };
-        assert!(validate_program(&program, &vehicle).join(" ").contains("parallel threads"));
+        let program = Program {
+            threads: vec![vec![Block::Wait { seconds: 1.0 }], vec![Block::Wait { seconds: 1.0 }]],
+        };
+        assert!(
+            validate_program(&program, &vehicle)
+                .join(" ")
+                .contains("parallel threads")
+        );
         let long = Program::single(vec![Block::Wait { seconds: 1.0 }; 9]);
         assert!(validate_program(&long, &vehicle).join(" ").contains("memory"));
 
         let mut better = sounding_rocket();
-        better.stages[1].parts[1].spec = PartSpec::Computer { class: ComputerClass::Standard };
+        better.stages[1].parts[1].spec = PartSpec::Computer {
+            class: ComputerClass::Standard,
+        };
         assert!(validate_program(&program, &better).is_empty());
-        assert!(validate_program(&long, &better).is_empty(), "16 blocks fit a standard computer");
+        assert!(
+            validate_program(&long, &better).is_empty(),
+            "16 blocks fit a standard computer"
+        );
     }
 
     #[test]
@@ -170,7 +203,10 @@ mod tests {
         let vehicle = sounding_rocket(); // pitot only
         let program = Program::single(vec![Block::HoldPressure { hpa: 900.0 }, Block::LockTarget]);
         let issues = validate_program(&program, &vehicle).join(" | ");
-        assert!(issues.contains("Hold 900 hPa") && issues.contains("Lock target"), "{issues}");
+        assert!(
+            issues.contains("Hold 900 hPa") && issues.contains("Lock target"),
+            "{issues}"
+        );
         let ok = Program::single(vec![Block::HoldSpeed { speed_ms: 250.0 }, Block::LockTarget]);
         assert!(validate_program(&ok, &with_radar()).is_empty());
     }
@@ -180,7 +216,9 @@ mod tests {
         let vehicle = with_radar();
         let early = Program::single(vec![Block::LockTarget, Block::Wait { seconds: 1.0 }]);
         assert!(validate_program(&early, &vehicle).join(" ").contains("last block"));
-        let twice = Program { threads: vec![vec![Block::LockTarget]] };
+        let twice = Program {
+            threads: vec![vec![Block::LockTarget]],
+        };
         assert!(validate_program(&twice, &vehicle).is_empty());
     }
 
@@ -209,7 +247,11 @@ mod tests {
 
     #[test]
     fn programs_round_trip_through_json() {
-        let program = Program::single(vec![Block::HoldPressure { hpa: 1013.0 }, Block::Wait { seconds: 2.5 }, Block::LockTarget]);
+        let program = Program::single(vec![
+            Block::HoldPressure { hpa: 1013.0 },
+            Block::Wait { seconds: 2.5 },
+            Block::LockTarget,
+        ]);
         let json = serde_json::to_string(&program).unwrap();
         assert_eq!(serde_json::from_str::<Program>(&json).unwrap(), program);
     }

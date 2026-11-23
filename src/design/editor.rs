@@ -1,6 +1,7 @@
 use super::{Assembly, DesignSession, MaterialKind, Part, PartKind, PolygonSketchSession};
 use crate::campus::{CampusState, CampusView};
 use crate::sequence::SequenceWorkspace;
+use crate::ui_kit::UiInteraction;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -88,7 +89,6 @@ impl GizmoState {
 #[derive(Clone, Copy, Debug)]
 enum GizmoDrag {
     Translate {
-        axis: usize,
         axis_world: Vec3,
         origin: Vec3,
         view_forward: Vec3,
@@ -113,9 +113,22 @@ pub(crate) struct GizmoAxisVisual(usize);
 
 #[derive(Clone, Copy, Debug)]
 enum GizmoPrimitive {
-    AxisShaft { axis: usize, length: f32, width: f32 },
-    AxisTip { axis: usize, length: f32, size: f32 },
-    RingSegment { axis: usize, angle: f32, radius: f32, width: f32 },
+    AxisShaft {
+        axis: usize,
+        length: f32,
+        width: f32,
+    },
+    AxisTip {
+        axis: usize,
+        length: f32,
+        size: f32,
+    },
+    RingSegment {
+        axis: usize,
+        angle: f32,
+        radius: f32,
+        width: f32,
+    },
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -137,7 +150,7 @@ pub fn setup_ui(mut commands: Commands) {
             padding: UiRect::all(Val::Px(12.0)),
             ..default()
         },
-        Interaction::None,
+        UiInteraction::None,
         BackgroundColor(Color::srgba(0.025, 0.04, 0.055, 0.88)),
         EditorHud,
     ));
@@ -176,7 +189,13 @@ pub fn handle_keyboard(
     mut gizmo: ResMut<GizmoState>,
     inspector: Res<super::InspectorState>,
 ) {
-    if campus.view != CampusView::Construction || campus.profile_editor_open || sequence.graph_is_open() || sketch.active || gizmo.pointer_captured || inspector.is_editing() {
+    if campus.view != CampusView::Construction
+        || campus.profile_editor_open
+        || sequence.graph_is_open()
+        || sketch.active
+        || gizmo.pointer_captured
+        || inspector.is_editing()
+    {
         return;
     }
     let control = control_down(&keys);
@@ -193,10 +212,18 @@ pub fn handle_keyboard(
     }
 
     if control && keys.just_pressed(KeyCode::KeyZ) {
-        if session.undo() { info!("Undo applied."); } else { info!("Nothing to undo."); }
+        if session.undo() {
+            info!("Undo applied.");
+        } else {
+            info!("Nothing to undo.");
+        }
     }
     if control && keys.just_pressed(KeyCode::KeyY) {
-        if session.redo() { info!("Redo applied."); } else { info!("Nothing to redo."); }
+        if session.redo() {
+            info!("Redo applied.");
+        } else {
+            info!("Nothing to redo.");
+        }
     }
 
     if !control && keys.just_pressed(KeyCode::Tab) {
@@ -237,12 +264,24 @@ pub fn handle_keyboard(
 
     let move_step = if alt { 0.01 } else { 0.1 };
     let mut movement = [0.0_f64; 3];
-    if !control && keys.just_pressed(KeyCode::KeyJ) { movement[0] -= move_step; }
-    if !control && keys.just_pressed(KeyCode::KeyL) { movement[0] += move_step; }
-    if !control && keys.just_pressed(KeyCode::KeyI) { movement[2] -= move_step; }
-    if !control && keys.just_pressed(KeyCode::KeyK) { movement[2] += move_step; }
-    if !control && keys.just_pressed(KeyCode::KeyU) { movement[1] += move_step; }
-    if !control && keys.just_pressed(KeyCode::KeyO) { movement[1] -= move_step; }
+    if !control && keys.just_pressed(KeyCode::KeyJ) {
+        movement[0] -= move_step;
+    }
+    if !control && keys.just_pressed(KeyCode::KeyL) {
+        movement[0] += move_step;
+    }
+    if !control && keys.just_pressed(KeyCode::KeyI) {
+        movement[2] -= move_step;
+    }
+    if !control && keys.just_pressed(KeyCode::KeyK) {
+        movement[2] += move_step;
+    }
+    if !control && keys.just_pressed(KeyCode::KeyU) {
+        movement[1] += move_step;
+    }
+    if !control && keys.just_pressed(KeyCode::KeyO) {
+        movement[1] -= move_step;
+    }
     if movement.iter().any(|value| *value != 0.0) {
         session.move_selected(movement);
     }
@@ -281,17 +320,27 @@ pub fn handle_keyboard(
         (2, KeyCode::F9, KeyCode::F10),
     ] {
         if !control && keys.just_pressed(smaller) {
-            if alt { session.adjust_selected_dimension(axis, -0.01); }
-            else { session.resize_selected_axis(axis, 0.95); }
+            if alt {
+                session.adjust_selected_dimension(axis, -0.01);
+            } else {
+                session.resize_selected_axis(axis, 0.95);
+            }
         }
         if !control && keys.just_pressed(larger) {
-            if alt { session.adjust_selected_dimension(axis, 0.01); }
-            else { session.resize_selected_axis(axis, 1.05); }
+            if alt {
+                session.adjust_selected_dimension(axis, 0.01);
+            } else {
+                session.resize_selected_axis(axis, 1.05);
+            }
         }
     }
 
     if keys.just_pressed(KeyCode::KeyS) && control_down(&keys) {
-        match session.assembly.to_bytes().and_then(|bytes| crate::save::write(crate::save::SaveFile::Assembly, &bytes)) {
+        match session
+            .assembly
+            .to_bytes()
+            .and_then(|bytes| crate::save::write(crate::save::SaveFile::Assembly, &bytes))
+        {
             Ok(()) => info!("Assembly saved to the save slot"),
             Err(error) => error!("Could not save assembly: {error}"),
         }
@@ -324,23 +373,29 @@ pub fn pick_part_with_mouse(
     camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
     visuals: Query<(&GlobalTransform, &PartVisual)>,
     mut session: ResMut<DesignSession>,
-    ui_buttons: Query<&Interaction>,
+    ui_buttons: Query<&UiInteraction>,
     gizmo: Res<GizmoState>,
     inspector: Res<super::InspectorState>,
 ) {
-    if gizmo.pointer_captured || inspector.is_editing() || campus.is_changed()
+    if gizmo.pointer_captured
+        || inspector.is_editing()
+        || campus.is_changed()
         || campus.view != CampusView::Construction
         || campus.profile_editor_open
         || sequence.graph_is_open()
         || sketch.active
         || !mouse.just_pressed(MouseButton::Left)
-        || ui_buttons.iter().any(|interaction| *interaction != Interaction::None)
+        || ui_buttons.iter().any(|interaction| *interaction != UiInteraction::None)
     {
         return;
     }
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     let (camera, camera_transform) = *camera;
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else { return };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+        return;
+    };
     let origin = ray.origin;
     let direction = ray.direction.as_vec3();
 
@@ -351,23 +406,18 @@ pub fn pick_part_with_mouse(
         let inverse = transform.to_matrix().inverse();
         let local_origin = inverse.transform_point3(origin);
         let local_direction = inverse.transform_vector3(direction);
-        if let Some(distance) = ray_aabb(
-            local_origin,
-            local_direction,
-            Vec3::splat(-0.5),
-            Vec3::splat(0.5),
-        ) {
-            if closest.as_ref().is_none_or(|(best, _)| distance < *best) {
-                closest = Some((distance, visual.id.clone()));
-            }
+        if let Some(distance) = ray_aabb(local_origin, local_direction, Vec3::splat(-0.5), Vec3::splat(0.5))
+            && closest.as_ref().is_none_or(|(best, _)| distance < *best)
+        {
+            closest = Some((distance, visual.id.clone()));
         }
     }
 
-    if let Some((_, id)) = closest {
-        if session.selected_part_id.as_deref() != Some(id.as_str()) {
-            session.selected_part_id = Some(id);
-            session.touch();
-        }
+    if let Some((_, id)) = closest
+        && session.selected_part_id.as_deref() != Some(id.as_str())
+    {
+        session.selected_part_id = Some(id);
+        session.touch();
     }
 }
 
@@ -379,7 +429,7 @@ pub fn handle_gizmo_input(
     sketch: Res<PolygonSketchSession>,
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
-    ui_interactions: Query<&Interaction>,
+    ui_interactions: Query<&UiInteraction>,
     mut gizmo: ResMut<GizmoState>,
     mut session: ResMut<DesignSession>,
     inspector: Res<super::InspectorState>,
@@ -407,9 +457,16 @@ pub fn handle_gizmo_input(
         if let Some((ray_origin, ray_direction)) = current_cursor_ray(*window, camera_ref, camera_transform_ref) {
             match active_drag {
                 GizmoDrag::Translate {
-                    axis_world, origin, view_forward, start_parameter, start_position_m, ..
+                    axis_world,
+                    origin,
+                    view_forward,
+                    start_parameter,
+                    start_position_m,
+                    ..
                 } => {
-                    if let Some(parameter) = translation_parameter(ray_origin, ray_direction, origin, axis_world, view_forward) {
+                    if let Some(parameter) =
+                        translation_parameter(ray_origin, ray_direction, origin, axis_world, view_forward)
+                    {
                         let delta = parameter - start_parameter;
                         let target = [
                             start_position_m[0] + axis_world.x as f64 * delta as f64,
@@ -420,7 +477,12 @@ pub fn handle_gizmo_input(
                     }
                 }
                 GizmoDrag::Rotate {
-                    axis, axis_world, origin, last_vector, accumulated_angle, base_rotation_rad,
+                    axis,
+                    axis_world,
+                    origin,
+                    last_vector,
+                    accumulated_angle,
+                    base_rotation_rad,
                 } => {
                     if let Some(hit) = ray_plane_hit(ray_origin, ray_direction, origin, axis_world) {
                         let current_vector = (hit - origin).normalize_or_zero();
@@ -432,8 +494,12 @@ pub fn handle_gizmo_input(
                             if incremental_angle.abs() > 1.0e-6 {
                                 session.set_selected_gizmo_rotation(axis, base_rotation_rad, total_angle as f64);
                                 gizmo.drag = Some(GizmoDrag::Rotate {
-                                    axis, axis_world, origin, last_vector: current_vector,
-                                    accumulated_angle: total_angle, base_rotation_rad,
+                                    axis,
+                                    axis_world,
+                                    origin,
+                                    last_vector: current_vector,
+                                    accumulated_angle: total_angle,
+                                    base_rotation_rad,
                                 });
                             }
                         }
@@ -453,7 +519,10 @@ pub fn handle_gizmo_input(
     }
 
     gizmo.pointer_captured = false;
-    if ui_interactions.iter().any(|interaction| *interaction != Interaction::None) {
+    if ui_interactions
+        .iter()
+        .any(|interaction| *interaction != UiInteraction::None)
+    {
         gizmo.hovered_axis = None;
         return;
     }
@@ -489,11 +558,11 @@ pub fn handle_gizmo_input(
     );
     gizmo.hovered_axis = hit.map(|(axis, _)| axis);
 
-    if mouse.just_pressed(MouseButton::Left) {
-        if let Some((_axis, drag)) = hit {
-            gizmo.drag = Some(drag);
-            gizmo.pointer_captured = true;
-        }
+    if mouse.just_pressed(MouseButton::Left)
+        && let Some((_axis, drag)) = hit
+    {
+        gizmo.drag = Some(drag);
+        gizmo.pointer_captured = true;
     }
 }
 
@@ -514,14 +583,17 @@ pub fn sync_gizmo_visuals(
         && !sketch.active
         && session.selected_index().is_some();
     let selected = session.selected_part_id.clone();
-    let dimensions = session.selected_index()
+    let dimensions = session
+        .selected_index()
         .map(|index| session.assembly.parts[index].dimensions_m)
         .unwrap_or([0.0; 3]);
     let changed = gizmo.rendered_visible != visible
         || gizmo.rendered_selection != selected
         || gizmo.rendered_mode != gizmo.mode
         || gizmo.rendered_dimensions != dimensions;
-    if !changed { return; }
+    if !changed {
+        return;
+    }
 
     for entity in &old_visuals {
         commands.entity(entity).despawn();
@@ -531,8 +603,12 @@ pub fn sync_gizmo_visuals(
     gizmo.rendered_mode = gizmo.mode;
     gizmo.rendered_dimensions = dimensions;
 
-    if !visible { return; }
-    let Some(index) = session.selected_index() else { return };
+    if !visible {
+        return;
+    }
+    let Some(index) = session.selected_index() else {
+        return;
+    };
     let part = &session.assembly.parts[index];
     let (axis_length, ring_radius) = gizmo_dimensions(part);
 
@@ -541,12 +617,24 @@ pub fn sync_gizmo_visuals(
             for axis in 0..3 {
                 let width = (axis_length * 0.035).clamp(0.025, 0.065);
                 spawn_gizmo_primitive(
-                    &mut commands, &assets, axis,
-                    GizmoPrimitive::AxisShaft { axis, length: axis_length, width },
+                    &mut commands,
+                    &assets,
+                    axis,
+                    GizmoPrimitive::AxisShaft {
+                        axis,
+                        length: axis_length,
+                        width,
+                    },
                 );
                 spawn_gizmo_primitive(
-                    &mut commands, &assets, axis,
-                    GizmoPrimitive::AxisTip { axis, length: axis_length, size: width * 3.2 },
+                    &mut commands,
+                    &assets,
+                    axis,
+                    GizmoPrimitive::AxisTip {
+                        axis,
+                        length: axis_length,
+                        size: width * 3.2,
+                    },
                 );
             }
         }
@@ -556,9 +644,13 @@ pub fn sync_gizmo_visuals(
                 for segment in 0..SEGMENTS {
                     let angle = std::f32::consts::TAU * segment as f32 / SEGMENTS as f32;
                     spawn_gizmo_primitive(
-                        &mut commands, &assets, axis,
+                        &mut commands,
+                        &assets,
+                        axis,
                         GizmoPrimitive::RingSegment {
-                            axis, angle, radius: ring_radius,
+                            axis,
+                            angle,
+                            radius: ring_radius,
                             width: (ring_radius * 0.018).clamp(0.018, 0.04),
                         },
                     );
@@ -575,15 +667,22 @@ pub fn update_gizmo_visuals(
     gizmo: Res<GizmoState>,
     camera: Single<&GlobalTransform, With<Camera3d>>,
     assets: Res<EditorAssets>,
-    mut visuals: Query<(
-        &GizmoPrimitiveVisual,
-        &GizmoAxisVisual,
-        &mut Transform,
-        &mut MeshMaterial3d<StandardMaterial>,
-    ), With<GizmoVisual>>,
+    mut visuals: Query<
+        (
+            &GizmoPrimitiveVisual,
+            &GizmoAxisVisual,
+            &mut Transform,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        With<GizmoVisual>,
+    >,
 ) {
-    if campus.view != CampusView::Construction { return; }
-    let Some(index) = session.selected_index() else { return };
+    if campus.view != CampusView::Construction {
+        return;
+    }
+    let Some(index) = session.selected_index() else {
+        return;
+    };
     let part = &session.assembly.parts[index];
     let origin = Vec3::from_array(part.position_m.map(|value| value as f32)) + ASSEMBLY_ANCHOR;
     let rotation = part_rotation(part);
@@ -603,12 +702,7 @@ pub fn update_gizmo_visuals(
     }
 }
 
-fn spawn_gizmo_primitive(
-    commands: &mut Commands,
-    assets: &EditorAssets,
-    axis: usize,
-    primitive: GizmoPrimitive,
-) {
+fn spawn_gizmo_primitive(commands: &mut Commands, assets: &EditorAssets, axis: usize, primitive: GizmoPrimitive) {
     let mesh = match primitive {
         GizmoPrimitive::AxisTip { .. } => assets.gizmo_cone.clone(),
         _ => assets.cylinder.clone(),
@@ -657,7 +751,12 @@ fn gizmo_primitive_transform(
                 .with_rotation(rotation)
                 .with_scale(Vec3::splat(size))
         }
-        GizmoPrimitive::RingSegment { axis, angle, radius, width } => {
+        GizmoPrimitive::RingSegment {
+            axis,
+            angle,
+            radius,
+            width,
+        } => {
             let radius = radius * view_scale;
             let width = width * view_scale;
             let a = ring_point(axis, angle, radius);
@@ -673,12 +772,17 @@ fn gizmo_primitive_transform(
 
 fn gizmo_dimensions(part: &Part) -> (f32, f32) {
     let maximum = part.dimensions_m.iter().copied().fold(0.0_f64, f64::max) as f32;
-    ((maximum * 0.85 + 0.7).clamp(0.9, 2.8), (maximum * 0.65 + 0.45).clamp(0.75, 2.2))
+    (
+        (maximum * 0.85 + 0.7).clamp(0.9, 2.8),
+        (maximum * 0.65 + 0.45).clamp(0.75, 2.2),
+    )
 }
 
 /// Approximate screen-constant gizmo sizing for the fixed-FOV workshop camera.
 fn gizmo_scale_factor(view_distance: f32) -> f32 {
-    if !view_distance.is_finite() { return 1.0; }
+    if !view_distance.is_finite() {
+        return 1.0;
+    }
     (view_distance / 24.0).clamp(0.65, 4.8)
 }
 
@@ -692,7 +796,11 @@ fn part_rotation(part: &Part) -> Quat {
 }
 
 fn axis_vector(axis: usize) -> Vec3 {
-    match axis { 0 => Vec3::X, 1 => Vec3::Y, _ => Vec3::Z }
+    match axis {
+        0 => Vec3::X,
+        1 => Vec3::Y,
+        _ => Vec3::Z,
+    }
 }
 
 fn ring_point(axis: usize, angle: f32, radius: f32) -> Vec3 {
@@ -705,11 +813,7 @@ fn ring_point(axis: usize, angle: f32, radius: f32) -> Vec3 {
     }
 }
 
-fn current_cursor_ray(
-    window: &Window,
-    camera: &Camera,
-    camera_transform: &GlobalTransform,
-) -> Option<(Vec3, Vec3)> {
+fn current_cursor_ray(window: &Window, camera: &Camera, camera_transform: &GlobalTransform) -> Option<(Vec3, Vec3)> {
     let cursor = window.cursor_position()?;
     let ray = camera.viewport_to_world(camera_transform, cursor).ok()?;
     Some((ray.origin, ray.direction.as_vec3()))
@@ -717,9 +821,13 @@ fn current_cursor_ray(
 
 fn ray_plane_hit(ray_origin: Vec3, ray_direction: Vec3, plane_origin: Vec3, plane_normal: Vec3) -> Option<Vec3> {
     let denominator = ray_direction.dot(plane_normal);
-    if denominator.abs() < 1.0e-5 { return None; }
+    if denominator.abs() < 1.0e-5 {
+        return None;
+    }
     let distance = (plane_origin - ray_origin).dot(plane_normal) / denominator;
-    if distance < 0.0 { return None; }
+    if distance < 0.0 {
+        return None;
+    }
     Some(ray_origin + ray_direction * distance)
 }
 
@@ -734,11 +842,15 @@ fn translation_parameter(
     // then project onto the visible part of the axis. An axis aimed directly at the
     // camera has no stable screen-space drag and is intentionally not pickable.
     let view_normal = view_forward.normalize_or_zero();
-    if view_normal.length_squared() < 0.5 { return None; }
+    if view_normal.length_squared() < 0.5 {
+        return None;
+    }
     let hit = ray_plane_hit(ray_origin, ray_direction, axis_origin, view_normal)?;
     let projected_axis = axis - view_normal * axis.dot(view_normal);
     let projected_length_squared = projected_axis.length_squared();
-    if projected_length_squared < 1.0e-4 { return None; }
+    if projected_length_squared < 1.0e-4 {
+        return None;
+    }
     Some((hit - axis_origin).dot(projected_axis) / projected_length_squared)
 }
 
@@ -759,12 +871,18 @@ fn hit_test_gizmo(
             let mut best: Option<(f32, usize, f32, Vec3)> = None;
             for axis in 0..3 {
                 let axis_world = (part_rotation * axis_vector(axis)).normalize_or_zero();
-                let Some(parameter) = translation_parameter(
-                    ray_origin, ray_direction, origin, axis_world, view_forward,
-                ) else { continue };
-                if !(0.0..=axis_length).contains(&parameter) { continue; }
+                let Some(parameter) =
+                    translation_parameter(ray_origin, ray_direction, origin, axis_world, view_forward)
+                else {
+                    continue;
+                };
+                if !(0.0..=axis_length).contains(&parameter) {
+                    continue;
+                }
                 let view_normal = view_forward.normalize_or_zero();
-                let Some(hit) = ray_plane_hit(ray_origin, ray_direction, origin, view_normal) else { continue };
+                let Some(hit) = ray_plane_hit(ray_origin, ray_direction, origin, view_normal) else {
+                    continue;
+                };
                 let projected_axis = axis_world - view_normal * axis_world.dot(view_normal);
                 let closest = origin + projected_axis * parameter;
                 let distance = (hit - closest).length();
@@ -774,24 +892,32 @@ fn hit_test_gizmo(
                     best = Some((distance, axis, parameter, axis_world));
                 }
             }
-            best.map(|(_, axis, parameter, axis_world)| (
-                axis,
-                GizmoDrag::Translate {
-                    axis, axis_world, origin, view_forward, start_parameter: parameter,
-                    start_position_m: base_position_m,
-                },
-            ))
+            best.map(|(_, axis, parameter, axis_world)| {
+                (
+                    axis,
+                    GizmoDrag::Translate {
+                        axis_world,
+                        origin,
+                        view_forward,
+                        start_parameter: parameter,
+                        start_position_m: base_position_m,
+                    },
+                )
+            })
         }
         GizmoMode::Rotate => {
             let tolerance = (ring_radius * 0.14).max(0.10);
             let mut best: Option<(f32, usize, Vec3)> = None;
             for axis in 0..3 {
                 let axis_world = (part_rotation * axis_vector(axis)).normalize_or_zero();
-                let Some(hit) = ray_plane_hit(ray_origin, ray_direction, origin, axis_world) else { continue };
+                let Some(hit) = ray_plane_hit(ray_origin, ray_direction, origin, axis_world) else {
+                    continue;
+                };
                 let radial = hit - origin;
                 let radial_length = radial.length();
                 let error = (radial_length - ring_radius).abs();
-                if radial_length > 1.0e-5 && error <= tolerance
+                if radial_length > 1.0e-5
+                    && error <= tolerance
                     && best.as_ref().is_none_or(|(current, ..)| error < *current)
                 {
                     best = Some((error, axis, radial / radial_length));
@@ -799,9 +925,17 @@ fn hit_test_gizmo(
             }
             best.map(|(_, axis, last_vector)| {
                 let axis_world = (part_rotation * axis_vector(axis)).normalize_or_zero();
-                (axis, GizmoDrag::Rotate {
-                    axis, axis_world, origin, last_vector, accumulated_angle: 0.0, base_rotation_rad,
-                })
+                (
+                    axis,
+                    GizmoDrag::Rotate {
+                        axis,
+                        axis_world,
+                        origin,
+                        last_vector,
+                        accumulated_angle: 0.0,
+                        base_rotation_rad,
+                    },
+                )
             })
         }
     }
@@ -860,9 +994,15 @@ pub fn sync_part_visuals(
             );
         }
         for connection in &session.assembly.connections {
-            let parent = session.assembly.parts.iter()
+            let parent = session
+                .assembly
+                .parts
+                .iter()
                 .find(|part| part.id == connection.parent_part_id);
-            let child = session.assembly.parts.iter()
+            let child = session
+                .assembly
+                .parts
+                .iter()
                 .find(|part| part.id == connection.child_part_id);
             if let (Some(parent), Some(child)) = (parent, child) {
                 spawn_connection(&mut commands, &assets, parent.position_m, child.position_m);
@@ -883,7 +1023,9 @@ fn spawn_connection(
     let end = Vec3::from_array(child_position.map(|value| value as f32)) + ASSEMBLY_ANCHOR;
     let delta = end - start;
     let length = delta.length();
-    if length <= 1e-4 { return; }
+    if length <= 1e-4 {
+        return;
+    }
 
     let rotation = Quat::from_rotation_arc(Vec3::Y, delta / length);
     commands.spawn((
@@ -896,12 +1038,7 @@ fn spawn_connection(
     ));
 }
 
-fn spawn_part(
-    commands: &mut Commands,
-    assets: &EditorAssets,
-    part: &Part,
-    selected: bool,
-) {
+fn spawn_part(commands: &mut Commands, assets: &EditorAssets, part: &Part, selected: bool) {
     let mesh = match &part.kind {
         PartKind::Cylinder => assets.cylinder.clone(),
         _ => assets.cube.clone(),
@@ -928,7 +1065,9 @@ fn spawn_part(
     commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(material),
-        Transform::from_translation(position).with_rotation(rotation).with_scale(scale),
+        Transform::from_translation(position)
+            .with_rotation(rotation)
+            .with_scale(scale),
         PartVisual { id: part.id.clone() },
     ));
 }
@@ -942,18 +1081,30 @@ pub fn update_hud(
     ui: Res<crate::ui_kit::UiState>,
     mut hud: Query<(&mut Text, &mut Node), With<EditorHud>>,
 ) {
-    let Ok((mut text, mut node)) = hud.single_mut() else { return };
-    node.display = if campus.view == CampusView::Construction && !campus.profile_editor_open && !sketch.active { Display::Flex } else { Display::None };
+    let Ok((mut text, mut node)) = hud.single_mut() else {
+        return;
+    };
+    node.display = if campus.view == CampusView::Construction && !campus.profile_editor_open && !sketch.active {
+        Display::Flex
+    } else {
+        Display::None
+    };
     if campus.view != CampusView::Construction || campus.profile_editor_open || sketch.active {
         return;
     }
     let selected = session.selected_index().map(|index| &session.assembly.parts[index]);
     let selected_summary = if let Some(part) = selected {
-        let parent = session.assembly.connections.iter()
+        let parent = session
+            .assembly
+            .connections
+            .iter()
             .find(|connection| connection.child_part_id == part.id)
             .map(|connection| connection.parent_part_id.as_str())
             .unwrap_or("none");
-        let child_count = session.assembly.connections.iter()
+        let child_count = session
+            .assembly
+            .connections
+            .iter()
             .filter(|connection| connection.parent_part_id == part.id)
             .count();
         format!(
@@ -962,9 +1113,15 @@ pub fn update_hud(
             part.id,
             part.kind,
             part.material,
-            part.dimensions_m[0], part.dimensions_m[1], part.dimensions_m[2],
-            part.position_m[0], part.position_m[1], part.position_m[2],
-            part.rotation_rad[0].to_degrees(), part.rotation_rad[1].to_degrees(), part.rotation_rad[2].to_degrees(),
+            part.dimensions_m[0],
+            part.dimensions_m[1],
+            part.dimensions_m[2],
+            part.position_m[0],
+            part.position_m[1],
+            part.position_m[2],
+            part.rotation_rad[0].to_degrees(),
+            part.rotation_rad[1].to_degrees(),
+            part.rotation_rad[2].to_degrees(),
             part.estimated_mass_kg(),
             parent,
             child_count,
@@ -980,9 +1137,16 @@ pub fn update_hud(
         session.assembly.parts.len(),
         session.assembly.connections.len(),
         session.assembly.estimated_mass_kg(),
-        if session.assembly.validate().is_ok() { "VALID" } else { "CHECK REQUIRED" },
+        if session.assembly.validate().is_ok() {
+            "VALID"
+        } else {
+            "CHECK REQUIRED"
+        },
         if session.snap_grid { "ON" } else { "OFF" },
-        match gizmo.mode { GizmoMode::Translate => "TRANSLATE", GizmoMode::Rotate => "ROTATE" },
+        match gizmo.mode {
+            GizmoMode::Translate => "TRANSLATE",
+            GizmoMode::Rotate => "ROTATE",
+        },
         session.history_depth(),
         if session.can_undo() { "available" } else { "none" },
         if session.can_redo() { "available" } else { "none" },
@@ -1001,24 +1165,14 @@ mod tests {
 
     #[test]
     fn ray_plane_intersection_returns_forward_hit() {
-        let hit = ray_plane_hit(
-            Vec3::new(0.0, 0.0, 5.0),
-            Vec3::NEG_Z,
-            Vec3::ZERO,
-            Vec3::Z,
-        ).unwrap();
+        let hit = ray_plane_hit(Vec3::new(0.0, 0.0, 5.0), Vec3::NEG_Z, Vec3::ZERO, Vec3::Z).unwrap();
         assert!((hit - Vec3::ZERO).length() < 1.0e-6);
     }
 
     #[test]
     fn translation_parameter_tracks_distance_along_axis() {
-        let parameter = translation_parameter(
-            Vec3::new(0.4, 0.05, 5.0),
-            Vec3::NEG_Z,
-            Vec3::ZERO,
-            Vec3::X,
-            Vec3::NEG_Z,
-        ).unwrap();
+        let parameter =
+            translation_parameter(Vec3::new(0.4, 0.05, 5.0), Vec3::NEG_Z, Vec3::ZERO, Vec3::X, Vec3::NEG_Z).unwrap();
         assert!((parameter - 0.4).abs() < 1.0e-6);
     }
 
@@ -1072,7 +1226,11 @@ mod tests {
             let transform = gizmo_primitive_transform(
                 Vec3::ZERO,
                 part_rotation,
-                GizmoPrimitive::AxisTip { axis, length: 1.5, size: 0.2 },
+                GizmoPrimitive::AxisTip {
+                    axis,
+                    length: 1.5,
+                    size: 0.2,
+                },
                 1.0,
             );
             let expected = part_rotation * axis_vector(axis);

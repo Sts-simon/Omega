@@ -5,8 +5,8 @@
 //! shells, or 3D structures. Results are numerical study outputs, not certification.
 
 use crate::SimulationMetadata;
-use rayon::prelude::*;
 use rayon::ThreadPool;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -76,9 +76,21 @@ impl Default for TrussConfig {
         Self {
             name: "Symmetric triangular support-frame demonstrator".to_string(),
             nodes: vec![
-                TrussNode { id: 1, x_m: 0.0, y_m: 0.0 },
-                TrussNode { id: 2, x_m: 2.0, y_m: 0.0 },
-                TrussNode { id: 3, x_m: 1.0, y_m: 1.0 },
+                TrussNode {
+                    id: 1,
+                    x_m: 0.0,
+                    y_m: 0.0,
+                },
+                TrussNode {
+                    id: 2,
+                    x_m: 2.0,
+                    y_m: 0.0,
+                },
+                TrussNode {
+                    id: 3,
+                    x_m: 1.0,
+                    y_m: 1.0,
+                },
             ],
             elements: vec![
                 TrussElement {
@@ -104,10 +116,22 @@ impl Default for TrussConfig {
                 },
             ],
             supports: vec![
-                TrussSupport { node_id: 1, fixed_x: true, fixed_y: true },
-                TrussSupport { node_id: 2, fixed_x: false, fixed_y: true },
+                TrussSupport {
+                    node_id: 1,
+                    fixed_x: true,
+                    fixed_y: true,
+                },
+                TrussSupport {
+                    node_id: 2,
+                    fixed_x: false,
+                    fixed_y: true,
+                },
             ],
-            loads: vec![TrussLoad { node_id: 3, force_x_n: 0.0, force_y_n: -1_000.0 }],
+            loads: vec![TrussLoad {
+                node_id: 3,
+                force_x_n: 0.0,
+                force_y_n: -1_000.0,
+            }],
             relative_tolerance: 1.0e-10,
             max_iterations: 2_000,
         }
@@ -130,9 +154,7 @@ impl TrussConfig {
                 "Element count must be between 1 and {MAX_ELEMENTS}"
             )));
         }
-        if !self.relative_tolerance.is_finite()
-            || !(1.0e-13..=1.0e-3).contains(&self.relative_tolerance)
-        {
+        if !self.relative_tolerance.is_finite() || !(1.0e-13..=1.0e-3).contains(&self.relative_tolerance) {
             return Err(TrussError::InvalidInput(
                 "Relative tolerance must be between 1e-13 and 1e-3".to_string(),
             ));
@@ -147,7 +169,8 @@ impl TrussConfig {
         for (index, node) in self.nodes.iter().enumerate() {
             if node_index.insert(node.id, index).is_some() {
                 return Err(TrussError::InvalidInput(format!(
-                    "Node identifier {} is duplicated", node.id
+                    "Node identifier {} is duplicated",
+                    node.id
                 )));
             }
             if !node.x_m.is_finite()
@@ -156,7 +179,8 @@ impl TrussConfig {
                 || node.y_m.abs() > MAX_COORDINATE_M
             {
                 return Err(TrussError::InvalidInput(format!(
-                    "Node {} has non-finite or out-of-range coordinates", node.id
+                    "Node {} has non-finite or out-of-range coordinates",
+                    node.id
                 )));
             }
         }
@@ -165,22 +189,26 @@ impl TrussConfig {
         for element in &self.elements {
             if !element_ids.insert(element.id) {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element identifier {} is duplicated", element.id
+                    "Element identifier {} is duplicated",
+                    element.id
                 )));
             }
             if element.node_a == element.node_b {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element {} connects a node to itself", element.id
+                    "Element {} connects a node to itself",
+                    element.id
                 )));
             }
             let Some(&a) = node_index.get(&element.node_a) else {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element {} references missing node {}", element.id, element.node_a
+                    "Element {} references missing node {}",
+                    element.id, element.node_a
                 )));
             };
             let Some(&b) = node_index.get(&element.node_b) else {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element {} references missing node {}", element.id, element.node_b
+                    "Element {} references missing node {}",
+                    element.id, element.node_b
                 )));
             };
             let dx = self.nodes[b].x_m - self.nodes[a].x_m;
@@ -188,7 +216,8 @@ impl TrussConfig {
             let length = dx.hypot(dy);
             if !length.is_finite() || length < MIN_ELEMENT_LENGTH_M {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element {} has zero or numerically negligible length", element.id
+                    "Element {} has zero or numerically negligible length",
+                    element.id
                 )));
             }
             if !element.cross_section_area_m2.is_finite()
@@ -196,7 +225,8 @@ impl TrussConfig {
                 || element.cross_section_area_m2 > MAX_AREA_M2
             {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element {} has an invalid cross-sectional area", element.id
+                    "Element {} has an invalid cross-sectional area",
+                    element.id
                 )));
             }
             if !element.youngs_modulus_pa.is_finite()
@@ -204,13 +234,15 @@ impl TrussConfig {
                 || element.youngs_modulus_pa > MAX_YOUNGS_MODULUS_PA
             {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element {} has an invalid Young's modulus", element.id
+                    "Element {} has an invalid Young's modulus",
+                    element.id
                 )));
             }
             let axial_rigidity = element.cross_section_area_m2 * element.youngs_modulus_pa;
             if !axial_rigidity.is_finite() {
                 return Err(TrussError::InvalidInput(format!(
-                    "Element {} axial rigidity is outside the supported range", element.id
+                    "Element {} axial rigidity is outside the supported range",
+                    element.id
                 )));
             }
         }
@@ -221,17 +253,20 @@ impl TrussConfig {
         for support in &self.supports {
             if !node_index.contains_key(&support.node_id) {
                 return Err(TrussError::InvalidInput(format!(
-                    "Support references missing node {}", support.node_id
+                    "Support references missing node {}",
+                    support.node_id
                 )));
             }
             if !support.fixed_x && !support.fixed_y {
                 return Err(TrussError::InvalidInput(format!(
-                    "Support at node {} fixes no degrees of freedom", support.node_id
+                    "Support at node {} fixes no degrees of freedom",
+                    support.node_id
                 )));
             }
             if !support_nodes.insert(support.node_id) {
                 return Err(TrussError::InvalidInput(format!(
-                    "Node {} has duplicate support definitions", support.node_id
+                    "Node {} has duplicate support definitions",
+                    support.node_id
                 )));
             }
             has_fixed_x |= support.fixed_x;
@@ -247,7 +282,8 @@ impl TrussConfig {
         for load in &self.loads {
             if !node_index.contains_key(&load.node_id) {
                 return Err(TrussError::InvalidInput(format!(
-                    "Load references missing node {}", load.node_id
+                    "Load references missing node {}",
+                    load.node_id
                 )));
             }
             if !load.force_x_n.is_finite()
@@ -256,7 +292,8 @@ impl TrussConfig {
                 || load.force_y_n.abs() > MAX_FORCE_N
             {
                 return Err(TrussError::InvalidInput(format!(
-                    "Load at node {} is non-finite or exceeds the prototype force limit", load.node_id
+                    "Load at node {} is non-finite or exceeds the prototype force limit",
+                    load.node_id
                 )));
             }
             has_nonzero_load |= load.force_x_n != 0.0 || load.force_y_n != 0.0;
@@ -329,12 +366,19 @@ impl std::fmt::Display for TrussError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidInput(message) => write!(formatter, "{message}"),
-            Self::MechanismOrSingularSystem(message) => write!(formatter, "Unstable or singular truss: {message}"),
-            Self::NotConverged { iterations, relative_residual } => write!(
+            Self::MechanismOrSingularSystem(message) => {
+                write!(formatter, "Unstable or singular truss: {message}")
+            }
+            Self::NotConverged {
+                iterations,
+                relative_residual,
+            } => write!(
                 formatter,
                 "Conjugate-gradient solver did not converge after {iterations} iterations (relative residual {relative_residual:.3e})"
             ),
-            Self::NonPhysicalResult(message) => write!(formatter, "Structural solver stopped: {message}"),
+            Self::NonPhysicalResult(message) => {
+                write!(formatter, "Structural solver stopped: {message}")
+            }
             Self::Cancelled => write!(formatter, "Structural study cancelled by user"),
         }
     }
@@ -367,7 +411,8 @@ impl SparseMatrix {
             || rows.iter().flatten().any(|(_, value)| !value.is_finite())
         {
             return Err(TrussError::MechanismOrSingularSystem(
-                "The assembled stiffness has a non-finite entry or a free degree of freedom with no positive stiffness".to_string(),
+                "The assembled stiffness has a non-finite entry or a free degree of freedom with no positive stiffness"
+                    .to_string(),
             ));
         }
         Ok(Self { rows, diagonal })
@@ -377,11 +422,7 @@ impl SparseMatrix {
         pool.install(|| {
             self.rows
                 .par_iter()
-                .map(|row| {
-                    row.iter()
-                        .map(|(column, value)| *value * vector[*column])
-                        .sum::<f64>()
-                })
+                .map(|row| row.iter().map(|(column, value)| *value * vector[*column]).sum::<f64>())
                 .collect()
         })
     }
@@ -392,11 +433,7 @@ impl SparseMatrix {
 /// The sparse global stiffness matrix is assembled once and solved with Jacobi-
 /// preconditioned conjugate gradients. Rows are independent during matrix-vector
 /// products; each row retains a stable column order to keep results reproducible.
-pub fn solve_truss<F>(
-    config: &TrussConfig,
-    pool: &ThreadPool,
-    progress: F,
-) -> Result<TrussResult, TrussError>
+pub fn solve_truss<F>(config: &TrussConfig, pool: &ThreadPool, progress: F) -> Result<TrussResult, TrussError>
 where
     F: FnMut(f64),
 {
@@ -464,8 +501,7 @@ where
         let length = dx.hypot(dy);
         let direction = [dx / length, dy / length, -dx / length, -dy / length];
         let local_dofs = [index_a * 2, index_a * 2 + 1, index_b * 2, index_b * 2 + 1];
-        let axial_rigidity_per_length =
-            element.youngs_modulus_pa * element.cross_section_area_m2 / length;
+        let axial_rigidity_per_length = element.youngs_modulus_pa * element.cross_section_area_m2 / length;
         for local_row in 0..4 {
             let Some(global_row) = free_map[local_dofs[local_row]] else {
                 continue;
@@ -474,17 +510,14 @@ where
                 let Some(global_column) = free_map[local_dofs[local_column]] else {
                     continue;
                 };
-                let value = axial_rigidity_per_length
-                    * direction[local_row]
-                    * direction[local_column];
+                let value = axial_rigidity_per_length * direction[local_row] * direction[local_column];
                 *matrix_rows[global_row].entry(global_column).or_insert(0.0) += value;
             }
         }
     }
     let matrix = SparseMatrix::from_rows(matrix_rows)?;
     let matrix_nonzero_count: usize = matrix.rows.iter().map(Vec::len).sum();
-    let estimated_matrix_vector_updates =
-        (matrix_nonzero_count as u128) * (config.max_iterations as u128);
+    let estimated_matrix_vector_updates = (matrix_nonzero_count as u128) * (config.max_iterations as u128);
     if estimated_matrix_vector_updates > MAX_MATRIX_VECTOR_ENTRY_UPDATES {
         return Err(TrussError::InvalidInput(format!(
             "Solver budget exceeded: {matrix_nonzero_count} sparse entries x {} iterations; limit is {MAX_MATRIX_VECTOR_ENTRY_UPDATES} matrix-vector entry updates",
@@ -581,8 +614,8 @@ where
     let strain_energy_j = strain_energy.value();
     let external_work_j = external_work.value();
     let energy_balance_error_j = strain_energy_j - external_work_j;
-    let energy_balance_relative_error = energy_balance_error_j.abs()
-        / strain_energy_j.abs().max(external_work_j.abs()).max(1.0e-30);
+    let energy_balance_relative_error =
+        energy_balance_error_j.abs() / strain_energy_j.abs().max(external_work_j.abs()).max(1.0e-30);
     let non_finite_node_result = node_results.iter().any(|node| {
         !node.displacement_x_m.is_finite()
             || !node.displacement_y_m.is_finite()
@@ -776,7 +809,9 @@ impl KahanSum {
         self.sum = next;
     }
 
-    fn value(&self) -> f64 { self.sum }
+    fn value(&self) -> f64 {
+        self.sum
+    }
 }
 
 #[cfg(test)]
@@ -795,8 +830,7 @@ mod tests {
         let top = result.nodes.iter().find(|node| node.node_id == 3).unwrap();
         let rigidity = 200.0e9 * 1.0e-3;
         let expected_horizontal = 1_000.0 / (2.0 * rigidity);
-        let expected_vertical = -1_000.0 * (6.0 + 5.0 * 2.0_f64.sqrt())
-            / (2.0 * rigidity * (2.0_f64.sqrt() + 2.0));
+        let expected_vertical = -1_000.0 * (6.0 + 5.0 * 2.0_f64.sqrt()) / (2.0 * rigidity * (2.0_f64.sqrt() + 2.0));
         assert!((top.displacement_x_m - expected_horizontal).abs() < 1.0e-10);
         assert!((top.displacement_y_m - expected_vertical).abs() < 1.0e-10);
         assert!(result.diagnostics.relative_residual < 1.0e-9);
@@ -806,7 +840,11 @@ mod tests {
     fn element_stress_sign_distinguishes_tension_and_compression() {
         let result = solve_truss(&TrussConfig::default(), &pool(1), |_| {}).unwrap();
         let base = result.elements.iter().find(|element| element.element_id == 1).unwrap();
-        let diagonals: Vec<_> = result.elements.iter().filter(|element| element.element_id != 1).collect();
+        let diagonals: Vec<_> = result
+            .elements
+            .iter()
+            .filter(|element| element.element_id != 1)
+            .collect();
         assert!(base.axial_stress_pa > 0.0);
         assert!(diagonals.iter().all(|element| element.axial_stress_pa < 0.0));
     }

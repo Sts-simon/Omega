@@ -81,15 +81,27 @@ impl Parser<'_> {
             return Ok(value);
         }
 
-        if self.peek().is_some_and(|character| character.is_ascii_digit() || character == '.') {
+        if self
+            .peek()
+            .is_some_and(|character| character.is_ascii_digit() || character == '.')
+        {
             return self.parse_number();
         }
-        if self.peek().is_some_and(|character| character == '_' || character.is_ascii_alphabetic()) {
+        if self
+            .peek()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        {
             let name = self.parse_identifier();
-            return self.variables.get(&name).copied()
+            return self
+                .variables
+                .get(&name)
+                .copied()
                 .ok_or_else(|| format!("Undefined variable '{name}'"));
         }
-        Err(format!("Expected a number, variable or '(' at position {}", self.index + 1))
+        Err(format!(
+            "Expected a number, variable or '(' at position {}",
+            self.index + 1
+        ))
     }
 
     fn parse_number(&mut self) -> Result<f64, String> {
@@ -105,9 +117,15 @@ impl Parser<'_> {
                 self.index += 1;
             }
         }
-        if self.peek().is_some_and(|character| character == 'e' || character == 'E') {
+        if self
+            .peek()
+            .is_some_and(|character| character == 'e' || character == 'E')
+        {
             self.index += 1;
-            if self.peek().is_some_and(|character| character == '+' || character == '-') {
+            if self
+                .peek()
+                .is_some_and(|character| character == '+' || character == '-')
+            {
                 self.index += 1;
             }
             let exponent_start = self.index;
@@ -128,7 +146,10 @@ impl Parser<'_> {
     fn parse_identifier(&mut self) -> String {
         let start = self.index;
         self.index += 1;
-        while self.peek().is_some_and(|character| character == '_' || character.is_ascii_alphanumeric()) {
+        while self
+            .peek()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphanumeric())
+        {
             self.index += 1;
         }
         self.chars[start..self.index].iter().collect()

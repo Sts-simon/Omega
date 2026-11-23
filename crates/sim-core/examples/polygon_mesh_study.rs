@@ -1,6 +1,6 @@
 use omega_sim_core::{
-    Material, MeshThermalConfig, PlanarPolygonRegion, export_mesh_thermal_visualization,
-    mesh_planar_polygon, simulate_mesh_thermal,
+    Material, MeshThermalConfig, PlanarPolygonRegion, export_mesh_thermal_visualization, mesh_planar_polygon,
+    simulate_mesh_thermal,
 };
 use rayon::ThreadPoolBuilder;
 use std::fs::{self, OpenOptions};
@@ -42,22 +42,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = ThreadPoolBuilder::new().num_threads(threads).build()?;
 
     println!("Study: {}", config.name);
-    println!("Polygon: {} outer vertices, {} holes", region.outer_boundary_m.len(), region.holes_m.len());
-    println!("Mesh: {} nodes, {} triangles, {} boundary edges", stats.node_count, stats.triangle_count, stats.boundary_edge_count);
-    println!("Area: {:.6} m² | volume: {:.6} m³", stats.total_area_m2, stats.total_volume_m3);
-    println!("Mesh quality: minimum angle {:.2}°, maximum radius ratio {:.3}", quality.minimum_angle_deg, quality.maximum_radius_ratio);
+    println!(
+        "Polygon: {} outer vertices, {} holes",
+        region.outer_boundary_m.len(),
+        region.holes_m.len()
+    );
+    println!(
+        "Mesh: {} nodes, {} triangles, {} boundary edges",
+        stats.node_count, stats.triangle_count, stats.boundary_edge_count
+    );
+    println!(
+        "Area: {:.6} m² | volume: {:.6} m³",
+        stats.total_area_m2, stats.total_volume_m3
+    );
+    println!(
+        "Mesh quality: minimum angle {:.2}°, maximum radius ratio {:.3}",
+        quality.minimum_angle_deg, quality.maximum_radius_ratio
+    );
     println!("Worker threads: {threads}");
 
     let result = simulate_mesh_thermal(&config, &pool)?;
     fs::create_dir_all("results")?;
-    let json_path = unique_path("results", &format!("polygon_thermal_{}", result.metadata.created_unix_ms), "json")?;
+    let json_path = unique_path(
+        "results",
+        &format!("polygon_thermal_{}", result.metadata.created_unix_ms),
+        "json",
+    )?;
     let bytes = serde_json::to_vec_pretty(&result)?;
     let mut file = OpenOptions::new().write(true).create_new(true).open(&json_path)?;
     file.write_all(&bytes)?;
     let visualizations = export_mesh_thermal_visualization(&result, "results")?;
 
-    println!("Temperature range: {:.4} .. {:.4} K (mean {:.4} K)", result.min_temperature_k, result.max_temperature_k, result.mean_temperature_k);
-    println!("Energy balance relative error: {:.6e}", result.diagnostics.energy_balance_relative_error);
+    println!(
+        "Temperature range: {:.4} .. {:.4} K (mean {:.4} K)",
+        result.min_temperature_k, result.max_temperature_k, result.mean_temperature_k
+    );
+    println!(
+        "Energy balance relative error: {:.6e}",
+        result.diagnostics.energy_balance_relative_error
+    );
     println!("JSON: {}", json_path.display());
     println!("HTML: {}", visualizations.html_path.display());
     println!("CSV: {}", visualizations.data_path.display());
@@ -68,7 +91,12 @@ fn unique_path(directory: &str, stem: &str, extension: &str) -> Result<PathBuf, 
     for index in 0_u32..10_000 {
         let suffix = if index == 0 { String::new() } else { format!("_{index}") };
         let path = PathBuf::from(directory).join(format!("{stem}{suffix}.{extension}"));
-        if !path.exists() { return Ok(path); }
+        if !path.exists() {
+            return Ok(path);
+        }
     }
-    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "could not allocate output filename"))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate output filename",
+    ))
 }

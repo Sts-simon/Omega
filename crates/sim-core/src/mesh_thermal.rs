@@ -6,8 +6,8 @@
 
 use crate::mesh::{MeshError, TriMesh2D};
 use crate::{Material, SimulationMetadata};
-use rayon::prelude::*;
 use rayon::ThreadPool;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,16 +35,18 @@ pub struct MeshThermalConfig {
 
 impl Default for MeshThermalConfig {
     fn default() -> Self {
-        let mesh = crate::mesh::mesh_planar_rectangles(&[
-            crate::mesh::PlanarRectangle {
+        let mesh = crate::mesh::mesh_planar_rectangles(
+            &[crate::mesh::PlanarRectangle {
                 source_part_id: "reference-plate".into(),
                 center_m: [0.0, 0.0],
                 size_m: [0.6, 0.4],
                 rotation_rad: 0.0,
                 material_id: 0,
                 thickness_m: 0.01,
-            },
-        ], 0.05).expect("bundled reference plate geometry must mesh");
+            }],
+            0.05,
+        )
+        .expect("bundled reference plate geometry must mesh");
         Self {
             name: "Reference planar plate mesh study".into(),
             mesh,
@@ -111,7 +113,9 @@ impl fmt::Display for MeshThermalError {
 impl std::error::Error for MeshThermalError {}
 
 impl From<MeshError> for MeshThermalError {
-    fn from(value: MeshError) -> Self { Self::Mesh(value.to_string()) }
+    fn from(value: MeshError) -> Self {
+        Self::Mesh(value.to_string())
+    }
 }
 
 #[derive(Debug)]
@@ -161,7 +165,9 @@ where
     F: FnMut(f64),
 {
     validate_config(config)?;
-    if cancel.load(Ordering::Relaxed) { return Err(MeshThermalError::Cancelled); }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(MeshThermalError::Cancelled);
+    }
     let start = Instant::now();
     let system = assemble_system(config)?;
     if config.time_step_s > system.stable_time_step_limit_s {
@@ -175,7 +181,9 @@ where
     let mut current = vec![config.initial_temperature_k; node_count];
     if let Some(boundary_temperature) = config.fixed_boundary_temperature_k {
         for (index, fixed) in system.fixed_nodes.iter().enumerate() {
-            if *fixed { current[index] = boundary_temperature; }
+            if *fixed {
+                current[index] = boundary_temperature;
+            }
         }
     }
     let mut next = vec![config.initial_temperature_k; node_count];
@@ -187,15 +195,16 @@ where
     let progress_stride = (config.steps / 100).max(1);
 
     for step in 0..config.steps {
-        if cancel.load(Ordering::Relaxed) { return Err(MeshThermalError::Cancelled); }
+        if cancel.load(Ordering::Relaxed) {
+            return Err(MeshThermalError::Cancelled);
+        }
         // For a fixed-temperature node, K*T - Q is the heat supplied by the
         // prescribed boundary. Summing these reactions gives an independent
         // boundary-energy term for the discrete global balance.
         let mut boundary_power = 0.0;
         for index in 0..node_count {
             if system.fixed_nodes[index] {
-                boundary_power += system.stiffness.multiply_row(index, &current)
-                    - system.source_power_w[index];
+                boundary_power += system.stiffness.multiply_row(index, &current) - system.source_power_w[index];
             }
         }
         boundary_energy += boundary_power * config.time_step_s;
@@ -212,8 +221,14 @@ where
                 }
             });
         });
-        if next.iter().any(|value| !value.is_finite() || *value < MIN_TEMPERATURE_K || *value > MAX_TEMPERATURE_K) {
-            return Err(MeshThermalError::Numerical(format!("temperature left the supported range at step {}", step + 1)));
+        if next
+            .iter()
+            .any(|value| !value.is_finite() || *value < MIN_TEMPERATURE_K || *value > MAX_TEMPERATURE_K)
+        {
+            return Err(MeshThermalError::Numerical(format!(
+                "temperature left the supported range at step {}",
+                step + 1
+            )));
         }
         std::mem::swap(&mut current, &mut next);
         if (step + 1) % progress_stride == 0 || step + 1 == config.steps {
@@ -224,7 +239,12 @@ where
     let final_energy = compensated_weighted_sum(&system.capacities_j_k, &current);
     let energy_change = final_energy - initial_energy;
     let balance_error = energy_change - source_energy - boundary_energy;
-    let energy_scale = initial_energy.abs().max(final_energy.abs()).max(source_energy.abs()).max(boundary_energy.abs()).max(1.0);
+    let energy_scale = initial_energy
+        .abs()
+        .max(final_energy.abs())
+        .max(source_energy.abs())
+        .max(boundary_energy.abs())
+        .max(1.0);
     let relative_error = balance_error.abs() / energy_scale;
     let total_capacity = compensated_sum(&system.capacities_j_k);
     let min_temperature = current.iter().copied().fold(f64::INFINITY, f64::min);
@@ -238,7 +258,8 @@ where
         "1.0.0",
         "SI",
         config,
-    ).map_err(MeshThermalError::InvalidInput)?;
+    )
+    .map_err(MeshThermalError::InvalidInput)?;
 
     Ok(MeshThermalResult {
         config: config.clone(),
@@ -272,7 +293,9 @@ fn validate_config(config: &MeshThermalConfig) -> Result<(), MeshThermalError> {
         return Err(MeshThermalError::InvalidInput("study name cannot be empty".into()));
     }
     if config.materials.is_empty() || config.materials.len() > 64 {
-        return Err(MeshThermalError::InvalidInput("material count must be between 1 and 64".into()));
+        return Err(MeshThermalError::InvalidInput(
+            "material count must be between 1 and 64".into(),
+        ));
     }
     for material in &config.materials {
         if material.name.trim().is_empty() {
@@ -284,33 +307,52 @@ fn validate_config(config: &MeshThermalConfig) -> Result<(), MeshThermalError> {
             ("specific heat", material.specific_heat_j_kg_k),
         ] {
             if !value.is_finite() || value <= 0.0 {
-                return Err(MeshThermalError::InvalidInput(format!("material {} has invalid {name}", material.name)));
+                return Err(MeshThermalError::InvalidInput(format!(
+                    "material {} has invalid {name}",
+                    material.name
+                )));
             }
         }
     }
-    if !config.initial_temperature_k.is_finite() || !(MIN_TEMPERATURE_K..=MAX_TEMPERATURE_K).contains(&config.initial_temperature_k) {
-        return Err(MeshThermalError::InvalidInput("initial temperature is outside the supported range".into()));
+    if !config.initial_temperature_k.is_finite()
+        || !(MIN_TEMPERATURE_K..=MAX_TEMPERATURE_K).contains(&config.initial_temperature_k)
+    {
+        return Err(MeshThermalError::InvalidInput(
+            "initial temperature is outside the supported range".into(),
+        ));
     }
-    if let Some(temperature) = config.fixed_boundary_temperature_k {
-        if !temperature.is_finite() || !(MIN_TEMPERATURE_K..=MAX_TEMPERATURE_K).contains(&temperature) {
-            return Err(MeshThermalError::InvalidInput("fixed boundary temperature is outside the supported range".into()));
-        }
+    if let Some(temperature) = config.fixed_boundary_temperature_k
+        && (!temperature.is_finite() || !(MIN_TEMPERATURE_K..=MAX_TEMPERATURE_K).contains(&temperature))
+    {
+        return Err(MeshThermalError::InvalidInput(
+            "fixed boundary temperature is outside the supported range".into(),
+        ));
     }
     if !config.time_step_s.is_finite() || config.time_step_s <= 0.0 {
-        return Err(MeshThermalError::InvalidInput("time step must be finite and positive".into()));
+        return Err(MeshThermalError::InvalidInput(
+            "time step must be finite and positive".into(),
+        ));
     }
     if config.steps == 0 || config.steps > MAX_STEPS {
-        return Err(MeshThermalError::InvalidInput(format!("step count must be between 1 and {MAX_STEPS}")));
+        return Err(MeshThermalError::InvalidInput(format!(
+            "step count must be between 1 and {MAX_STEPS}"
+        )));
     }
     if !config.volumetric_heat_source_w_m3.is_finite() {
-        return Err(MeshThermalError::InvalidInput("volumetric heat source must be finite".into()));
+        return Err(MeshThermalError::InvalidInput(
+            "volumetric heat source must be finite".into(),
+        ));
     }
     if config.mesh.triangles.len() > MAX_ELEMENTS {
-        return Err(MeshThermalError::InvalidInput(format!("mesh exceeds the {MAX_ELEMENTS}-triangle solve limit")));
+        return Err(MeshThermalError::InvalidInput(format!(
+            "mesh exceeds the {MAX_ELEMENTS}-triangle solve limit"
+        )));
     }
     let node_updates = (config.mesh.nodes.len() as u64).saturating_mul(config.steps as u64);
     if node_updates > MAX_NODE_UPDATES {
-        return Err(MeshThermalError::InvalidInput(format!("study requests {node_updates} node updates; limit is {MAX_NODE_UPDATES}")));
+        return Err(MeshThermalError::InvalidInput(format!(
+            "study requests {node_updates} node updates; limit is {MAX_NODE_UPDATES}"
+        )));
     }
     config.mesh.validate(config.materials.len())?;
     Ok(())
@@ -331,7 +373,9 @@ fn assemble_system(config: &MeshThermalConfig) -> Result<AssembledSystem, MeshTh
         let p2 = mesh.nodes[i2].position_m;
         let twice_area = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
         if !twice_area.is_finite() || twice_area <= 1.0e-14 {
-            return Err(MeshThermalError::Mesh(format!("triangle {element_index} has invalid signed area")));
+            return Err(MeshThermalError::Mesh(format!(
+                "triangle {element_index} has invalid signed area"
+            )));
         }
         let area = 0.5 * twice_area;
         let material = &config.materials[usize::from(triangle.material_id)];
@@ -339,7 +383,9 @@ fn assemble_system(config: &MeshThermalConfig) -> Result<AssembledSystem, MeshTh
         let conductivity = material.conductivity_w_m_k;
         let capacity_per_area = material.density_kg_m3 * material.specific_heat_j_kg_k * thickness * area / 3.0;
         if !capacity_per_area.is_finite() || capacity_per_area <= 0.0 {
-            return Err(MeshThermalError::Numerical(format!("triangle {element_index} has invalid heat capacity")));
+            return Err(MeshThermalError::Numerical(format!(
+                "triangle {element_index} has invalid heat capacity"
+            )));
         }
         for node in [i0, i1, i2] {
             capacities[node] += capacity_per_area;
@@ -358,7 +404,9 @@ fn assemble_system(config: &MeshThermalConfig) -> Result<AssembledSystem, MeshTh
         }
     }
     if capacities.iter().any(|value| !value.is_finite() || *value <= 0.0) {
-        return Err(MeshThermalError::Mesh("mesh contains a node with no positive thermal capacity".into()));
+        return Err(MeshThermalError::Mesh(
+            "mesh contains a node with no positive thermal capacity".into(),
+        ));
     }
 
     let mut row_offsets = Vec::with_capacity(node_count + 1);
@@ -382,18 +430,27 @@ fn assemble_system(config: &MeshThermalConfig) -> Result<AssembledSystem, MeshTh
         }
         row_offsets.push(columns.len());
     }
-    let stiffness = CsrMatrix { row_offsets, columns, values };
+    let stiffness = CsrMatrix {
+        row_offsets,
+        columns,
+        values,
+    };
 
     let boundary_ids = mesh.boundary_node_ids()?;
     let mut fixed_nodes = vec![false; node_count];
     if config.fixed_boundary_temperature_k.is_some() {
-        for index in boundary_ids { fixed_nodes[index] = true; }
+        for index in boundary_ids {
+            fixed_nodes[index] = true;
+        }
     }
     let mut maximum_row_rate: f64 = 0.0;
     for node in 0..node_count {
-        if fixed_nodes[node] { continue; }
+        if fixed_nodes[node] {
+            continue;
+        }
         let row_sum_abs: f64 = (stiffness.row_offsets[node]..stiffness.row_offsets[node + 1])
-            .map(|index| stiffness.values[index].abs()).sum();
+            .map(|index| stiffness.values[index].abs())
+            .sum();
         maximum_row_rate = maximum_row_rate.max(row_sum_abs / capacities[node]);
     }
     let stable_limit = if maximum_row_rate <= f64::MIN_POSITIVE {
@@ -402,11 +459,17 @@ fn assemble_system(config: &MeshThermalConfig) -> Result<AssembledSystem, MeshTh
         STABILITY_SAFETY_FACTOR * 2.0 / maximum_row_rate
     };
     if stable_limit.is_nan() || stable_limit <= 0.0 {
-        return Err(MeshThermalError::Numerical("could not calculate a positive stability limit".into()));
+        return Err(MeshThermalError::Numerical(
+            "could not calculate a positive stability limit".into(),
+        ));
     }
     Ok(AssembledSystem {
-        stiffness, capacities_j_k: capacities, source_power_w: source_power,
-        fixed_nodes, stats, maximum_row_rate_per_s: maximum_row_rate,
+        stiffness,
+        capacities_j_k: capacities,
+        source_power_w: source_power,
+        fixed_nodes,
+        stats,
+        maximum_row_rate_per_s: maximum_row_rate,
         stable_time_step_limit_s: stable_limit,
     })
 }
@@ -438,7 +501,7 @@ fn compensated_weighted_sum(weights: &[f64], values: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mesh::{mesh_planar_rectangles, PlanarRectangle};
+    use crate::mesh::{PlanarRectangle, mesh_planar_rectangles};
     use rayon::ThreadPoolBuilder;
 
     fn pool(threads: usize) -> ThreadPool {
@@ -446,16 +509,26 @@ mod tests {
     }
 
     fn small_config() -> MeshThermalConfig {
-        let mesh = mesh_planar_rectangles(&[PlanarRectangle {
-            source_part_id: "test-plate".into(), center_m: [0.0, 0.0], size_m: [0.4, 0.3],
-            rotation_rad: 0.0, material_id: 0, thickness_m: 0.01,
-        }], 0.05).unwrap();
+        let mesh = mesh_planar_rectangles(
+            &[PlanarRectangle {
+                source_part_id: "test-plate".into(),
+                center_m: [0.0, 0.0],
+                size_m: [0.4, 0.3],
+                rotation_rad: 0.0,
+                material_id: 0,
+                thickness_m: 0.01,
+            }],
+            0.05,
+        )
+        .unwrap();
         MeshThermalConfig {
-            name: "small test plate".into(), mesh,
+            name: "small test plate".into(),
+            mesh,
             materials: vec![Material::aluminium()],
             initial_temperature_k: 293.15,
             fixed_boundary_temperature_k: Some(293.15),
-            time_step_s: 0.05, steps: 100,
+            time_step_s: 0.05,
+            steps: 100,
             volumetric_heat_source_w_m3: 5_000.0,
         }
     }
@@ -466,7 +539,12 @@ mod tests {
         config.fixed_boundary_temperature_k = None;
         config.volumetric_heat_source_w_m3 = 0.0;
         let result = simulate_mesh_thermal(&config, &pool(2)).unwrap();
-        assert!(result.final_temperature_k.iter().all(|value| (*value - 293.15).abs() < 1.0e-12));
+        assert!(
+            result
+                .final_temperature_k
+                .iter()
+                .all(|value| (*value - 293.15).abs() < 1.0e-12)
+        );
         assert!(result.diagnostics.energy_balance_relative_error < 1.0e-12);
     }
 
@@ -477,8 +555,11 @@ mod tests {
         let result = simulate_mesh_thermal(&config, &pool(2)).unwrap();
         let expected_energy = config.volumetric_heat_source_w_m3
             * result.diagnostics.total_volume_m3
-            * config.time_step_s * config.steps as f64;
-        assert!((result.diagnostics.final_energy_j - result.diagnostics.initial_energy_j - expected_energy).abs() < 1.0e-8);
+            * config.time_step_s
+            * config.steps as f64;
+        assert!(
+            (result.diagnostics.final_energy_j - result.diagnostics.initial_energy_j - expected_energy).abs() < 1.0e-8
+        );
         assert!(result.diagnostics.energy_balance_relative_error < 1.0e-10);
         assert!(result.max_temperature_k > config.initial_temperature_k);
     }
@@ -489,7 +570,10 @@ mod tests {
         let boundary = config.mesh.boundary_node_ids().unwrap();
         let result = simulate_mesh_thermal(&config, &pool(2)).unwrap();
         for node in boundary {
-            assert_eq!(result.final_temperature_k[node], config.fixed_boundary_temperature_k.unwrap());
+            assert_eq!(
+                result.final_temperature_k[node],
+                config.fixed_boundary_temperature_k.unwrap()
+            );
         }
         assert!(result.max_temperature_k > result.min_temperature_k);
     }
@@ -530,19 +614,26 @@ mod tests {
     fn unstable_time_step_is_rejected_before_time_loop() {
         let mut config = small_config();
         config.time_step_s = 1.0e9;
-        assert!(matches!(simulate_mesh_thermal(&config, &pool(1)), Err(MeshThermalError::InvalidInput(_))));
+        assert!(matches!(
+            simulate_mesh_thermal(&config, &pool(1)),
+            Err(MeshThermalError::InvalidInput(_))
+        ));
     }
 
     #[test]
     fn cancellation_is_cooperative() {
         let config = small_config();
         let cancelled = AtomicBool::new(true);
-        assert_eq!(simulate_mesh_thermal_cancellable(&config, &pool(1), |_| {}, &cancelled).unwrap_err(), MeshThermalError::Cancelled);
+        assert_eq!(
+            simulate_mesh_thermal_cancellable(&config, &pool(1), |_| {}, &cancelled).unwrap_err(),
+            MeshThermalError::Cancelled
+        );
     }
 
     #[test]
     fn bundled_planar_mesh_study_parses_and_validates() {
-        let config: MeshThermalConfig = serde_json::from_str(include_str!("../examples/planar-mesh-thermal-study.json")).unwrap();
+        let config: MeshThermalConfig =
+            serde_json::from_str(include_str!("../examples/planar-mesh-thermal-study.json")).unwrap();
         validate_config(&config).unwrap();
         assert_eq!(config.mesh.triangles.len(), 32);
         assert_eq!(config.materials.len(), 2);

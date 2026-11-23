@@ -3,8 +3,8 @@
 //! Contracts evaluate the *actual geometry* through these metrics instead of free-form numbers.
 
 use super::model::Assembly;
-use omega_data::{hash_serializable, ContentHash};
-use omega_rules::{derive_metrics, DerivedMetrics, PartGeometry};
+use omega_data::{ContentHash, hash_serializable};
+use omega_rules::{DerivedMetrics, PartGeometry, derive_metrics};
 
 pub fn assembly_metrics(assembly: &Assembly) -> Result<DerivedMetrics, String> {
     let parts: Vec<PartGeometry> = assembly
@@ -46,7 +46,13 @@ mod tests {
         let m0 = assembly_metrics(&before).unwrap().get("cg_x_m").unwrap().value;
         let m1 = assembly_metrics(&after).unwrap().get("cg_x_m").unwrap().value;
         assert!(m1 < m0);
-        assert_ne!(assembly_content_hash(&before).unwrap(), assembly_content_hash(&after).unwrap());
-        assert_eq!(assembly_content_hash(&before).unwrap(), assembly_content_hash(&before.clone()).unwrap());
+        assert_ne!(
+            assembly_content_hash(&before).unwrap(),
+            assembly_content_hash(&after).unwrap()
+        );
+        assert_eq!(
+            assembly_content_hash(&before).unwrap(),
+            assembly_content_hash(&before.clone()).unwrap()
+        );
     }
 }

@@ -1,4 +1,4 @@
-use crate::requirement::{evaluate_requirement, Evidence, Requirement, RequirementStatus};
+use crate::requirement::{Evidence, Requirement, RequirementStatus, evaluate_requirement};
 use omega_data::ContentHash;
 use serde::{Deserialize, Serialize};
 
@@ -92,25 +92,40 @@ pub fn build_dossier(
         });
     }
 
-    let score = if total_weight > 0.0 { weighted / total_weight } else { 0.0 };
+    let score = if total_weight > 0.0 {
+        weighted / total_weight
+    } else {
+        0.0
+    };
     if requirements.is_empty() {
         reasons.push("the contract defines no requirements".to_string());
     } else if reasons.is_empty() && score < ACCEPTANCE_THRESHOLD {
-        reasons.push(format!("score {:.0}% is below the {:.0}% threshold", score * 100.0, ACCEPTANCE_THRESHOLD * 100.0));
+        reasons.push(format!(
+            "score {:.0}% is below the {:.0}% threshold",
+            score * 100.0,
+            ACCEPTANCE_THRESHOLD * 100.0
+        ));
     }
     let decision = if reasons.is_empty() {
         DossierDecision::Accepted { score }
     } else {
         DossierDecision::Rejected { reasons }
     };
-    Dossier { contract_id, design: design.clone(), program: program.cloned(), matrix, score, decision }
+    Dossier {
+        contract_id,
+        design: design.clone(),
+        program: program.cloned(),
+        matrix,
+        score,
+        decision,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::requirement::tests::{evidence, mass_req};
     use crate::requirement::Comparator;
+    use crate::requirement::tests::{evidence, mass_req};
 
     fn soft(id: &str, limit: f64) -> Requirement {
         let mut r = mass_req();

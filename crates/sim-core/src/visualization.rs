@@ -4,7 +4,7 @@
 //! opened in any modern browser and retain the numerical metadata needed to
 //! interpret the plotted fields.
 
-use crate::{MeshThermalResult, TrussResult, ThermalResult};
+use crate::{MeshThermalResult, ThermalResult, TrussResult};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -97,10 +97,7 @@ pub fn export_thermal_visualization(
         "Transient 2D finite-volume conduction",
         &format!(
             "{} · {} × {} cells · {:.3} simulated seconds",
-            result.metadata.model_id,
-            result.width,
-            result.height,
-            result.simulated_time_s
+            result.metadata.model_id, result.width, result.height, result.simulated_time_s
         ),
         &svg,
         &format!(
@@ -135,20 +132,20 @@ pub fn export_thermal_visualization(
             result.diagnostics.energy_balance_error_j,
             result.diagnostics.energy_balance_relative_error,
         ),
-        csv_path.file_name().and_then(|name| name.to_str()).unwrap_or("field.csv"),
+        csv_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("field.csv"),
         &result.metadata.input_fingerprint,
         &result.metadata.solver_id,
         &result.metadata.solver_version,
     );
-    let html_path = write_unique(
-        directory,
-        &format!("{stem}_visualization"),
-        "html",
-        html.as_bytes(),
-    )?;
-    Ok(VisualizationFiles { html_path, data_path: csv_path })
+    let html_path = write_unique(directory, &format!("{stem}_visualization"), "html", html.as_bytes())?;
+    Ok(VisualizationFiles {
+        html_path,
+        data_path: csv_path,
+    })
 }
-
 
 /// Writes an unstructured triangular-mesh thermal report. Triangle polygons are
 /// coloured from their mean nodal temperature; the CSV retains full nodal and
@@ -169,7 +166,8 @@ pub fn export_mesh_thermal_visualization(
     }
     mesh.validate(result.config.materials.len())
         .map_err(|error| VisualizationError::InvalidResult(error.to_string()))?;
-    let mesh_quality = mesh.quality_stats()
+    let mesh_quality = mesh
+        .quality_stats()
         .map_err(|error| VisualizationError::InvalidResult(error.to_string()))?;
 
     let directory = output_directory.as_ref();
@@ -239,21 +237,43 @@ pub fn export_mesh_thermal_visualization(
             result.diagnostics.energy_balance_error_j,
             result.diagnostics.energy_balance_relative_error,
         ),
-        csv_path.file_name().and_then(|name| name.to_str()).unwrap_or("mesh-field.csv"),
+        csv_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("mesh-field.csv"),
         &result.metadata.input_fingerprint,
         &result.metadata.solver_id,
         &result.metadata.solver_version,
     );
     let html_path = write_unique(directory, &format!("{stem}_visualization"), "html", html.as_bytes())?;
-    Ok(VisualizationFiles { html_path, data_path: csv_path })
+    Ok(VisualizationFiles {
+        html_path,
+        data_path: csv_path,
+    })
 }
 
 fn mesh_thermal_svg(result: &MeshThermalResult) -> String {
     let mesh = &result.config.mesh;
-    let min_x = mesh.nodes.iter().map(|node| node.position_m[0]).fold(f64::INFINITY, f64::min);
-    let max_x = mesh.nodes.iter().map(|node| node.position_m[0]).fold(f64::NEG_INFINITY, f64::max);
-    let min_y = mesh.nodes.iter().map(|node| node.position_m[1]).fold(f64::INFINITY, f64::min);
-    let max_y = mesh.nodes.iter().map(|node| node.position_m[1]).fold(f64::NEG_INFINITY, f64::max);
+    let min_x = mesh
+        .nodes
+        .iter()
+        .map(|node| node.position_m[0])
+        .fold(f64::INFINITY, f64::min);
+    let max_x = mesh
+        .nodes
+        .iter()
+        .map(|node| node.position_m[0])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = mesh
+        .nodes
+        .iter()
+        .map(|node| node.position_m[1])
+        .fold(f64::INFINITY, f64::min);
+    let max_y = mesh
+        .nodes
+        .iter()
+        .map(|node| node.position_m[1])
+        .fold(f64::NEG_INFINITY, f64::max);
     let span_x = (max_x - min_x).max(1.0e-9);
     let span_y = (max_y - min_y).max(1.0e-9);
     let plot_x = 70.0;
@@ -274,7 +294,12 @@ fn mesh_thermal_svg(result: &MeshThermalResult) -> String {
             let y = offset_y + (max_y - point[1]) * scale;
             (x, y)
         });
-        let temperature = element.node_ids.iter().map(|id| result.final_temperature_k[*id]).sum::<f64>() / 3.0;
+        let temperature = element
+            .node_ids
+            .iter()
+            .map(|id| result.final_temperature_k[*id])
+            .sum::<f64>()
+            / 3.0;
         let color = thermal_mesh_color((temperature - result.min_temperature_k) / range);
         triangles.push_str(&format!(
             "<polygon points=\"{:.3},{:.3} {:.3},{:.3} {:.3},{:.3}\" fill=\"{}\" stroke=\"#09111b\" stroke-width=\"0.55\"><title>{}: {:.4} K</title></polygon>",
@@ -306,14 +331,19 @@ fn thermal_mesh_color(fraction: f64) -> String {
         (0.65, [232.0, 207.0, 85.0]),
         (1.0, [217.0, 71.0, 63.0]),
     ];
-    let pair = stops.windows(2).find(|pair| fraction <= pair[1].0).unwrap_or(&stops[2..4]);
+    let pair = stops
+        .windows(2)
+        .find(|pair| fraction <= pair[1].0)
+        .unwrap_or(&stops[2..4]);
     let amount = ((fraction - pair[0].0) / (pair[1].0 - pair[0].0)).clamp(0.0, 1.0);
     let channel = |index: usize| (pair[0].1[index] + (pair[1].1[index] - pair[0].1[index]) * amount).round() as u8;
     format!("#{:02x}{:02x}{:02x}", channel(0), channel(1), channel(2))
 }
 
 fn mesh_thermal_csv(result: &MeshThermalResult) -> String {
-    let mut csv = String::from("record_type,id,x_m,y_m,temperature_k,node_a,node_b,node_c,material_id,thickness_m,source_part_id,mean_temperature_k\n");
+    let mut csv = String::from(
+        "record_type,id,x_m,y_m,temperature_k,node_a,node_b,node_c,material_id,thickness_m,source_part_id,mean_temperature_k\n",
+    );
     for (index, node) in result.config.mesh.nodes.iter().enumerate() {
         csv.push_str(&format!(
             "node,{},{:.12},{:.12},{:.12},,,,,,,\n",
@@ -321,11 +351,21 @@ fn mesh_thermal_csv(result: &MeshThermalResult) -> String {
         ));
     }
     for (index, triangle) in result.config.mesh.triangles.iter().enumerate() {
-        let mean = triangle.node_ids.iter().map(|id| result.final_temperature_k[*id]).sum::<f64>() / 3.0;
+        let mean = triangle
+            .node_ids
+            .iter()
+            .map(|id| result.final_temperature_k[*id])
+            .sum::<f64>()
+            / 3.0;
         csv.push_str(&format!(
             "triangle,{index},,,,{},{},{},{},{},\"{}\",{:.12}\n",
-            triangle.node_ids[0], triangle.node_ids[1], triangle.node_ids[2],
-            triangle.material_id, triangle.thickness_m, csv_escape(&triangle.source_part_id), mean,
+            triangle.node_ids[0],
+            triangle.node_ids[1],
+            triangle.node_ids[2],
+            triangle.material_id,
+            triangle.thickness_m,
+            csv_escape(&triangle.source_part_id),
+            mean,
         ));
     }
     csv
@@ -398,13 +438,11 @@ pub fn export_truss_visualization(
         &result.metadata.solver_id,
         &result.metadata.solver_version,
     );
-    let html_path = write_unique(
-        directory,
-        &format!("{stem}_visualization"),
-        "html",
-        html.as_bytes(),
-    )?;
-    Ok(VisualizationFiles { html_path, data_path: csv_path })
+    let html_path = write_unique(directory, &format!("{stem}_visualization"), "html", html.as_bytes())?;
+    Ok(VisualizationFiles {
+        html_path,
+        data_path: csv_path,
+    })
 }
 
 fn validate_truss_result(result: &TrussResult) -> Result<(), VisualizationError> {
@@ -427,28 +465,65 @@ fn validate_truss_result(result: &TrussResult) -> Result<(), VisualizationError>
         || input_node_ids.len() != result.config.nodes.len()
         || input_element_ids.len() != result.config.elements.len()
         || result.config.nodes.iter().any(|node| !node_ids.contains_key(&node.id))
-        || result.config.elements.iter().any(|element| !element_ids.contains_key(&element.id))
-        || result.config.elements.iter().any(|element| {
-            !input_node_ids.contains(&element.node_a) || !input_node_ids.contains(&element.node_b)
-        })
-        || result.config.supports.iter().any(|support| !input_node_ids.contains(&support.node_id))
-        || result.config.loads.iter().any(|load| !input_node_ids.contains(&load.node_id))
+        || result
+            .config
+            .elements
+            .iter()
+            .any(|element| !element_ids.contains_key(&element.id))
+        || result
+            .config
+            .elements
+            .iter()
+            .any(|element| !input_node_ids.contains(&element.node_a) || !input_node_ids.contains(&element.node_b))
+        || result
+            .config
+            .supports
+            .iter()
+            .any(|support| !input_node_ids.contains(&support.node_id))
+        || result
+            .config
+            .loads
+            .iter()
+            .any(|load| !input_node_ids.contains(&load.node_id))
     {
         return Err(VisualizationError::InvalidResult(
             "result identifiers do not match the input geometry".into(),
         ));
     }
-    let finite_input_nodes = result.config.nodes.iter().all(|node| node.x_m.is_finite() && node.y_m.is_finite());
-    let finite_loads = result.config.loads.iter().all(|load| load.force_x_n.is_finite() && load.force_y_n.is_finite());
+    let finite_input_nodes = result
+        .config
+        .nodes
+        .iter()
+        .all(|node| node.x_m.is_finite() && node.y_m.is_finite());
+    let finite_loads = result
+        .config
+        .loads
+        .iter()
+        .all(|load| load.force_x_n.is_finite() && load.force_y_n.is_finite());
     let finite_nodes = result.nodes.iter().all(|node| {
-        [node.displacement_x_m, node.displacement_y_m, node.reaction_x_n, node.reaction_y_n]
-            .iter().all(|value| value.is_finite())
+        [
+            node.displacement_x_m,
+            node.displacement_y_m,
+            node.reaction_x_n,
+            node.reaction_y_n,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
     });
     let finite_elements = result.elements.iter().all(|element| {
-        [element.length_m, element.axial_force_n, element.axial_stress_pa, element.axial_strain]
-            .iter().all(|value| value.is_finite())
+        [
+            element.length_m,
+            element.axial_force_n,
+            element.axial_stress_pa,
+            element.axial_strain,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
     });
-    if !finite_input_nodes || !finite_loads || !finite_nodes || !finite_elements
+    if !finite_input_nodes
+        || !finite_loads
+        || !finite_nodes
+        || !finite_elements
         || !result.max_displacement_m.is_finite()
         || !result.max_absolute_stress_pa.is_finite()
         || !result.max_absolute_axial_force_n.is_finite()
@@ -560,10 +635,30 @@ fn thermal_csv(result: &ThermalResult) -> String {
 }
 
 fn truss_svg(result: &TrussResult) -> String {
-    let x_min = result.config.nodes.iter().map(|node| node.x_m).fold(f64::INFINITY, f64::min);
-    let x_max = result.config.nodes.iter().map(|node| node.x_m).fold(f64::NEG_INFINITY, f64::max);
-    let y_min = result.config.nodes.iter().map(|node| node.y_m).fold(f64::INFINITY, f64::min);
-    let y_max = result.config.nodes.iter().map(|node| node.y_m).fold(f64::NEG_INFINITY, f64::max);
+    let x_min = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.x_m)
+        .fold(f64::INFINITY, f64::min);
+    let x_max = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.x_m)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let y_min = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.y_m)
+        .fold(f64::INFINITY, f64::min);
+    let y_max = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.y_m)
+        .fold(f64::NEG_INFINITY, f64::max);
     let span_x = (x_max - x_min).max(1.0e-6);
     let span_y = (y_max - y_min).max(1.0e-6);
     let plot_x = 80.0;
@@ -574,8 +669,10 @@ fn truss_svg(result: &TrussResult) -> String {
     let centre_x = (x_min + x_max) * 0.5;
     let centre_y = (y_min + y_max) * 0.5;
     let map_point = |x: f64, y: f64| -> (f64, f64) {
-        (plot_x + plot_w * 0.5 + (x - centre_x) * scale,
-         plot_y + plot_h * 0.5 - (y - centre_y) * scale)
+        (
+            plot_x + plot_w * 0.5 + (x - centre_x) * scale,
+            plot_y + plot_h * 0.5 - (y - centre_y) * scale,
+        )
     };
     let max_displacement = result.max_displacement_m;
     let geometric_diagonal = span_x.hypot(span_y);
@@ -585,13 +682,21 @@ fn truss_svg(result: &TrussResult) -> String {
         1.0
     };
     let node_results: HashMap<u32, _> = result.nodes.iter().map(|node| (node.node_id, node)).collect();
-    let element_results: HashMap<u32, _> = result.elements.iter().map(|element| (element.element_id, element)).collect();
+    let element_results: HashMap<u32, _> = result
+        .elements
+        .iter()
+        .map(|element| (element.element_id, element))
+        .collect();
     let node_inputs: HashMap<u32, _> = result.config.nodes.iter().map(|node| (node.id, node)).collect();
     let mut members = String::new();
 
     for element in &result.config.elements {
-        let Some(a) = node_inputs.get(&element.node_a) else { continue };
-        let Some(b) = node_inputs.get(&element.node_b) else { continue };
+        let Some(a) = node_inputs.get(&element.node_a) else {
+            continue;
+        };
+        let Some(b) = node_inputs.get(&element.node_b) else {
+            continue;
+        };
         let original_a = map_point(a.x_m, a.y_m);
         let original_b = map_point(b.x_m, b.y_m);
         let result_a = node_results[&a.id];
@@ -683,10 +788,30 @@ fn truss_svg(result: &TrussResult) -> String {
 }
 
 fn deformation_scale(result: &TrussResult) -> f64 {
-    let x_min = result.config.nodes.iter().map(|node| node.x_m).fold(f64::INFINITY, f64::min);
-    let x_max = result.config.nodes.iter().map(|node| node.x_m).fold(f64::NEG_INFINITY, f64::max);
-    let y_min = result.config.nodes.iter().map(|node| node.y_m).fold(f64::INFINITY, f64::min);
-    let y_max = result.config.nodes.iter().map(|node| node.y_m).fold(f64::NEG_INFINITY, f64::max);
+    let x_min = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.x_m)
+        .fold(f64::INFINITY, f64::min);
+    let x_max = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.x_m)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let y_min = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.y_m)
+        .fold(f64::INFINITY, f64::min);
+    let y_max = result
+        .config
+        .nodes
+        .iter()
+        .map(|node| node.y_m)
+        .fold(f64::NEG_INFINITY, f64::max);
     let diagonal = (x_max - x_min).hypot(y_max - y_min);
     if result.max_displacement_m > 0.0 {
         0.12 * diagonal.max(1.0e-6) / result.max_displacement_m
@@ -718,13 +843,20 @@ fn truss_member_table(result: &TrussResult) -> String {
 
 fn truss_csv(result: &TrussResult) -> String {
     let node_results: HashMap<u32, _> = result.nodes.iter().map(|node| (node.node_id, node)).collect();
-    let mut csv = String::from("record_type,id,x_m,y_m,displacement_x_m,displacement_y_m,reaction_x_n,reaction_y_n,length_m,axial_force_n,axial_stress_pa,axial_strain\n");
+    let mut csv = String::from(
+        "record_type,id,x_m,y_m,displacement_x_m,displacement_y_m,reaction_x_n,reaction_y_n,length_m,axial_force_n,axial_stress_pa,axial_strain\n",
+    );
     for node in &result.config.nodes {
         let value = node_results[&node.id];
         csv.push_str(&format!(
             "node,{},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},,,,\n",
-            node.id, node.x_m, node.y_m, value.displacement_x_m, value.displacement_y_m,
-            value.reaction_x_n, value.reaction_y_n
+            node.id,
+            node.x_m,
+            node.y_m,
+            value.displacement_x_m,
+            value.displacement_y_m,
+            value.reaction_x_n,
+            value.reaction_y_n
         ));
     }
     for element in &result.elements {
@@ -740,7 +872,17 @@ fn truss_csv(result: &TrussResult) -> String {
     csv
 }
 
-fn report_html(title: &str, heading: &str, subtitle: &str, svg: &str, metrics: &str, data_filename: &str, fingerprint: &str, solver: &str, solver_version: &str) -> String {
+fn report_html(
+    title: &str,
+    heading: &str,
+    subtitle: &str,
+    svg: &str,
+    metrics: &str,
+    data_filename: &str,
+    fingerprint: &str,
+    solver: &str,
+    solver_version: &str,
+) -> String {
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title>
         <style>
@@ -766,12 +908,21 @@ fn report_html(title: &str, heading: &str, subtitle: &str, svg: &str, metrics: &
 }
 
 fn html_escape(value: &str) -> String {
-    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 fn write_unique(directory: &Path, stem: &str, extension: &str, contents: &[u8]) -> Result<PathBuf, VisualizationError> {
     for collision in 0_u32..10_000 {
-        let suffix = if collision == 0 { String::new() } else { format!("_{collision}") };
+        let suffix = if collision == 0 {
+            String::new()
+        } else {
+            format!("_{collision}")
+        };
         let path = directory.join(format!("{stem}{suffix}.{extension}"));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
@@ -785,7 +936,9 @@ fn write_unique(directory: &Path, stem: &str, extension: &str, contents: &[u8]) 
             Err(error) => return Err(VisualizationError::Io(error)),
         }
     }
-    Err(VisualizationError::InvalidResult("could not allocate a unique report filename".into()))
+    Err(VisualizationError::InvalidResult(
+        "could not allocate a unique report filename".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -803,13 +956,15 @@ mod tests {
     #[test]
     fn thermal_visualization_exports_html_and_full_resolution_csv() {
         let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
-        let mut config = crate::ThermalConfig::default();
-        config.width = 8;
-        config.height = 8;
-        config.time_step_s = 0.001;
-        config.steps = 2;
-        config.heat_patch = None;
-        config.boundary_conditions = crate::BoundaryConditions::insulated();
+        let config = crate::ThermalConfig {
+            width: 8,
+            height: 8,
+            time_step_s: 0.001,
+            steps: 2,
+            heat_patch: None,
+            boundary_conditions: crate::BoundaryConditions::insulated(),
+            ..Default::default()
+        };
         let result = crate::simulate(&config, &pool, |_| {}).unwrap();
         let directory = temp_dir("thermal");
         let files = export_thermal_visualization(&result, &directory).unwrap();
@@ -825,9 +980,11 @@ mod tests {
     #[test]
     fn mesh_thermal_visualization_exports_mesh_svg_and_source_provenance() {
         let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
-        let mut config = crate::MeshThermalConfig::default();
-        config.steps = 3;
-        config.time_step_s = 0.01;
+        let config = crate::MeshThermalConfig {
+            steps: 3,
+            time_step_s: 0.01,
+            ..Default::default()
+        };
         let result = crate::simulate_mesh_thermal(&config, &pool).unwrap();
         let directory = temp_dir("mesh-thermal");
         let files = export_mesh_thermal_visualization(&result, &directory).unwrap();
@@ -840,7 +997,10 @@ mod tests {
         assert!(html.contains("Minimum interior angle"));
         assert!(csv.contains("source_part_id"));
         assert!(csv.contains("reference-plate"));
-        assert_eq!(csv.lines().count(), result.config.mesh.nodes.len() + result.config.mesh.triangles.len() + 1);
+        assert_eq!(
+            csv.lines().count(),
+            result.config.mesh.nodes.len() + result.config.mesh.triangles.len() + 1
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -876,12 +1036,14 @@ mod tests {
     #[test]
     fn invalid_thermal_field_is_rejected() {
         let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
-        let mut config = crate::ThermalConfig::default();
-        config.width = 8;
-        config.height = 8;
-        config.time_step_s = 0.001;
-        config.steps = 1;
-        config.heat_patch = None;
+        let config = crate::ThermalConfig {
+            width: 8,
+            height: 8,
+            time_step_s: 0.001,
+            steps: 1,
+            heat_patch: None,
+            ..Default::default()
+        };
         let mut result = crate::simulate(&config, &pool, |_| {}).unwrap();
         result.final_temperature_k.pop();
         assert!(matches!(

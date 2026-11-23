@@ -49,9 +49,9 @@ impl SimulationMetadata {
 fn fnv1a64(bytes: &[u8]) -> String {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let hash = bytes.iter().fold(OFFSET_BASIS, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
-    });
+    let hash = bytes
+        .iter()
+        .fold(OFFSET_BASIS, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(PRIME));
     format!("fnv1a64:{hash:016x}")
 }
 
@@ -88,7 +88,10 @@ mod tests {
     #[test]
     fn changed_inputs_change_the_fingerprint() {
         let first = metadata(&Inputs { width: 64, factor: 0.2 });
-        let second = metadata(&Inputs { width: 64, factor: 0.21 });
+        let second = metadata(&Inputs {
+            width: 64,
+            factor: 0.21,
+        });
         assert_ne!(first.input_fingerprint, second.input_fingerprint);
     }
 }

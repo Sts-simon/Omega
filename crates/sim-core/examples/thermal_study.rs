@@ -5,9 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let detected = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(2);
+    let detected = std::thread::available_parallelism().map(usize::from).unwrap_or(2);
     let threads = std::env::var("OMEGA_WORKER_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -43,24 +41,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let result = simulate(&config, &pool, |fraction| {
         let percent = (fraction * 100.0).round() as u32;
-        if percent % 10 == 0 {
+        if percent.is_multiple_of(10) {
             println!("Progress: {percent:3}%");
         }
     })?;
 
     println!("\nCompleted in {:.3} s wall time", result.elapsed_ms as f64 / 1_000.0);
     println!("Simulated time: {:.3} s", result.simulated_time_s);
-    println!("Stable time-step limit: {:.6} s", result.diagnostics.stable_time_step_limit_s);
+    println!(
+        "Stable time-step limit: {:.6} s",
+        result.diagnostics.stable_time_step_limit_s
+    );
     println!(
         "Temperature: min {:.3} K | mean {:.3} K | max {:.3} K",
-        result.min_temperature_k,
-        result.mean_temperature_k,
-        result.max_temperature_k
+        result.min_temperature_k, result.mean_temperature_k, result.max_temperature_k
     );
     println!(
         "Energy balance: absolute {:.6e} J | relative {:.6e}",
-        result.diagnostics.energy_balance_error_j,
-        result.diagnostics.energy_balance_relative_error
+        result.diagnostics.energy_balance_error_j, result.diagnostics.energy_balance_relative_error
     );
     println!("Input fingerprint: {}", result.metadata.input_fingerprint);
 

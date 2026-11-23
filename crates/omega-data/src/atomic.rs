@@ -16,9 +16,11 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_file_name(format!("{file_name}.tmp"));
     {
         let mut file = File::create(&tmp).map_err(|e| format!("cannot create {}: {e}", tmp.display()))?;
-        file.write_all(bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+        file.write_all(bytes)
+            .map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
         file.flush().map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| format!("cannot sync {}: {e}", tmp.display()))?;
+        file.sync_all()
+            .map_err(|e| format!("cannot sync {}: {e}", tmp.display()))?;
     }
     if path.exists() {
         let bak = path.with_file_name(format!("{file_name}.bak"));

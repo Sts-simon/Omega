@@ -5,8 +5,9 @@ mod runtime;
 
 pub use graph::{handle_mouse as graph_input, setup as setup_graph_ui, sync as sync_graph_ui};
 
-use bevy::prelude::*;
 use crate::campus::{CampusState, CampusView};
+use crate::ui_kit::UiInteraction;
+use bevy::prelude::*;
 use model::{BlockKind, Program, ProgramBlock, TemperatureComparison};
 use runtime::{RuntimeStatus, SequenceRuntime};
 use std::path::Path;
@@ -109,7 +110,9 @@ impl SequenceWorkspace {
         if !self.ensure_editable() {
             return;
         }
-        let Some(selected_index) = self.selected_index() else { return };
+        let Some(selected_index) = self.selected_index() else {
+            return;
+        };
         let current_target = match &self.program.blocks[selected_index].kind {
             BlockKind::BranchTemperature { target_block_id, .. }
             | BlockKind::BranchVariable { target_block_id, .. } => *target_block_id,
@@ -165,7 +168,12 @@ impl SequenceWorkspace {
         if !self.ensure_editable() || !delta.is_finite() {
             return;
         }
-        let Some(block) = self.program.blocks.iter_mut().find(|block| block.id == self.selected_block_id) else {
+        let Some(block) = self
+            .program
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == self.selected_block_id)
+        else {
             return;
         };
         match &mut block.kind {
@@ -202,11 +210,13 @@ impl SequenceWorkspace {
             return;
         }
         match self.program.toggle_breakpoint(self.selected_block_id) {
-            Ok(enabled) => self.message = if enabled {
-                format!("Breakpoint enabled on block #{}", self.selected_block_id)
-            } else {
-                format!("Breakpoint removed from block #{}", self.selected_block_id)
-            },
+            Ok(enabled) => {
+                self.message = if enabled {
+                    format!("Breakpoint enabled on block #{}", self.selected_block_id)
+                } else {
+                    format!("Breakpoint removed from block #{}", self.selected_block_id)
+                }
+            }
             Err(error) => self.message = error,
         }
     }
@@ -219,7 +229,11 @@ impl SequenceWorkspace {
     }
 
     fn save(&mut self) {
-        match self.program.to_bytes().and_then(|bytes| crate::save::write(crate::save::SaveFile::Program, &bytes)) {
+        match self
+            .program
+            .to_bytes()
+            .and_then(|bytes| crate::save::write(crate::save::SaveFile::Program, &bytes))
+        {
             Ok(()) => self.message = "Program saved to the save slot".to_string(),
             Err(error) => self.message = format!("Save failed: {error}"),
         }
@@ -242,13 +256,13 @@ impl SequenceWorkspace {
     }
 
     fn toggle_run(&mut self) {
-        if self.runtime.status != RuntimeStatus::Running {
-            if let Err(issues) = self.program.validate() {
-                self.runtime.status = RuntimeStatus::Failed;
-                self.runtime.error = Some(issues.join("; "));
-                self.message = "Program validation failed; see runtime error".to_string();
-                return;
-            }
+        if self.runtime.status != RuntimeStatus::Running
+            && let Err(issues) = self.program.validate()
+        {
+            self.runtime.status = RuntimeStatus::Failed;
+            self.runtime.error = Some(issues.join("; "));
+            self.message = "Program validation failed; see runtime error".to_string();
+            return;
         }
         self.runtime.toggle_run();
         self.message = format!("Sequence {}", self.runtime.status.label().to_lowercase());
@@ -281,7 +295,7 @@ pub fn setup_ui(mut commands: Commands) {
             padding: UiRect::all(Val::Px(12.0)),
             ..default()
         },
-        Interaction::None,
+        UiInteraction::None,
         BackgroundColor(Color::srgba(0.025, 0.04, 0.055, 0.91)),
         SequenceHud,
     ));
@@ -424,11 +438,7 @@ pub fn handle_keyboard(
     }
 }
 
-pub fn tick(
-    time: Res<Time>,
-    campus: Res<CampusState>,
-    mut workspace: ResMut<SequenceWorkspace>,
-) {
+pub fn tick(time: Res<Time>, campus: Res<CampusState>, mut workspace: ResMut<SequenceWorkspace>) {
     if campus.view != CampusView::Programming || campus.profile_editor_open {
         return;
     }
@@ -442,12 +452,15 @@ pub fn update_hud(
     campus: Res<CampusState>,
     mut hud: Query<(&mut Text, &mut Node), With<SequenceHud>>,
 ) {
-    let Ok((mut text, mut node)) = hud.single_mut() else { return };
-    node.display = if campus.view == CampusView::Programming && !campus.profile_editor_open && !workspace.graph_is_open() {
-        Display::Flex
-    } else {
-        Display::None
+    let Ok((mut text, mut node)) = hud.single_mut() else {
+        return;
     };
+    node.display =
+        if campus.view == CampusView::Programming && !campus.profile_editor_open && !workspace.graph_is_open() {
+            Display::Flex
+        } else {
+            Display::None
+        };
     if campus.view != CampusView::Programming || workspace.graph_is_open() {
         return;
     }
@@ -455,12 +468,18 @@ pub fn update_hud(
         "OMEGA 0.26.0 | LAB SEQUENCER   [{}]",
         workspace.runtime.status.label()
     )];
-    lines.push("F6 open graph | Space run/pause | N step | B breakpoint | F1 wait | F2 read | F3 temp condition".to_string());
+    lines.push(
+        "F6 open graph | Space run/pause | N step | B breakpoint | F1 wait | F2 read | F3 temp condition".to_string(),
+    );
     lines.push("F4 heater | F5 set variable | F7 increment | F8 variable condition | F11 record".to_string());
     lines.push("Shift+F12 delete | PgUp/PgDn select | Ctrl+F7 export trace".to_string());
     lines.push("Shift+PgUp/PgDn reorder | T / Shift+T change branch target | +/- edit value".to_string());
     lines.push("Ctrl+F8 save | Ctrl+F9 load | Ctrl+F10 reset".to_string());
-    lines.push(format!("\nPROGRAM: {}  |  {} blocks", workspace.program.name, workspace.program.blocks.len()));
+    lines.push(format!(
+        "\nPROGRAM: {}  |  {} blocks",
+        workspace.program.name,
+        workspace.program.blocks.len()
+    ));
 
     let selected_index = workspace.program.index_of(workspace.selected_block_id).unwrap_or(0);
     let visible_start = selected_index.saturating_sub(5);
@@ -469,7 +488,11 @@ pub fn update_hud(
         lines.push("... earlier blocks ...".to_string());
     }
     for block in visible_blocks {
-        let marker = if block.id == workspace.selected_block_id { ">" } else { " " };
+        let marker = if block.id == workspace.selected_block_id {
+            ">"
+        } else {
+            " "
+        };
         lines.push(format!("{marker} {}", format_block(block)));
     }
     if visible_start + 12 < workspace.program.blocks.len() {
@@ -485,12 +508,22 @@ pub fn update_hud(
         workspace.runtime.instructions_executed,
     ));
     if workspace.runtime.wait_remaining_s > 0.0 {
-        lines.push(format!("Waiting: {:.2} s remaining", workspace.runtime.wait_remaining_s));
+        lines.push(format!(
+            "Waiting: {:.2} s remaining",
+            workspace.runtime.wait_remaining_s
+        ));
     }
     if !workspace.runtime.variables.is_empty() {
-        lines.push(format!("Variables: {}", workspace.runtime.variables.iter()
-            .map(|(name, value)| format!("{name}={value:.3}"))
-            .collect::<Vec<_>>().join(" | ")));
+        lines.push(format!(
+            "Variables: {}",
+            workspace
+                .runtime
+                .variables
+                .iter()
+                .map(|(name, value)| format!("{name}={value:.3}"))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
     }
     if let Some(error) = &workspace.runtime.error {
         lines.push(format!("Runtime error: {error}"));
@@ -506,25 +539,50 @@ fn format_block(block: &ProgramBlock) -> String {
     match &block.kind {
         BlockKind::Start => format!("[{:03}] START", block.id),
         BlockKind::Wait { duration_s } => format!("[{:03}] WAIT  {duration_s:.2} s", block.id),
-        BlockKind::SetHeaterPower { fraction } => format!("[{:03}] SET CHAMBER HEATER  {:.0}%", block.id, fraction * 100.0),
-        BlockKind::ReadTemperature { sensor_id } => format!("[{:03}] READ TEMPERATURE  {sensor_id}", block.id),
-        BlockKind::BranchTemperature { comparison, threshold_c, target_block_id } => {
+        BlockKind::SetHeaterPower { fraction } => {
+            format!("[{:03}] SET CHAMBER HEATER  {:.0}%", block.id, fraction * 100.0)
+        }
+        BlockKind::ReadTemperature { sensor_id } => {
+            format!("[{:03}] READ TEMPERATURE  {sensor_id}", block.id)
+        }
+        BlockKind::BranchTemperature {
+            comparison,
+            threshold_c,
+            target_block_id,
+        } => {
             let operator = match comparison {
                 TemperatureComparison::GreaterOrEqual => ">=",
                 TemperatureComparison::LessThan => "<",
             };
-            format!("[{:03}] IF TEMP {operator} {threshold_c:.1} C  GOTO #{target_block_id:03}", block.id)
+            format!(
+                "[{:03}] IF TEMP {operator} {threshold_c:.1} C  GOTO #{target_block_id:03}",
+                block.id
+            )
         }
-        BlockKind::SetVariable { name, value } => format!("[{:03}] SET {name} = {value:.3}", block.id),
-        BlockKind::SetVariableExpression { name, expression } => format!("[{:03}] SET {name} = {expression}", block.id),
-        BlockKind::AddVariable { name, delta } => format!("[{:03}] ADD {name} += {delta:.3}", block.id),
-        BlockKind::BranchVariable { name, comparison, threshold, target_block_id } => {
+        BlockKind::SetVariable { name, value } => {
+            format!("[{:03}] SET {name} = {value:.3}", block.id)
+        }
+        BlockKind::SetVariableExpression { name, expression } => {
+            format!("[{:03}] SET {name} = {expression}", block.id)
+        }
+        BlockKind::AddVariable { name, delta } => {
+            format!("[{:03}] ADD {name} += {delta:.3}", block.id)
+        }
+        BlockKind::BranchVariable {
+            name,
+            comparison,
+            threshold,
+            target_block_id,
+        } => {
             let operator = match comparison {
                 model::NumericComparison::GreaterOrEqual => ">=",
                 model::NumericComparison::LessThan => "<",
                 model::NumericComparison::Equal => "==",
             };
-            format!("[{:03}] IF {name} {operator} {threshold:.3}  GOTO #{target_block_id:03}", block.id)
+            format!(
+                "[{:03}] IF {name} {operator} {threshold:.3}  GOTO #{target_block_id:03}",
+                block.id
+            )
         }
         BlockKind::Record { message } => format!("[{:03}] RECORD  {message}", block.id),
         BlockKind::End => format!("[{:03}] END", block.id),

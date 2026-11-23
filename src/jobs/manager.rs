@@ -1,20 +1,21 @@
 use super::thermal::{self, ThermalConfig, ThermalError, ThermalResult};
-use omega_sim_core::{
-    MeshThermalConfig, MeshThermalError, MeshThermalResult, TrussConfig, TrussError,
-    TrussResult, export_mesh_thermal_visualization, export_thermal_visualization,
-    export_truss_visualization, simulate_mesh_thermal_cancellable, solve_truss_cancellable,
-};
-use bevy::prelude::*;
-use crossbeam_channel::{unbounded, Receiver, Sender};
-use rayon::ThreadPoolBuilder;
 use crate::campus::{CampusState, CampusView};
 use crate::sequence::SequenceWorkspace;
+use crate::ui_kit::UiInteraction;
+use bevy::prelude::*;
+use crossbeam_channel::{Receiver, Sender, unbounded};
+use omega_sim_core::{
+    MeshThermalConfig, MeshThermalError, MeshThermalResult, TrussConfig, TrussError, TrussResult,
+    export_mesh_thermal_visualization, export_thermal_visualization, export_truss_visualization,
+    simulate_mesh_thermal_cancellable, solve_truss_cancellable,
+};
+use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Debug)]
 enum JobCommand {
@@ -37,13 +38,35 @@ enum JobCommand {
 
 #[derive(Clone, Debug)]
 enum JobEvent {
-    Started { id: u64 },
-    Progress { id: u64, fraction: f32 },
-    Completed { id: u64, result: ThermalResult, report_path: PathBuf },
-    TrussCompleted { id: u64, result: TrussResult, report_path: PathBuf },
-    MeshThermalCompleted { id: u64, result: MeshThermalResult, report_path: PathBuf },
-    Cancelled { id: u64 },
-    Failed { id: u64, message: String },
+    Started {
+        id: u64,
+    },
+    Progress {
+        id: u64,
+        fraction: f32,
+    },
+    Completed {
+        id: u64,
+        result: ThermalResult,
+        report_path: PathBuf,
+    },
+    TrussCompleted {
+        id: u64,
+        result: TrussResult,
+        report_path: PathBuf,
+    },
+    MeshThermalCompleted {
+        id: u64,
+        result: MeshThermalResult,
+        report_path: PathBuf,
+    },
+    Cancelled {
+        id: u64,
+    },
+    Failed {
+        id: u64,
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,9 +118,7 @@ impl Default for JobManager {
     fn default() -> Self {
         let (command_tx, command_rx) = unbounded::<JobCommand>();
         let (event_tx, event_rx) = unbounded::<JobEvent>();
-        let detected_threads = std::thread::available_parallelism()
-            .map(usize::from)
-            .unwrap_or(4);
+        let detected_threads = std::thread::available_parallelism().map(usize::from).unwrap_or(4);
         // Leave one logical CPU available for Bevy/UI by default. The environment
         // variable lets users explicitly spend the full CPU budget on research.
         let default_budget = detected_threads.saturating_sub(1).max(1);
@@ -350,11 +371,15 @@ impl JobManager {
             report_path: None,
         });
 
-        if self.command_tx.send(JobCommand::CivilTruss {
-            id,
-            config: TrussConfig::default(),
-            cancel,
-        }).is_err() {
+        if self
+            .command_tx
+            .send(JobCommand::CivilTruss {
+                id,
+                config: TrussConfig::default(),
+                cancel,
+            })
+            .is_err()
+        {
             if let Some(record) = self.find_record_mut(id) {
                 record.state = JobState::Failed;
                 record.summary = Some("Research worker is unavailable".to_string());
@@ -379,7 +404,11 @@ impl JobManager {
             summary: None,
             report_path: None,
         });
-        if self.command_tx.send(JobCommand::MeshThermal { id, config, cancel }).is_err() {
+        if self
+            .command_tx
+            .send(JobCommand::MeshThermal { id, config, cancel })
+            .is_err()
+        {
             if let Some(record) = self.find_record_mut(id) {
                 record.state = JobState::Failed;
                 record.summary = Some("Research worker is unavailable".to_string());
@@ -390,14 +419,21 @@ impl JobManager {
     }
 
     pub fn open_latest_report(&self) -> Result<(), String> {
-        let path = self.records.iter().rev().find_map(|record| record.report_path.as_ref())
+        let path = self
+            .records
+            .iter()
+            .rev()
+            .find_map(|record| record.report_path.as_ref())
             .ok_or_else(|| "No visualization report has been generated yet".to_string())?;
         let absolute = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
 
         #[cfg(target_os = "linux")]
         let result = std::process::Command::new("xdg-open").arg(&absolute).spawn();
         #[cfg(target_os = "windows")]
-        let result = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(&absolute).spawn();
+        let result = std::process::Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(&absolute)
+            .spawn();
         #[cfg(target_os = "macos")]
         let result = std::process::Command::new("open").arg(&absolute).spawn();
         #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
@@ -406,7 +442,9 @@ impl JobManager {
             "Opening reports is not configured for this operating system",
         ));
 
-        result.map(|_| ()).map_err(|error| format!("Could not open {}: {error}", absolute.display()))
+        result
+            .map(|_| ())
+            .map_err(|error| format!("Could not open {}: {error}", absolute.display()))
     }
 
     /// Requests cancellation of the newest queued or running task.
@@ -422,7 +460,9 @@ impl JobManager {
     }
 
     pub fn cancel_job(&mut self, id: u64) -> bool {
-        let Some(token) = self.cancel_tokens.get(&id).cloned() else { return false };
+        let Some(token) = self.cancel_tokens.get(&id).cloned() else {
+            return false;
+        };
         let Some(record) = self.records.iter_mut().find(|record| record.id == id) else {
             return false;
         };
@@ -462,7 +502,11 @@ impl JobManager {
                         messages.push(format!("Job #{id}: {percent}%"));
                     }
                 }
-                JobEvent::Completed { id, result, report_path } => {
+                JobEvent::Completed {
+                    id,
+                    result,
+                    report_path,
+                } => {
                     if let Some(record) = self.find_record_mut(id) {
                         record.state = JobState::Completed;
                         record.progress = 1.0;
@@ -481,9 +525,16 @@ impl JobManager {
                         record.report_path = Some(report_path.clone());
                     }
                     self.cancel_tokens.remove(&id);
-                    messages.push(format!("Job #{id}: completed. Browser report: {}", report_path.display()));
+                    messages.push(format!(
+                        "Job #{id}: completed. Browser report: {}",
+                        report_path.display()
+                    ));
                 }
-                JobEvent::TrussCompleted { id, result, report_path } => {
+                JobEvent::TrussCompleted {
+                    id,
+                    result,
+                    report_path,
+                } => {
                     if let Some(record) = self.find_record_mut(id) {
                         record.state = JobState::Completed;
                         record.progress = 1.0;
@@ -498,9 +549,16 @@ impl JobManager {
                         record.report_path = Some(report_path.clone());
                     }
                     self.cancel_tokens.remove(&id);
-                    messages.push(format!("Job #{id}: structural study completed. Browser report: {}", report_path.display()));
+                    messages.push(format!(
+                        "Job #{id}: structural study completed. Browser report: {}",
+                        report_path.display()
+                    ));
                 }
-                JobEvent::MeshThermalCompleted { id, result, report_path } => {
+                JobEvent::MeshThermalCompleted {
+                    id,
+                    result,
+                    report_path,
+                } => {
                     if let Some(record) = self.find_record_mut(id) {
                         record.state = JobState::Completed;
                         record.progress = 1.0;
@@ -516,7 +574,10 @@ impl JobManager {
                         record.report_path = Some(report_path.clone());
                     }
                     self.cancel_tokens.remove(&id);
-                    messages.push(format!("Job #{id}: workshop mesh thermal study completed. Browser report: {}", report_path.display()));
+                    messages.push(format!(
+                        "Job #{id}: workshop mesh thermal study completed. Browser report: {}",
+                        report_path.display()
+                    ));
                 }
                 JobEvent::Cancelled { id } => {
                     if let Some(record) = self.find_record_mut(id) {
@@ -566,7 +627,7 @@ pub fn setup_ui(mut commands: Commands) {
             overflow: bevy::prelude::Overflow::scroll_y(),
             ..default()
         },
-        Interaction::None,
+        UiInteraction::None,
         ScrollPosition::default(),
         bevy::prelude::BackgroundColor(Color::srgba(0.025, 0.04, 0.055, 0.88)),
         ComputationHud,
@@ -579,7 +640,9 @@ pub fn update_hud(
     sequence: Res<SequenceWorkspace>,
     mut hud: Query<(&mut Text, &mut Node), bevy::prelude::With<ComputationHud>>,
 ) {
-    let Ok((mut text, mut node)) = hud.single_mut() else { return };
+    let Ok((mut text, mut node)) = hud.single_mut() else {
+        return;
+    };
     node.display = if campus.view == CampusView::Computation && !sequence.graph_is_open() {
         bevy::prelude::Display::Flex
     } else {
@@ -637,8 +700,8 @@ fn write_report(id: u64, result: &ThermalResult) -> Result<PathBuf, String> {
                     let _ = fs::remove_file(&path);
                     return Err(error.to_string());
                 }
-                let visualizations = export_thermal_visualization(result, &directory)
-                    .map_err(|error| error.to_string())?;
+                let visualizations =
+                    export_thermal_visualization(result, &directory).map_err(|error| error.to_string())?;
                 return Ok(visualizations.html_path);
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -649,14 +712,17 @@ fn write_report(id: u64, result: &ThermalResult) -> Result<PathBuf, String> {
     }
 }
 
-
 fn write_mesh_thermal_report(id: u64, result: &MeshThermalResult) -> Result<PathBuf, String> {
     let directory = PathBuf::from("results");
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let json = serde_json::to_vec_pretty(result).map_err(|error| error.to_string())?;
     let timestamp = result.metadata.created_unix_ms;
     for collision in 0_u32..10_000 {
-        let suffix = if collision == 0 { String::new() } else { format!("_{collision}") };
+        let suffix = if collision == 0 {
+            String::new()
+        } else {
+            format!("_{collision}")
+        };
         let path = directory.join(format!("mesh_thermal_{id:04}_{timestamp}{suffix}.json"));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
@@ -664,8 +730,8 @@ fn write_mesh_thermal_report(id: u64, result: &MeshThermalResult) -> Result<Path
                     let _ = fs::remove_file(&path);
                     return Err(error.to_string());
                 }
-                let visualizations = export_mesh_thermal_visualization(result, &directory)
-                    .map_err(|error| error.to_string())?;
+                let visualizations =
+                    export_mesh_thermal_visualization(result, &directory).map_err(|error| error.to_string())?;
                 return Ok(visualizations.html_path);
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -682,7 +748,11 @@ fn write_truss_report(id: u64, result: &TrussResult) -> Result<PathBuf, String> 
     let timestamp = result.metadata.created_unix_ms;
     let mut collision = 0_u32;
     loop {
-        let suffix = if collision == 0 { String::new() } else { format!("_{collision}") };
+        let suffix = if collision == 0 {
+            String::new()
+        } else {
+            format!("_{collision}")
+        };
         let path = directory.join(format!("truss_static_{id:04}_{timestamp}{suffix}.json"));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
@@ -690,8 +760,8 @@ fn write_truss_report(id: u64, result: &TrussResult) -> Result<PathBuf, String> 
                     let _ = fs::remove_file(&path);
                     return Err(error.to_string());
                 }
-                let visualizations = export_truss_visualization(result, &directory)
-                    .map_err(|error| error.to_string())?;
+                let visualizations =
+                    export_truss_visualization(result, &directory).map_err(|error| error.to_string())?;
                 return Ok(visualizations.html_path);
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {

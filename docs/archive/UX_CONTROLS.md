@@ -1,4 +1,9 @@
+> **Archived document.** Written before the 0.26 missile-only direction and kept for historical
+> reference only. It no longer describes the current project: see `README.md`,
+> `docs/ARCHITECTURE.md` and `docs/ROADMAP_OMEGA.md`.
+
 # Omega 0.21.0 — UI and mouse controls
+
 
 ## Navigation
 

@@ -5,8 +5,8 @@
 use crate::campus::{CampusState, CampusView};
 use crate::save::{self, SaveFile};
 use crate::scene::OrbitCameraRig;
-use omega_rules::{ComputerClass, Part, PartSpec, RadarClass, SensorKind, Stage, Vehicle};
 use bevy::prelude::*;
+use omega_rules::{ComputerClass, Part, PartSpec, RadarClass, SensorKind, Stage, Vehicle};
 use std::collections::BTreeSet;
 
 const ANCHOR: Vec3 = Vec3::new(0.0, 0.2, 18.0);
@@ -65,24 +65,48 @@ impl PartTemplate {
 
     pub fn spec(self) -> PartSpec {
         match self {
-            Self::SolidMotor => PartSpec::SolidMotor { length_m: 1.5, diameter_m: 0.4, burn_time_s: 15.0 },
-            Self::FuelTank => PartSpec::FuelTank { length_m: 1.5, diameter_m: 0.4 },
+            Self::SolidMotor => PartSpec::SolidMotor {
+                length_m: 1.5,
+                diameter_m: 0.4,
+                burn_time_s: 15.0,
+            },
+            Self::FuelTank => PartSpec::FuelTank {
+                length_m: 1.5,
+                diameter_m: 0.4,
+            },
             Self::LiquidEngine => PartSpec::LiquidEngine { scale: 1.0 },
             Self::AirBreathing => PartSpec::AirBreathing { scale: 1.0 },
-            Self::Pitot => PartSpec::Sensor { kind: SensorKind::Pitot },
-            Self::Barometer => PartSpec::Sensor { kind: SensorKind::Barometer },
-            Self::RadarBasic => PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Basic) },
-            Self::RadarActive => PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Active) },
-            Self::ComputerBasic => PartSpec::Computer { class: ComputerClass::Basic },
-            Self::ComputerStandard => PartSpec::Computer { class: ComputerClass::Standard },
-            Self::ComputerAdvanced => PartSpec::Computer { class: ComputerClass::Advanced },
+            Self::Pitot => PartSpec::Sensor {
+                kind: SensorKind::Pitot,
+            },
+            Self::Barometer => PartSpec::Sensor {
+                kind: SensorKind::Barometer,
+            },
+            Self::RadarBasic => PartSpec::Sensor {
+                kind: SensorKind::Radar(RadarClass::Basic),
+            },
+            Self::RadarActive => PartSpec::Sensor {
+                kind: SensorKind::Radar(RadarClass::Active),
+            },
+            Self::ComputerBasic => PartSpec::Computer {
+                class: ComputerClass::Basic,
+            },
+            Self::ComputerStandard => PartSpec::Computer {
+                class: ComputerClass::Standard,
+            },
+            Self::ComputerAdvanced => PartSpec::Computer {
+                class: ComputerClass::Advanced,
+            },
             Self::Decoupler => PartSpec::Decoupler,
             Self::MissionModule => PartSpec::MissionModule { mass_kg: 40.0 },
         }
     }
 
     pub fn is_computer(self) -> bool {
-        matches!(self, Self::ComputerBasic | Self::ComputerStandard | Self::ComputerAdvanced)
+        matches!(
+            self,
+            Self::ComputerBasic | Self::ComputerStandard | Self::ComputerAdvanced
+        )
     }
 }
 
@@ -120,11 +144,21 @@ impl Param {
 /// Adjustable parameters of a part, with their current values.
 pub(crate) fn params_of(spec: &PartSpec) -> Vec<(Param, f64)> {
     match *spec {
-        PartSpec::SolidMotor { length_m, diameter_m, burn_time_s } => {
-            vec![(Param::Length, length_m), (Param::Diameter, diameter_m), (Param::BurnTime, burn_time_s)]
+        PartSpec::SolidMotor {
+            length_m,
+            diameter_m,
+            burn_time_s,
+        } => {
+            vec![
+                (Param::Length, length_m),
+                (Param::Diameter, diameter_m),
+                (Param::BurnTime, burn_time_s),
+            ]
         }
         PartSpec::FuelTank { length_m, diameter_m } => vec![(Param::Length, length_m), (Param::Diameter, diameter_m)],
-        PartSpec::LiquidEngine { scale } | PartSpec::AirBreathing { scale } => vec![(Param::Scale, scale)],
+        PartSpec::LiquidEngine { scale } | PartSpec::AirBreathing { scale } => {
+            vec![(Param::Scale, scale)]
+        }
         PartSpec::MissionModule { mass_kg } => vec![(Param::Mass, mass_kg)],
         _ => Vec::new(),
     }
@@ -135,24 +169,59 @@ pub(crate) fn adjusted(spec: PartSpec, param: Param, direction: f64) -> Option<P
     let round = |v: f64| (v * 1000.0).round() / 1000.0;
     let delta = param.step() * direction;
     let changed = match (spec, param) {
-        (PartSpec::SolidMotor { length_m, diameter_m, burn_time_s }, Param::Length) => {
-            PartSpec::SolidMotor { length_m: round((length_m + delta).clamp(0.3, 8.0)), diameter_m, burn_time_s }
-        }
-        (PartSpec::SolidMotor { length_m, diameter_m, burn_time_s }, Param::Diameter) => {
-            PartSpec::SolidMotor { length_m, diameter_m: round((diameter_m + delta).clamp(0.1, 1.2)), burn_time_s }
-        }
-        (PartSpec::SolidMotor { length_m, diameter_m, burn_time_s }, Param::BurnTime) => {
-            PartSpec::SolidMotor { length_m, diameter_m, burn_time_s: round((burn_time_s + delta).clamp(1.0, 60.0)) }
-        }
-        (PartSpec::FuelTank { length_m, diameter_m }, Param::Length) => {
-            PartSpec::FuelTank { length_m: round((length_m + delta).clamp(0.3, 8.0)), diameter_m }
-        }
-        (PartSpec::FuelTank { length_m, diameter_m }, Param::Diameter) => {
-            PartSpec::FuelTank { length_m, diameter_m: round((diameter_m + delta).clamp(0.1, 1.2)) }
-        }
-        (PartSpec::LiquidEngine { scale }, Param::Scale) => PartSpec::LiquidEngine { scale: round((scale + delta).clamp(0.3, 3.0)) },
-        (PartSpec::AirBreathing { scale }, Param::Scale) => PartSpec::AirBreathing { scale: round((scale + delta).clamp(0.3, 3.0)) },
-        (PartSpec::MissionModule { mass_kg }, Param::Mass) => PartSpec::MissionModule { mass_kg: round((mass_kg + delta).clamp(1.0, 300.0)) },
+        (
+            PartSpec::SolidMotor {
+                length_m,
+                diameter_m,
+                burn_time_s,
+            },
+            Param::Length,
+        ) => PartSpec::SolidMotor {
+            length_m: round((length_m + delta).clamp(0.3, 8.0)),
+            diameter_m,
+            burn_time_s,
+        },
+        (
+            PartSpec::SolidMotor {
+                length_m,
+                diameter_m,
+                burn_time_s,
+            },
+            Param::Diameter,
+        ) => PartSpec::SolidMotor {
+            length_m,
+            diameter_m: round((diameter_m + delta).clamp(0.1, 1.2)),
+            burn_time_s,
+        },
+        (
+            PartSpec::SolidMotor {
+                length_m,
+                diameter_m,
+                burn_time_s,
+            },
+            Param::BurnTime,
+        ) => PartSpec::SolidMotor {
+            length_m,
+            diameter_m,
+            burn_time_s: round((burn_time_s + delta).clamp(1.0, 60.0)),
+        },
+        (PartSpec::FuelTank { length_m, diameter_m }, Param::Length) => PartSpec::FuelTank {
+            length_m: round((length_m + delta).clamp(0.3, 8.0)),
+            diameter_m,
+        },
+        (PartSpec::FuelTank { length_m, diameter_m }, Param::Diameter) => PartSpec::FuelTank {
+            length_m,
+            diameter_m: round((diameter_m + delta).clamp(0.1, 1.2)),
+        },
+        (PartSpec::LiquidEngine { scale }, Param::Scale) => PartSpec::LiquidEngine {
+            scale: round((scale + delta).clamp(0.3, 3.0)),
+        },
+        (PartSpec::AirBreathing { scale }, Param::Scale) => PartSpec::AirBreathing {
+            scale: round((scale + delta).clamp(0.3, 3.0)),
+        },
+        (PartSpec::MissionModule { mass_kg }, Param::Mass) => PartSpec::MissionModule {
+            mass_kg: round((mass_kg + delta).clamp(1.0, 300.0)),
+        },
         _ => return None,
     };
     Some(changed)
@@ -180,7 +249,10 @@ pub(crate) struct MissileSession {
 }
 
 fn part(id: &str, spec: PartSpec) -> Part {
-    Part { id: id.to_string(), spec }
+    Part {
+        id: id.to_string(),
+        spec,
+    }
 }
 
 impl MissileSession {
@@ -208,15 +280,19 @@ impl MissileSession {
         let last = self.vehicle.stages.len().saturating_sub(1);
         let mut found = None;
         for (s, stage) in self.vehicle.stages.iter().enumerate() {
-            if let Some(p) = stage.parts.iter().position(|p| matches!(p.spec, PartSpec::Computer { .. })) {
+            if let Some(p) = stage
+                .parts
+                .iter()
+                .position(|p| matches!(p.spec, PartSpec::Computer { .. }))
+            {
                 found = Some((s, p));
             }
         }
-        if let Some((s, p)) = found {
-            if s != last {
-                let computer = self.vehicle.stages[s].parts.remove(p);
-                self.vehicle.stages[last].parts.push(computer);
-            }
+        if let Some((s, p)) = found
+            && s != last
+        {
+            let computer = self.vehicle.stages[s].parts.remove(p);
+            self.vehicle.stages[last].parts.push(computer);
         }
         self.selected = None;
     }
@@ -233,15 +309,39 @@ impl MissileSession {
                 stages: vec![
                     Stage {
                         parts: vec![
-                            part("motor-1", PartSpec::SolidMotor { length_m: 2.0, diameter_m: 0.4, burn_time_s: 20.0 }),
+                            part(
+                                "motor-1",
+                                PartSpec::SolidMotor {
+                                    length_m: 2.0,
+                                    diameter_m: 0.4,
+                                    burn_time_s: 20.0,
+                                },
+                            ),
                             part("decoupler-2", PartSpec::Decoupler),
                         ],
                     },
                     Stage {
                         parts: vec![
-                            part("motor-3", PartSpec::SolidMotor { length_m: 1.0, diameter_m: 0.3, burn_time_s: 25.0 }),
-                            part("computer-4", PartSpec::Computer { class: ComputerClass::Basic }),
-                            part("pitot-5", PartSpec::Sensor { kind: SensorKind::Pitot }),
+                            part(
+                                "motor-3",
+                                PartSpec::SolidMotor {
+                                    length_m: 1.0,
+                                    diameter_m: 0.3,
+                                    burn_time_s: 25.0,
+                                },
+                            ),
+                            part(
+                                "computer-4",
+                                PartSpec::Computer {
+                                    class: ComputerClass::Basic,
+                                },
+                            ),
+                            part(
+                                "pitot-5",
+                                PartSpec::Sensor {
+                                    kind: SensorKind::Pitot,
+                                },
+                            ),
                             part("module-6", PartSpec::MissionModule { mass_kg: 40.0 }),
                         ],
                     },
@@ -251,10 +351,26 @@ impl MissileSession {
                 name: "Cruise vehicle".into(),
                 stages: vec![Stage {
                     parts: vec![
-                        part("tank-1", PartSpec::FuelTank { length_m: 1.5, diameter_m: 0.3 }),
+                        part(
+                            "tank-1",
+                            PartSpec::FuelTank {
+                                length_m: 1.5,
+                                diameter_m: 0.3,
+                            },
+                        ),
                         part("turbofan-2", PartSpec::AirBreathing { scale: 1.0 }),
-                        part("computer-3", PartSpec::Computer { class: ComputerClass::Basic }),
-                        part("pitot-4", PartSpec::Sensor { kind: SensorKind::Pitot }),
+                        part(
+                            "computer-3",
+                            PartSpec::Computer {
+                                class: ComputerClass::Basic,
+                            },
+                        ),
+                        part(
+                            "pitot-4",
+                            PartSpec::Sensor {
+                                kind: SensorKind::Pitot,
+                            },
+                        ),
                         part("module-5", PartSpec::MissionModule { mass_kg: 30.0 }),
                     ],
                 }],
@@ -283,8 +399,12 @@ impl MissileSession {
                 format!("New parts go to stage {}", self.active_stage + 1)
             }
             MissileAction::Adjust(param, direction) => {
-                let Some((s, p)) = self.selected else { return "Select a part first".to_string() };
-                let Some(current) = self.vehicle.stages.get(s).and_then(|st| st.parts.get(p)) else { return String::new() };
+                let Some((s, p)) = self.selected else {
+                    return "Select a part first".to_string();
+                };
+                let Some(current) = self.vehicle.stages.get(s).and_then(|st| st.parts.get(p)) else {
+                    return String::new();
+                };
                 match adjusted(current.spec, param, f64::from(direction)) {
                     Some(spec) => {
                         self.vehicle.stages[s].parts[p].spec = spec;
@@ -294,7 +414,9 @@ impl MissileSession {
                 }
             }
             MissileAction::RemovePart => {
-                let Some((s, p)) = self.selected else { return "Select a part first".to_string() };
+                let Some((s, p)) = self.selected else {
+                    return "Select a part first".to_string();
+                };
                 if s < self.vehicle.stages.len() && p < self.vehicle.stages[s].parts.len() {
                     let removed = self.vehicle.stages[s].parts.remove(p);
                     self.selected = None;
@@ -309,7 +431,10 @@ impl MissileSession {
                 self.vehicle.stages.push(Stage::default());
                 self.active_stage = self.vehicle.stages.len() - 1;
                 self.move_computer_to_last_stage();
-                format!("Stage {} added; the flight computer moved into it", self.vehicle.stages.len())
+                format!(
+                    "Stage {} added; the flight computer moved into it",
+                    self.vehicle.stages.len()
+                )
             }
             MissileAction::RemoveStage => {
                 if self.vehicle.stages.len() <= 1 {
@@ -322,7 +447,10 @@ impl MissileSession {
                 format!("Stage {} removed", index + 1)
             }
             MissileAction::Preset(index) => {
-                let preset_vehicle = Self { next_id: 0, ..Self::default() };
+                let preset_vehicle = Self {
+                    next_id: 0,
+                    ..Self::default()
+                };
                 let mut candidate = preset_vehicle;
                 candidate.load_preset(index);
                 let missing = candidate.vehicle.missing_research(owned);
@@ -333,7 +461,10 @@ impl MissileSession {
                 format!("Loaded preset: {}", self.vehicle.name)
             }
             MissileAction::Clear => {
-                self.vehicle = Vehicle { name: "New vehicle".into(), stages: vec![Stage::default()] };
+                self.vehicle = Vehicle {
+                    name: "New vehicle".into(),
+                    stages: vec![Stage::default()],
+                };
                 self.active_stage = 0;
                 self.selected = None;
                 self.next_id = 0;
@@ -380,7 +511,10 @@ impl MissileSession {
                 p.spec.validate().map_err(|e| format!("{}: {e}", p.id))?;
             }
         }
-        let mut session = Self { vehicle, ..Self::default() };
+        let mut session = Self {
+            vehicle,
+            ..Self::default()
+        };
         session.active_stage = session.vehicle.stages.len().saturating_sub(1);
         session.sync_next_id();
         Ok(session)
@@ -429,19 +563,62 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
         order.sort_by_key(|i| order_key(&stage.parts[*i].spec));
         for i in order {
             let (height, radius, shape, color) = match stage.parts[i].spec {
-                PartSpec::SolidMotor { length_m, diameter_m, .. } => (length_m as f32, diameter_m as f32 / 2.0, Shape::Body, [0.86, 0.42, 0.22]),
-                PartSpec::FuelTank { length_m, diameter_m } => (length_m as f32, diameter_m as f32 / 2.0, Shape::Body, [0.82, 0.86, 0.90]),
-                PartSpec::LiquidEngine { scale } => (0.35 * scale as f32, 0.15 * scale as f32, Shape::Nozzle, [0.35, 0.38, 0.42]),
-                PartSpec::AirBreathing { scale } => (0.5 * scale as f32, 0.17 * scale as f32, Shape::Nozzle, [0.45, 0.48, 0.55]),
-                PartSpec::Sensor { kind: SensorKind::Pitot } => (0.25, 0.03, Shape::Sensor, [0.35, 0.84, 0.94]),
-                PartSpec::Sensor { kind: SensorKind::Barometer } => (0.12, body_radius * 0.9, Shape::Disc, [0.35, 0.74, 0.80]),
-                PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Basic) } => (0.2, body_radius * 0.95, Shape::Disc, [0.30, 0.78, 0.60]),
-                PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Active) } => (0.28, body_radius, Shape::Disc, [0.35, 0.90, 0.55]),
+                PartSpec::SolidMotor {
+                    length_m, diameter_m, ..
+                } => (
+                    length_m as f32,
+                    diameter_m as f32 / 2.0,
+                    Shape::Body,
+                    [0.86, 0.42, 0.22],
+                ),
+                PartSpec::FuelTank { length_m, diameter_m } => (
+                    length_m as f32,
+                    diameter_m as f32 / 2.0,
+                    Shape::Body,
+                    [0.82, 0.86, 0.90],
+                ),
+                PartSpec::LiquidEngine { scale } => (
+                    0.35 * scale as f32,
+                    0.15 * scale as f32,
+                    Shape::Nozzle,
+                    [0.35, 0.38, 0.42],
+                ),
+                PartSpec::AirBreathing { scale } => (
+                    0.5 * scale as f32,
+                    0.17 * scale as f32,
+                    Shape::Nozzle,
+                    [0.45, 0.48, 0.55],
+                ),
+                PartSpec::Sensor {
+                    kind: SensorKind::Pitot,
+                } => (0.25, 0.03, Shape::Sensor, [0.35, 0.84, 0.94]),
+                PartSpec::Sensor {
+                    kind: SensorKind::Barometer,
+                } => (0.12, body_radius * 0.9, Shape::Disc, [0.35, 0.74, 0.80]),
+                PartSpec::Sensor {
+                    kind: SensorKind::Radar(RadarClass::Basic),
+                } => (0.2, body_radius * 0.95, Shape::Disc, [0.30, 0.78, 0.60]),
+                PartSpec::Sensor {
+                    kind: SensorKind::Radar(RadarClass::Active),
+                } => (0.28, body_radius, Shape::Disc, [0.35, 0.90, 0.55]),
                 PartSpec::Computer { .. } => (0.15, body_radius * 0.9, Shape::Disc, [0.40, 0.78, 0.40]),
                 PartSpec::Decoupler => (0.06, body_radius * 1.05, Shape::Disc, [0.95, 0.80, 0.20]),
-                PartSpec::MissionModule { mass_kg } => ((0.2 + mass_kg as f32 / 150.0).min(2.2), body_radius, Shape::Body, [0.40, 0.55, 0.92]),
+                PartSpec::MissionModule { mass_kg } => (
+                    (0.2 + mass_kg as f32 / 150.0).min(2.2),
+                    body_radius,
+                    Shape::Body,
+                    [0.40, 0.55, 0.92],
+                ),
             };
-            boxes.push(PartBox { stage: s, index: i, y_bottom: y, height, radius, shape, color });
+            boxes.push(PartBox {
+                stage: s,
+                index: i,
+                y_bottom: y,
+                height,
+                radius,
+                shape,
+                color,
+            });
             y += height;
         }
     }
@@ -452,7 +629,11 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
 pub(crate) struct MissileRoot;
 
 pub(crate) fn setup_missile(mut commands: Commands) {
-    commands.spawn((Transform::from_translation(ANCHOR).with_scale(Vec3::splat(VISUAL_SCALE)), Visibility::Hidden, MissileRoot));
+    commands.spawn((
+        Transform::from_translation(ANCHOR).with_scale(Vec3::splat(VISUAL_SCALE)),
+        Visibility::Hidden,
+        MissileRoot,
+    ));
 }
 
 pub(crate) fn load_missile(mut session: ResMut<MissileSession>) {
@@ -467,7 +648,9 @@ pub(crate) fn load_missile(mut session: ResMut<MissileSession>) {
 }
 
 pub(crate) fn persist_missile(session: &MissileSession) -> Result<(), String> {
-    session.to_bytes().and_then(|bytes| save::write(SaveFile::Vehicle, &bytes))
+    session
+        .to_bytes()
+        .and_then(|bytes| save::write(SaveFile::Vehicle, &bytes))
 }
 
 /// Rebuild the 3D stack whenever the vehicle or the selection changes.
@@ -480,9 +663,15 @@ pub(crate) fn sync_missile_visuals(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut last: Local<String>,
 ) {
-    let Ok((entity, mut visibility)) = root.single_mut() else { return };
+    let Ok((entity, mut visibility)) = root.single_mut() else {
+        return;
+    };
     let show = campus.view == CampusView::Missile;
-    let wanted = if show { Visibility::Inherited } else { Visibility::Hidden };
+    let wanted = if show {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
     if *visibility != wanted {
         *visibility = wanted;
     }
@@ -504,7 +693,11 @@ pub(crate) fn sync_missile_visuals(
             let [r, g, bl] = b.color;
             let material = materials.add(StandardMaterial {
                 base_color: Color::srgb(r, g, bl),
-                emissive: if selected { LinearRgba::rgb(0.25, 0.55, 0.65) } else { LinearRgba::BLACK },
+                emissive: if selected {
+                    LinearRgba::rgb(0.25, 0.55, 0.65)
+                } else {
+                    LinearRgba::BLACK
+                },
                 perceptual_roughness: 0.6,
                 ..default()
             });
@@ -513,10 +706,18 @@ pub(crate) fn sync_missile_visuals(
                 Shape::Nozzle => meshes.add(Cone::new(b.radius, b.height)),
                 Shape::Body | Shape::Sensor | Shape::Disc => meshes.add(Cylinder::new(b.radius, b.height)),
             };
-            root.spawn((Mesh3d(mesh), MeshMaterial3d(material), Transform::from_xyz(0.0, mid, 0.0)));
+            root.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::from_xyz(0.0, mid, 0.0),
+            ));
         }
         if !boxes.is_empty() {
-            let nose = materials.add(StandardMaterial { base_color: Color::srgb(0.88, 0.90, 0.94), perceptual_roughness: 0.5, ..default() });
+            let nose = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.88, 0.90, 0.94),
+                perceptual_roughness: 0.5,
+                ..default()
+            });
             let height = (nose_radius * 3.0).max(0.3);
             root.spawn((
                 Mesh3d(meshes.add(Cone::new(nose_radius, height))),
@@ -540,14 +741,21 @@ pub(crate) fn focus_missile_camera(
     if !entered {
         return;
     }
-    let Ok((mut transform, mut rig)) = cameras.single_mut() else { return };
+    let Ok((mut transform, mut rig)) = cameras.single_mut() else {
+        return;
+    };
     let height: f32 = layout(&session.vehicle).iter().map(|b| b.height).sum();
     rig.target = ANCHOR + Vec3::new(0.0, height * VISUAL_SCALE * 0.5, 0.0);
     rig.distance = (14.0 + height * 2.5).clamp(14.0, 40.0);
     rig.yaw = 0.7;
     rig.pitch = 0.30;
     let horizontal = rig.pitch.cos() * rig.distance;
-    transform.translation = rig.target + Vec3::new(rig.yaw.sin() * horizontal, rig.pitch.sin() * rig.distance, rig.yaw.cos() * horizontal);
+    transform.translation = rig.target
+        + Vec3::new(
+            rig.yaw.sin() * horizontal,
+            rig.pitch.sin() * rig.distance,
+            rig.yaw.cos() * horizontal,
+        );
     transform.look_at(rig.target, Vec3::Y);
 }
 
@@ -557,7 +765,10 @@ mod tests {
 
     fn everything_owned() -> BTreeSet<String> {
         let tree = omega_rules::default_tree();
-        let state = omega_rules::ResearchState { completed: tree.iter().map(|n| n.id.clone()).collect(), active: None };
+        let state = omega_rules::ResearchState {
+            completed: tree.iter().map(|n| n.id.clone()).collect(),
+            active: None,
+        };
         state.owned_capabilities(&tree)
     }
 
@@ -583,20 +794,34 @@ mod tests {
         session.apply(MissileAction::Adjust(Param::BurnTime, -1), &owned);
         let after = session.vehicle.stages[0].parts[0].spec.stats();
         assert!(after.propellant_kg > before.propellant_kg);
-        assert!(after.thrust_n > before.thrust_n, "longer motor and shorter burn = more thrust");
+        assert!(
+            after.thrust_n > before.thrust_n,
+            "longer motor and shorter burn = more thrust"
+        );
         for _ in 0..200 {
             session.apply(MissileAction::Adjust(Param::BurnTime, -1), &owned);
         }
-        assert_eq!(params_of(&session.vehicle.stages[0].parts[0].spec)[2].1, 1.0, "clamped at the minimum burn time");
+        assert_eq!(
+            params_of(&session.vehicle.stages[0].parts[0].spec)[2].1,
+            1.0,
+            "clamped at the minimum burn time"
+        );
         assert!(session.vehicle.stages[0].parts[0].spec.validate().is_ok());
-        assert!(session.apply(MissileAction::Adjust(Param::Scale, 1), &owned).contains("no such setting"));
+        assert!(
+            session
+                .apply(MissileAction::Adjust(Param::Scale, 1), &owned)
+                .contains("no such setting")
+        );
     }
 
     #[test]
     fn locked_parts_cannot_be_added_until_researched() {
         let mut session = MissileSession::new_default();
         let message = session.apply(MissileAction::AddPart(PartTemplate::RadarActive), &starting());
-        assert!(message.contains("Locked") && message.contains("sensor:radar_active"), "{message}");
+        assert!(
+            message.contains("Locked") && message.contains("sensor:radar_active"),
+            "{message}"
+        );
         let count = session.vehicle.parts().count();
         assert_eq!(session.vehicle.parts().count(), count);
         let ok = session.apply(MissileAction::AddPart(PartTemplate::RadarActive), &everything_owned());
@@ -609,12 +834,22 @@ mod tests {
         let mut session = MissileSession::new_default();
         let owned = everything_owned();
         session.apply(MissileAction::AddPart(PartTemplate::ComputerAdvanced), &owned);
-        let computers: Vec<_> = session.vehicle.parts().filter(|(_, p)| matches!(p.spec, PartSpec::Computer { .. })).collect();
+        let computers: Vec<_> = session
+            .vehicle
+            .parts()
+            .filter(|(_, p)| matches!(p.spec, PartSpec::Computer { .. }))
+            .collect();
         assert_eq!(computers.len(), 1);
         assert_eq!(session.vehicle.computer(), Some(ComputerClass::Advanced));
         session.apply(MissileAction::NewStage, &owned);
         assert_eq!(session.vehicle.stages.len(), 3);
-        assert!(session.vehicle.stages[2].parts.iter().any(|p| matches!(p.spec, PartSpec::Computer { .. })), "computer follows the new last stage");
+        assert!(
+            session.vehicle.stages[2]
+                .parts
+                .iter()
+                .any(|p| matches!(p.spec, PartSpec::Computer { .. })),
+            "computer follows the new last stage"
+        );
     }
 
     #[test]
@@ -628,15 +863,26 @@ mod tests {
             session.apply(MissileAction::RemoveStage, &owned);
         }
         assert_eq!(session.vehicle.stages.len(), 1);
-        assert!(session.apply(MissileAction::RemoveStage, &owned).contains("at least one"));
+        assert!(
+            session
+                .apply(MissileAction::RemoveStage, &owned)
+                .contains("at least one")
+        );
     }
 
     #[test]
     fn presets_respect_research_and_ids_stay_unique() {
         let mut session = MissileSession::new_default();
         assert!(session.apply(MissileAction::Preset(1), &starting()).contains("locked"));
-        assert_eq!(session.vehicle.name, "Two-stage rocket", "a locked preset does not replace the design");
-        assert!(session.apply(MissileAction::Preset(1), &everything_owned()).contains("Cruise vehicle"));
+        assert_eq!(
+            session.vehicle.name, "Two-stage rocket",
+            "a locked preset does not replace the design"
+        );
+        assert!(
+            session
+                .apply(MissileAction::Preset(1), &everything_owned())
+                .contains("Cruise vehicle")
+        );
         let owned = everything_owned();
         for _ in 0..3 {
             session.apply(MissileAction::AddPart(PartTemplate::FuelTank), &owned);
@@ -665,10 +911,20 @@ mod tests {
         session.apply(MissileAction::Preset(1), &everything_owned());
         let boxes = layout(&session.vehicle);
         assert_eq!(boxes.len(), 5);
-        assert!(boxes.windows(2).all(|w| (w[0].y_bottom + w[0].height - w[1].y_bottom).abs() < 1e-6), "contiguous stack");
+        assert!(
+            boxes
+                .windows(2)
+                .all(|w| (w[0].y_bottom + w[0].height - w[1].y_bottom).abs() < 1e-6),
+            "contiguous stack"
+        );
         assert_eq!(boxes[0].shape, Shape::Nozzle, "the turbofan sits at the bottom");
         let two_stage = layout(&MissileSession::new_default().vehicle);
-        assert!(two_stage.iter().filter(|b| b.stage == 0).all(|b| b.y_bottom < two_stage.iter().find(|x| x.stage == 1).unwrap().y_bottom + 1e-6));
+        assert!(
+            two_stage
+                .iter()
+                .filter(|b| b.stage == 0)
+                .all(|b| b.y_bottom < two_stage.iter().find(|x| x.stage == 1).unwrap().y_bottom + 1e-6)
+        );
     }
 
     #[test]
@@ -678,7 +934,11 @@ mod tests {
         let loaded = MissileSession::from_bytes(&bytes).unwrap();
         assert_eq!(loaded.vehicle, session.vehicle);
         let mut bad = session.vehicle.clone();
-        bad.stages[0].parts[0].spec = PartSpec::SolidMotor { length_m: 99.0, diameter_m: 0.4, burn_time_s: 10.0 };
+        bad.stages[0].parts[0].spec = PartSpec::SolidMotor {
+            length_m: 99.0,
+            diameter_m: 0.4,
+            burn_time_s: 10.0,
+        };
         assert!(MissileSession::from_bytes(&serde_json::to_vec(&bad).unwrap()).is_err());
         assert!(MissileSession::from_bytes(b"not json").is_err());
     }
@@ -688,6 +948,9 @@ mod tests {
         let mut session = MissileSession::new_default();
         let raw = session.apply(MissileAction::AddPart(PartTemplate::RadarActive), &starting());
         let friendly = crate::campus::friendly_capabilities(&raw);
-        assert!(friendly.contains("Active radar") && !friendly.contains("sensor:radar_active"), "{friendly}");
+        assert!(
+            friendly.contains("Active radar") && !friendly.contains("sensor:radar_active"),
+            "{friendly}"
+        );
     }
 }

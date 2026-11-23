@@ -12,14 +12,17 @@ pub mod requirement;
 pub mod research;
 pub mod vehicle;
 
-pub use diff::{diff_parts, DesignDiff};
-pub use dossier::{build_dossier, Dossier, DossierDecision, MatrixRow, ACCEPTANCE_THRESHOLD};
-pub use metrics::{derive_metrics, DerivedMetrics, PartGeometry};
-pub use flight::{simulate, FlightConfig, FlightReport, LaunchMode, LockResult, Sample};
-pub use program::{validate_program, Block, Program};
-pub use vehicle::{ComputerClass, Part, PartSpec, PartStats, RadarClass, SensorKind, Stage, StageReport, Vehicle};
-pub use research::{default_tree, starting_capabilities, validate_tree, ActiveResearch, Department, Grant, ResearchError, ResearchState, TechNode};
+pub use diff::{DesignDiff, diff_parts};
+pub use dossier::{ACCEPTANCE_THRESHOLD, Dossier, DossierDecision, MatrixRow, build_dossier};
+pub use flight::{FlightConfig, FlightReport, LaunchMode, LockResult, Sample, simulate};
+pub use metrics::{DerivedMetrics, PartGeometry, derive_metrics};
+pub use program::{Block, Program, validate_program};
 pub use requirement::{
-    evaluate_requirement, verification_cost, Comparator, Estimate, Evidence, Requirement,
-    RequirementStatus, VerificationCost, VerificationMethod,
+    Comparator, Estimate, Evidence, Requirement, RequirementStatus, VerificationCost, VerificationMethod,
+    evaluate_requirement, verification_cost,
 };
+pub use research::{
+    ActiveResearch, Department, Grant, ResearchError, ResearchState, TechNode, default_tree, starting_capabilities,
+    validate_tree,
+};
+pub use vehicle::{ComputerClass, Part, PartSpec, PartStats, RadarClass, SensorKind, Stage, StageReport, Vehicle};

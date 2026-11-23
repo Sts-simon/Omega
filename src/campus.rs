@@ -1,11 +1,18 @@
-use crate::design::{assembly_content_hash, assembly_metrics, Assembly, DesignSession, PolygonSketchSession, build_assembly_mesh_thermal_config, build_polygon_sketch_thermal_config};
-use omega_data::ContentHash;
-use omega_rules::{evaluate_requirement, Comparator, DossierDecision, Estimate, Evidence, Requirement, RequirementStatus, VerificationMethod};
-use omega_sim_core::refine_tri_mesh_local;
+use crate::design::{
+    Assembly, DesignSession, PolygonSketchSession, assembly_content_hash, assembly_metrics,
+    build_assembly_mesh_thermal_config, build_polygon_sketch_thermal_config,
+};
 use crate::jobs::{JobManager, JobState};
 use crate::sequence::SequenceWorkspace;
+use crate::ui_kit::UiInteraction;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use omega_data::ContentHash;
+use omega_rules::{
+    Comparator, DossierDecision, Estimate, Evidence, Requirement, RequirementStatus, VerificationMethod,
+    evaluate_requirement,
+};
+use omega_sim_core::refine_tri_mesh_local;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -14,7 +21,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod board;
 mod verification;
 
-pub(crate) use board::{friendly_capabilities, handle_extra_actions, setup_boards, sync_boards, update_nav_status, update_toast, ToastText};
+#[cfg(test)]
+pub(crate) use board::friendly_capabilities;
+pub(crate) use board::{ToastText, handle_extra_actions, setup_boards, sync_boards, update_nav_status, update_toast};
 
 const CAMPAIGN_SCHEMA: u32 = 1;
 const MAX_ACTIVE_CONTRACTS: usize = 2;
@@ -151,11 +160,21 @@ impl ContractDomain {
 
     fn brief(self) -> &'static str {
         match self {
-            Self::ScientificSounding => "Deliver a recoverable scientific instrument package for atmospheric measurements. The contract focuses on instrumentation, environmental robustness and data quality.",
-            Self::LongDurationObservation => "Develop an autonomous recorder for a long measurement campaign, with controlled energy use and reliable data retention.",
-            Self::GroundWeatherNetwork => "Supply compatible weather stations that operate outdoors and produce consistent environmental readings.",
-            Self::CivilAirSafety => "Develop cooperative civil telemetry and state-logging modules to improve the safety and interoperability of a research fleet.",
-            Self::EnvironmentalSurvey => "Create an instrument kit for mapping natural areas and recording georeferenced environmental measurements.",
+            Self::ScientificSounding => {
+                "Deliver a recoverable scientific instrument package for atmospheric measurements. The contract focuses on instrumentation, environmental robustness and data quality."
+            }
+            Self::LongDurationObservation => {
+                "Develop an autonomous recorder for a long measurement campaign, with controlled energy use and reliable data retention."
+            }
+            Self::GroundWeatherNetwork => {
+                "Supply compatible weather stations that operate outdoors and produce consistent environmental readings."
+            }
+            Self::CivilAirSafety => {
+                "Develop cooperative civil telemetry and state-logging modules to improve the safety and interoperability of a research fleet."
+            }
+            Self::EnvironmentalSurvey => {
+                "Create an instrument kit for mapping natural areas and recording georeferenced environmental measurements."
+            }
         }
     }
 }
@@ -360,16 +379,22 @@ fn check_balance(assembly: &Assembly, limit_ratio: f64, issues: &mut Vec<String>
         run_id: 0,
         design: design_hash.clone(),
         program: None,
-        estimate: Estimate { value: estimate.value, uncertainty: estimate.uncertainty },
+        estimate: Estimate {
+            value: estimate.value,
+            uncertainty: estimate.uncertainty,
+        },
     };
     match evaluate_requirement(&requirement, Some(&evidence), &design_hash, None) {
         RequirementStatus::Failed { .. } => issues.push(format!(
             "Centre of gravity is offset {:.1}% of the design length; the limit is {:.1}%",
-            estimate.value * 100.0, limit_ratio * 100.0
+            estimate.value * 100.0,
+            limit_ratio * 100.0
         )),
         RequirementStatus::Marginal { .. } => issues.push(format!(
             "Balance margin is too thin: offset {:.1}% +/- {:.1}% against a {:.1}% limit",
-            estimate.value * 100.0, estimate.uncertainty * 100.0, limit_ratio * 100.0
+            estimate.value * 100.0,
+            estimate.uncertainty * 100.0,
+            limit_ratio * 100.0
         )),
         _ => {}
     }
@@ -399,8 +424,7 @@ fn make_contract(id: u32, domain: ContractDomain, rng: &mut ContractRng) -> Cont
     let required_units = rng.range(unit_range.0, unit_range.1) as u8;
     let max_unit_cost_cr = u64::from(base_unit_budget + d * 1_500 + rng.range(0, 2_500));
     let total_budget = max_unit_cost_cr.saturating_mul(u64::from(required_units));
-    let deadline_days = (48_i32 - i32::from(difficulty) * 3 + rng.range(0, 9) as i32)
-        .clamp(20, 60) as u16;
+    let deadline_days = (48_i32 - i32::from(difficulty) * 3 + rng.range(0, 9) as i32).clamp(20, 60) as u16;
     let design_bonus = u64::from(difficulty) * 1_250 * u64::from(required_units);
     let reward = total_budget + total_budget / 3 + design_bonus;
 
@@ -502,7 +526,11 @@ impl Default for CampusState {
                     interrupted_analysis = true;
                 }
             }
-            if !save.accepted_contracts.iter().any(|item| Some(item.offer.id) == save.selected_contract_id) {
+            if !save
+                .accepted_contracts
+                .iter()
+                .any(|item| Some(item.offer.id) == save.selected_contract_id)
+            {
                 save.selected_contract_id = save.accepted_contracts.first().map(|item| item.offer.id);
             }
             return Self {
@@ -568,7 +596,8 @@ impl CampusState {
     }
 
     pub(crate) fn ui_computation_summary(&self) -> String {
-        let project = self.selected_contract()
+        let project = self
+            .selected_contract()
             .map(|active| format!("Selected project: {} | {}", active.offer.title, active.phase.label()))
             .unwrap_or_else(|| "No active project selected".to_string());
         format!("{}\nCredits: {} cr\n{}", project, self.credits, self.message)
@@ -586,7 +615,11 @@ impl CampusState {
         }
         let current = self.selected_contract_index().unwrap_or(0);
         let next = if reverse {
-            if current == 0 { self.accepted_contracts.len() - 1 } else { current - 1 }
+            if current == 0 {
+                self.accepted_contracts.len() - 1
+            } else {
+                current - 1
+            }
         } else {
             (current + 1) % self.accepted_contracts.len()
         };
@@ -613,7 +646,9 @@ impl CampusState {
             self.message = format!("Analysis unavailable while contract is {}", phase.label());
             return;
         }
-        if snapshot.fingerprint != assembly_fingerprint(&design.assembly) || snapshot.profile_revision != self.profile_revision {
+        if snapshot.fingerprint != assembly_fingerprint(&design.assembly)
+            || snapshot.profile_revision != self.profile_revision
+        {
             self.accepted_contracts[index].phase = ContractPhase::NeedsRevision;
             self.accepted_contracts[index].analysis_job_id = None;
             self.message = "Design or instrument profile changed. Submit the design again.".to_string();
@@ -645,7 +680,9 @@ impl CampusState {
             self.message = "No submitted design snapshot exists".to_string();
             return;
         };
-        if snapshot.fingerprint != assembly_fingerprint(&design.assembly) || snapshot.profile_revision != self.profile_revision {
+        if snapshot.fingerprint != assembly_fingerprint(&design.assembly)
+            || snapshot.profile_revision != self.profile_revision
+        {
             self.accepted_contracts[index].phase = ContractPhase::NeedsRevision;
             self.accepted_contracts[index].analysis_job_id = None;
             self.message = "The design changed after analysis. Submit it again and repeat the analysis.".to_string();
@@ -657,7 +694,10 @@ impl CampusState {
         let test_seed = u64::from(offer.id)
             ^ snapshot.design_revision.rotate_left(17)
             ^ snapshot.profile_revision.rotate_left(31)
-            ^ snapshot.fingerprint.bytes().fold(0_u64, |acc, byte| acc.wrapping_mul(131).wrapping_add(u64::from(byte)));
+            ^ snapshot
+                .fingerprint
+                .bytes()
+                .fold(0_u64, |acc, byte| acc.wrapping_mul(131).wrapping_add(u64::from(byte)));
         let mut rng = ContractRng::new(test_seed);
         let structural_penalty = snapshot.part_count.saturating_sub(8).min(4) as u8;
         let uptime_probability = profile.uptime_percent.saturating_sub(structural_penalty);
@@ -699,9 +739,17 @@ impl CampusState {
         let design_hash = ContentHash(snapshot.fingerprint.clone());
         let active = &mut self.accepted_contracts[index];
         let run_id = verification::next_run_id(&active.evidence);
-        active.evidence.retain(|e| e.requirement_id != "UPTIME" && e.requirement_id != "DATA");
-        active.evidence.extend(verification::field_test_evidence(&report, &design_hash, run_id));
-        active.phase = if passed { ContractPhase::TestPassed } else { ContractPhase::TestFailed };
+        active
+            .evidence
+            .retain(|e| e.requirement_id != "UPTIME" && e.requirement_id != "DATA");
+        active
+            .evidence
+            .extend(verification::field_test_evidence(&report, &design_hash, run_id));
+        active.phase = if passed {
+            ContractPhase::TestPassed
+        } else {
+            ContractPhase::TestFailed
+        };
         active.test_report = Some(report.clone());
         active.last_issues.clear();
         if measured_uptime < f64::from(offer.requirements.min_uptime_percent) {
@@ -717,12 +765,20 @@ impl CampusState {
             ));
         }
         if !thermal_passed {
-            active.last_issues.push("Instrument operating-temperature envelope is insufficient".to_string());
+            active
+                .last_issues
+                .push("Instrument operating-temperature envelope is insufficient".to_string());
         }
         self.message = if passed {
-            format!("Contract #{} passed its 1,000-sample field test. Return to the contract office to deliver it.", offer.id)
+            format!(
+                "Contract #{} passed its 1,000-sample field test. Return to the contract office to deliver it.",
+                offer.id
+            )
         } else {
-            format!("Contract #{} failed its field test. Adjust the profile and resubmit the design.", offer.id)
+            format!(
+                "Contract #{} failed its field test. Adjust the profile and resubmit the design.",
+                offer.id
+            )
         };
         self.mark_dirty();
     }
@@ -733,18 +789,29 @@ impl CampusState {
             return;
         };
         let offer = self.accepted_contracts[index].offer.clone();
-        let (snapshot, issues) = evaluate_design(&offer, &design.assembly, &self.instrument_profile, design.revision, self.profile_revision);
+        let (snapshot, issues) = evaluate_design(
+            &offer,
+            &design.assembly,
+            &self.instrument_profile,
+            design.revision,
+            self.profile_revision,
+        );
         let passed = issues.is_empty();
         let design_hash = ContentHash(snapshot.fingerprint.clone());
-        let evidence = verification::analysis_evidence(&offer, &design.assembly, &self.instrument_profile, &design_hash, 1)
-            .unwrap_or_default();
+        let evidence =
+            verification::analysis_evidence(&offer, &design.assembly, &self.instrument_profile, &design_hash, 1)
+                .unwrap_or_default();
         let active = &mut self.accepted_contracts[index];
         active.evidence = evidence;
         active.snapshot = Some(snapshot);
         active.analysis_job_id = None;
         active.test_report = None;
         active.last_issues = issues.clone();
-        active.phase = if passed { ContractPhase::DesignSubmitted } else { ContractPhase::NeedsRevision };
+        active.phase = if passed {
+            ContractPhase::DesignSubmitted
+        } else {
+            ContractPhase::NeedsRevision
+        };
         self.message = if passed {
             format!("Design for contract #{} accepted for scientific analysis", offer.id)
         } else {
@@ -770,7 +837,9 @@ impl CampusState {
             self.message = "No valid project snapshot available".to_string();
             return;
         };
-        if snapshot.fingerprint != assembly_fingerprint(&design.assembly) || snapshot.profile_revision != self.profile_revision {
+        if snapshot.fingerprint != assembly_fingerprint(&design.assembly)
+            || snapshot.profile_revision != self.profile_revision
+        {
             self.accepted_contracts[index].phase = ContractPhase::NeedsRevision;
             self.accepted_contracts[index].analysis_job_id = None;
             self.message = "The design changed after the field test. Submit, analyze and test it again.".to_string();
@@ -780,7 +849,12 @@ impl CampusState {
         let design_hash = ContentHash(snapshot.fingerprint.clone());
         if self.accepted_contracts[index].evidence.is_empty() {
             // Campaign saved before evidence was stored: rebuild it from the current state.
-            let rebuilt = verification::rebuild_evidence(&self.accepted_contracts[index], &design.assembly, &self.instrument_profile, &design_hash);
+            let rebuilt = verification::rebuild_evidence(
+                &self.accepted_contracts[index],
+                &design.assembly,
+                &self.instrument_profile,
+                &design_hash,
+            );
             self.accepted_contracts[index].evidence = rebuilt;
         }
         let dossier = verification::dossier_for(&self.accepted_contracts[index], &design_hash);
@@ -822,10 +896,7 @@ impl CampusState {
         self.selected_contract_id = self.accepted_contracts.first().map(|item| item.offer.id);
         self.message = format!(
             "Delivered contract #{}: production cost {} cr, client payment {} cr, net result {} cr",
-            offer.id,
-            production_cost,
-            offer.reward,
-            profit
+            offer.id, production_cost, offer.reward, profit
         );
         self.mark_dirty();
     }
@@ -837,7 +908,10 @@ impl CampusState {
             Ok(cost) => {
                 self.credits -= cost;
                 self.mark_dirty();
-                format!("Research started: {} ({} days, {} cr)", tech.label, tech.duration_days, cost)
+                format!(
+                    "Research started: {} ({} days, {} cr)",
+                    tech.label, tech.duration_days, cost
+                )
             }
             Err(error) => format!("Cannot research {}: {error}", tech.label),
         };
@@ -889,10 +963,6 @@ impl CampusState {
         }
     }
 
-    pub(crate) fn ui_cycle_selected_contract(&mut self) {
-        self.cycle_selected_contract(false);
-    }
-
     pub(crate) fn ui_submit_design(&mut self, design: &DesignSession) {
         self.submit_design(design);
     }
@@ -912,20 +982,33 @@ impl CampusState {
         let mut changed = true;
         match () {
             _ if keys.just_pressed(KeyCode::F1) => profile.power_draw_w = profile.power_draw_w.saturating_sub(2).max(2),
-            _ if keys.just_pressed(KeyCode::F2) => profile.power_draw_w = profile.power_draw_w.saturating_add(2).min(250),
+            _ if keys.just_pressed(KeyCode::F2) => {
+                profile.power_draw_w = profile.power_draw_w.saturating_add(2).min(250)
+            }
             _ if keys.just_pressed(KeyCode::F3) => profile.storage_gb = profile.storage_gb.saturating_sub(16).max(16),
-            _ if keys.just_pressed(KeyCode::F4) => profile.storage_gb = profile.storage_gb.saturating_add(16).min(2_048),
-            _ if keys.just_pressed(KeyCode::F5) => profile.uptime_percent = profile.uptime_percent.saturating_sub(1).max(80),
-            _ if keys.just_pressed(KeyCode::F7) => profile.uptime_percent = profile.uptime_percent.saturating_add(1).min(100),
-            _ if keys.just_pressed(KeyCode::F8) => profile.data_completeness_percent = profile.data_completeness_percent.saturating_sub(1).max(80),
-            _ if keys.just_pressed(KeyCode::F9) => profile.data_completeness_percent = profile.data_completeness_percent.saturating_add(1).min(100),
+            _ if keys.just_pressed(KeyCode::F4) => {
+                profile.storage_gb = profile.storage_gb.saturating_add(16).min(2_048)
+            }
+            _ if keys.just_pressed(KeyCode::F5) => {
+                profile.uptime_percent = profile.uptime_percent.saturating_sub(1).max(80)
+            }
+            _ if keys.just_pressed(KeyCode::F7) => {
+                profile.uptime_percent = profile.uptime_percent.saturating_add(1).min(100)
+            }
+            _ if keys.just_pressed(KeyCode::F8) => {
+                profile.data_completeness_percent = profile.data_completeness_percent.saturating_sub(1).max(80)
+            }
+            _ if keys.just_pressed(KeyCode::F9) => {
+                profile.data_completeness_percent = profile.data_completeness_percent.saturating_add(1).min(100)
+            }
             _ if keys.just_pressed(KeyCode::F10) => {
-                (profile.operating_min_c, profile.operating_max_c) = match (profile.operating_min_c, profile.operating_max_c) {
-                    (-55, 80) => (-40, 70),
-                    (-40, 70) => (-30, 60),
-                    (-30, 60) => (-60, 100),
-                    _ => (-55, 80),
-                };
+                (profile.operating_min_c, profile.operating_max_c) =
+                    match (profile.operating_min_c, profile.operating_max_c) {
+                        (-55, 80) => (-40, 70),
+                        (-40, 70) => (-30, 60),
+                        (-30, 60) => (-60, 100),
+                        _ => (-55, 80),
+                    };
             }
             _ => changed = false,
         }
@@ -969,29 +1052,51 @@ fn evaluate_design(
     let requirements = offer.requirements;
 
     if mass_kg > f64::from(requirements.max_unit_mass_kg) {
-        issues.push(format!("Unit mass {:.2} kg exceeds the {} kg limit", mass_kg, requirements.max_unit_mass_kg));
+        issues.push(format!(
+            "Unit mass {:.2} kg exceeds the {} kg limit",
+            mass_kg, requirements.max_unit_mass_kg
+        ));
     }
     if profile.power_draw_w > requirements.max_unit_power_w {
-        issues.push(format!("Power draw {} W exceeds the {} W limit", profile.power_draw_w, requirements.max_unit_power_w));
+        issues.push(format!(
+            "Power draw {} W exceeds the {} W limit",
+            profile.power_draw_w, requirements.max_unit_power_w
+        ));
     }
-    if profile.operating_min_c > requirements.temperature_min_c || profile.operating_max_c < requirements.temperature_max_c {
+    if profile.operating_min_c > requirements.temperature_min_c
+        || profile.operating_max_c < requirements.temperature_max_c
+    {
         issues.push(format!(
             "Operating envelope {}..{} C does not cover {}..{} C",
-            profile.operating_min_c, profile.operating_max_c,
-            requirements.temperature_min_c, requirements.temperature_max_c
+            profile.operating_min_c,
+            profile.operating_max_c,
+            requirements.temperature_min_c,
+            requirements.temperature_max_c
         ));
     }
     if profile.uptime_percent < requirements.min_uptime_percent {
-        issues.push(format!("Uptime {}% is below {}%", profile.uptime_percent, requirements.min_uptime_percent));
+        issues.push(format!(
+            "Uptime {}% is below {}%",
+            profile.uptime_percent, requirements.min_uptime_percent
+        ));
     }
     if profile.data_completeness_percent < requirements.min_data_completeness_percent {
-        issues.push(format!("Data completeness {}% is below {}%", profile.data_completeness_percent, requirements.min_data_completeness_percent));
+        issues.push(format!(
+            "Data completeness {}% is below {}%",
+            profile.data_completeness_percent, requirements.min_data_completeness_percent
+        ));
     }
     if profile.storage_gb < requirements.min_storage_gb {
-        issues.push(format!("Storage {} GB is below {} GB", profile.storage_gb, requirements.min_storage_gb));
+        issues.push(format!(
+            "Storage {} GB is below {} GB",
+            profile.storage_gb, requirements.min_storage_gb
+        ));
     }
     if estimated_unit_cost_cr > requirements.max_unit_cost_cr {
-        issues.push(format!("Estimated unit cost {estimated_unit_cost_cr} cr exceeds the {} cr limit", requirements.max_unit_cost_cr));
+        issues.push(format!(
+            "Estimated unit cost {estimated_unit_cost_cr} cr exceeds the {} cr limit",
+            requirements.max_unit_cost_cr
+        ));
     }
     if let Some(limit) = requirements.max_cg_offset_ratio {
         check_balance(assembly, limit, &mut issues);
@@ -1037,7 +1142,10 @@ fn load_campaign() -> Option<CampaignSave> {
 fn write_field_test_report(report: &mut FieldTestReport) -> Result<std::path::PathBuf, String> {
     let directory = Path::new("results");
     fs::create_dir_all(directory).map_err(|error| error.to_string())?;
-    let path = directory.join(format!("contract_test_{:04}_{}.json", report.contract_id, report.created_unix_ms));
+    let path = directory.join(format!(
+        "contract_test_{:04}_{}.json",
+        report.contract_id, report.created_unix_ms
+    ));
     report.report_path = Some(path.display().to_string());
     let json = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
     fs::write(&path, json).map_err(|error| error.to_string())?;
@@ -1045,7 +1153,10 @@ fn write_field_test_report(report: &mut FieldTestReport) -> Result<std::path::Pa
 }
 
 fn unix_ms() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_millis()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 #[derive(Component)]
@@ -1069,7 +1180,7 @@ pub fn setup_ui(mut commands: Commands) {
             overflow: Overflow::scroll_y(),
             ..default()
         },
-        Interaction::None,
+        UiInteraction::None,
         ScrollPosition::default(),
         BackgroundColor(Color::srgba(0.018, 0.032, 0.047, 0.94)),
         CampusHud,
@@ -1086,7 +1197,7 @@ pub fn handle_input(
     design: Res<DesignSession>,
     sequence: Res<SequenceWorkspace>,
     sketch: Res<PolygonSketchSession>,
-    ui_buttons: Query<&Interaction>,
+    ui_buttons: Query<&UiInteraction>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
         if campus.view == CampusView::Construction && sketch.active {
@@ -1132,13 +1243,17 @@ pub fn handle_input(
 
             if !mouse.just_pressed(MouseButton::Left)
                 || sequence.graph_is_open()
-                || ui_buttons.iter().any(|interaction| *interaction != Interaction::None)
+                || ui_buttons.iter().any(|interaction| *interaction != UiInteraction::None)
             {
                 return;
             }
-            let Some(cursor) = window.cursor_position() else { return };
+            let Some(cursor) = window.cursor_position() else {
+                return;
+            };
             let (camera, camera_transform) = *camera;
-            let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else { return };
+            let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+                return;
+            };
             let origin = ray.origin;
             let direction = ray.direction.as_vec3();
             let mut closest: Option<(f32, FacilityKind)> = None;
@@ -1146,10 +1261,14 @@ pub fn handle_input(
                 let inverse = transform.to_matrix().inverse();
                 let local_origin = inverse.transform_point3(origin);
                 let local_direction = inverse.transform_vector3(direction);
-                if let Some(distance) = ray_aabb(local_origin, local_direction, -building.half_extents, building.half_extents) {
-                    if closest.as_ref().is_none_or(|(best, _)| distance < *best) {
-                        closest = Some((distance, building.facility));
-                    }
+                if let Some(distance) = ray_aabb(
+                    local_origin,
+                    local_direction,
+                    -building.half_extents,
+                    building.half_extents,
+                ) && closest.as_ref().is_none_or(|(best, _)| distance < *best)
+                {
+                    closest = Some((distance, building.facility));
                 }
             }
             if let Some((_, facility)) = closest {
@@ -1204,7 +1323,6 @@ pub fn handle_input(
             }
             if control && keys.just_pressed(KeyCode::Enter) {
                 campus.submit_design(&design);
-                return;
             }
         }
         CampusView::Research | CampusView::Programming | CampusView::Computation | CampusView::Missile => {}
@@ -1238,7 +1356,9 @@ pub fn handle_computation_input(
             Ok(config) => {
                 let region_count = sketch.document.regions.len();
                 let id = jobs.enqueue_mesh_thermal(config);
-                campus.message = format!("Polygon sketch study #{id} queued from {region_count} region(s). Results will be written to results/.");
+                campus.message = format!(
+                    "Polygon sketch study #{id} queued from {region_count} region(s). Results will be written to results/."
+                );
                 info!("Polygon sketch thermal study #{id} queued.");
             }
             Err(message) => {
@@ -1255,10 +1375,34 @@ pub fn handle_computation_input(
                 let skipped_count = built.skipped_part_ids.len();
                 let mut refinement_summary = String::new();
                 if shift {
-                    let min_x = built.config.mesh.nodes.iter().map(|node| node.position_m[0]).fold(f64::INFINITY, f64::min);
-                    let max_x = built.config.mesh.nodes.iter().map(|node| node.position_m[0]).fold(f64::NEG_INFINITY, f64::max);
-                    let min_y = built.config.mesh.nodes.iter().map(|node| node.position_m[1]).fold(f64::INFINITY, f64::min);
-                    let max_y = built.config.mesh.nodes.iter().map(|node| node.position_m[1]).fold(f64::NEG_INFINITY, f64::max);
+                    let min_x = built
+                        .config
+                        .mesh
+                        .nodes
+                        .iter()
+                        .map(|node| node.position_m[0])
+                        .fold(f64::INFINITY, f64::min);
+                    let max_x = built
+                        .config
+                        .mesh
+                        .nodes
+                        .iter()
+                        .map(|node| node.position_m[0])
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let min_y = built
+                        .config
+                        .mesh
+                        .nodes
+                        .iter()
+                        .map(|node| node.position_m[1])
+                        .fold(f64::INFINITY, f64::min);
+                    let max_y = built
+                        .config
+                        .mesh
+                        .nodes
+                        .iter()
+                        .map(|node| node.position_m[1])
+                        .fold(f64::NEG_INFINITY, f64::max);
                     let centre = [0.5 * (min_x + max_x), 0.5 * (min_y + max_y)];
                     let half_extent = [0.20 * (max_x - min_x), 0.20 * (max_y - min_y)];
                     let target = 0.025;
@@ -1321,19 +1465,39 @@ pub fn handle_computation_input(
 pub fn sync_jobs(mut campus: ResMut<CampusState>, jobs: Res<JobManager>) {
     let mut changes = Vec::new();
     for record in &jobs.records {
-        let Some(contract_id) = record.linked_contract_id else { continue };
-        let Some(active) = campus.accepted_contracts.iter().find(|item| item.offer.id == contract_id) else { continue };
+        let Some(contract_id) = record.linked_contract_id else {
+            continue;
+        };
+        let Some(active) = campus
+            .accepted_contracts
+            .iter()
+            .find(|item| item.offer.id == contract_id)
+        else {
+            continue;
+        };
         if active.analysis_job_id != Some(record.id) || active.phase != ContractPhase::AnalysisQueued {
             continue;
         }
         match &record.state {
-            JobState::Completed => changes.push((contract_id, ContractPhase::AnalysisPassed, "Laboratory material-screening calculation completed")),
-            JobState::Failed | JobState::Cancelled => changes.push((contract_id, ContractPhase::AnalysisFailed, "Laboratory analysis failed or was cancelled")),
+            JobState::Completed => changes.push((
+                contract_id,
+                ContractPhase::AnalysisPassed,
+                "Laboratory material-screening calculation completed",
+            )),
+            JobState::Failed | JobState::Cancelled => changes.push((
+                contract_id,
+                ContractPhase::AnalysisFailed,
+                "Laboratory analysis failed or was cancelled",
+            )),
             JobState::Queued | JobState::Running | JobState::Cancelling => {}
         }
     }
     for (contract_id, phase, message) in changes {
-        if let Some(active) = campus.accepted_contracts.iter_mut().find(|item| item.offer.id == contract_id) {
+        if let Some(active) = campus
+            .accepted_contracts
+            .iter_mut()
+            .find(|item| item.offer.id == contract_id)
+        {
             active.phase = phase;
         }
         campus.message = format!("Contract #{contract_id}: {message}");
@@ -1384,7 +1548,10 @@ fn refresh_contract_board(campus: &mut CampusState) {
     let new_board = generate_board(&mut campus.rng, &mut campus.next_contract_id);
     campus.available_contracts = new_board;
     campus.board_refreshes = campus.board_refreshes.saturating_add(1);
-    campus.message = format!("New randomized board generated (refresh #{}). Active projects were kept.", campus.board_refreshes);
+    campus.message = format!(
+        "New randomized board generated (refresh #{}). Active projects were kept.",
+        campus.board_refreshes
+    );
     campus.mark_dirty();
 }
 
@@ -1398,7 +1565,11 @@ fn accept_contract(campus: &mut CampusState, offer_index: usize) {
         return;
     }
     let offer = campus.available_contracts.remove(offer_index);
-    if campus.accepted_contracts.iter().any(|active| active.offer.id == offer.id) {
+    if campus
+        .accepted_contracts
+        .iter()
+        .any(|active| active.offer.id == offer.id)
+    {
         campus.message = format!("Contract #{} is already active", offer.id);
         return;
     }
@@ -1424,14 +1595,27 @@ fn format_offer(index: usize, offer: &ContractOffer) -> String {
     let requirements = offer.requirements;
     format!(
         "[{}] #{:04} | {} | difficulty {}/5\n    {} | {}\n    {}\n    Mass <= {} kg; power <= {} W; temperature {}..{} C\n    Uptime >= {}%; data >= {}%; storage >= {} GB; units: {}\n    Balance: CG offset <= {}% of length | unit budget <= {} cr | total payout {} cr | deadline {} days",
-        index + 1, offer.id, offer.domain.label(), offer.difficulty,
-        offer.title, offer.client, offer.brief,
-        requirements.max_unit_mass_kg, requirements.max_unit_power_w,
-        requirements.temperature_min_c, requirements.temperature_max_c,
-        requirements.min_uptime_percent, requirements.min_data_completeness_percent,
-        requirements.min_storage_gb, requirements.required_units,
-        requirements.max_cg_offset_ratio.map_or("n/a".to_string(), |r| format!("{:.0}", r * 100.0)),
-        requirements.max_unit_cost_cr, offer.reward, offer.deadline_days,
+        index + 1,
+        offer.id,
+        offer.domain.label(),
+        offer.difficulty,
+        offer.title,
+        offer.client,
+        offer.brief,
+        requirements.max_unit_mass_kg,
+        requirements.max_unit_power_w,
+        requirements.temperature_min_c,
+        requirements.temperature_max_c,
+        requirements.min_uptime_percent,
+        requirements.min_data_completeness_percent,
+        requirements.min_storage_gb,
+        requirements.required_units,
+        requirements
+            .max_cg_offset_ratio
+            .map_or("n/a".to_string(), |r| format!("{:.0}", r * 100.0)),
+        requirements.max_unit_cost_cr,
+        offer.reward,
+        offer.deadline_days,
     )
 }
 
@@ -1446,8 +1630,12 @@ fn format_active_contract(active: &ActiveContract, selected: bool, current_desig
     if let Some(snapshot) = &active.snapshot {
         lines.push(format!(
             "    Design: {:.2} kg, {} components, {} links, ~{} cr/unit | rev {} | hash {}",
-            snapshot.mass_kg, snapshot.part_count, snapshot.connection_count,
-            snapshot.estimated_unit_cost_cr, snapshot.design_revision, snapshot.fingerprint
+            snapshot.mass_kg,
+            snapshot.part_count,
+            snapshot.connection_count,
+            snapshot.estimated_unit_cost_cr,
+            snapshot.design_revision,
+            snapshot.fingerprint
         ));
     }
     if let Some(report) = &active.test_report {
@@ -1462,10 +1650,11 @@ fn format_active_contract(active: &ActiveContract, selected: bool, current_desig
     for issue in &active.last_issues {
         lines.push(format!("    - {issue}"));
     }
-    if selected && active.snapshot.is_some() {
-        if let Some(design) = current_design {
-            lines.extend(verification::matrix_lines(active, design));
-        }
+    if selected
+        && active.snapshot.is_some()
+        && let Some(design) = current_design
+    {
+        lines.extend(verification::matrix_lines(active, design));
     }
     lines.join("\n")
 }
@@ -1476,12 +1665,18 @@ pub fn update_hud(
     design: Res<DesignSession>,
     mut hud: Query<(&mut Text, &mut Node), With<CampusHud>>,
 ) {
-    let Ok((mut text, mut node)) = hud.single_mut() else { return };
+    let Ok((mut text, mut node)) = hud.single_mut() else {
+        return;
+    };
     let current_design = assembly_content_hash(&design.assembly).ok();
     // Boards (`campus::board`) now present every view; this text panel only remains for the
     // instrument profile editor.
     let show_profile_text = campus.view == CampusView::Construction && campus.profile_editor_open && !sketch.active;
-    node.display = if show_profile_text { Display::Flex } else { Display::None };
+    node.display = if show_profile_text {
+        Display::Flex
+    } else {
+        Display::None
+    };
     if !show_profile_text {
         return;
     }
@@ -1489,7 +1684,10 @@ pub fn update_hud(
     text.0 = match campus.view {
         CampusView::Island => format!(
             "OMEGA 0.26.0 | RESEARCH ISLAND\n\nFive dedicated facilities:\n\n[F1] CONTRACT OFFICE\nClient offers, project requirements, deadlines and payments.\n\n[F2] CONSTRUCTION WORKSHOP\n3D assembly editor and component library.\n\n[F3] RESEARCH CENTRE\nTechnology development and unlock progression.\n\n[F4] PROGRAMMING STUDIO\nVisual event-and-data sequence editor.\n\n[F5] COMPUTATION CENTRE\nScientific studies, simulations and reports.\n\nCredits: {} cr | Active contracts: {}/{} | Completed: {}\n\nRight drag: orbit | middle drag: pan | wheel: zoom\nClick a building or use the navigation bar",
-            campus.credits, campus.accepted_contracts.len(), MAX_ACTIVE_CONTRACTS, campus.completed_contracts.len()
+            campus.credits,
+            campus.accepted_contracts.len(),
+            MAX_ACTIVE_CONTRACTS,
+            campus.completed_contracts.len()
         ),
         CampusView::Contracts => {
             let mut lines = vec![
@@ -1513,19 +1711,31 @@ pub fn update_hud(
                 lines.push("None".to_string());
             } else {
                 for active in &campus.accepted_contracts {
-                    lines.push(format_active_contract(active, Some(active.offer.id) == campus.selected_contract_id, current_design.as_ref()));
+                    lines.push(format_active_contract(
+                        active,
+                        Some(active.offer.id) == campus.selected_contract_id,
+                        current_design.as_ref(),
+                    ));
                 }
             }
             lines.push("\nCOMPLETED CONTRACTS".to_string());
             for completed in campus.completed_contracts.iter().rev().take(3) {
                 lines.push(format!(
                     "#{:04} {} | cost {} cr | payout {} cr | net {} cr{}",
-                    completed.id, completed.title, completed.production_cost_cr, completed.payout_cr, completed.profit_cr,
-                    completed.dossier_score_percent.map_or(String::new(), |score| format!(" | dossier {score}%"))
+                    completed.id,
+                    completed.title,
+                    completed.production_cost_cr,
+                    completed.payout_cr,
+                    completed.profit_cr,
+                    completed
+                        .dossier_score_percent
+                        .map_or(String::new(), |score| format!(" | dossier {score}%"))
                 ));
             }
             lines.push(String::new());
-            lines.push("1-5: accept | Tab: select active | V: deliver passed project | N: refresh | Esc: island".to_string());
+            lines.push(
+                "1-5: accept | Tab: select active | V: deliver passed project | N: refresh | Esc: island".to_string(),
+            );
             lines.push(format!("\n{}", campus.message));
             lines.join("\n")
         }
@@ -1542,7 +1752,10 @@ pub fn update_hud(
                     campus.message
                 )
             } else {
-                let selected = campus.selected_contract().map(|active| format_active_contract(active, true, current_design.as_ref())).unwrap_or_else(|| "No active contract selected. Accept one at the contract office.".to_string());
+                let selected = campus
+                    .selected_contract()
+                    .map(|active| format_active_contract(active, true, current_design.as_ref()))
+                    .unwrap_or_else(|| "No active contract selected. Accept one at the contract office.".to_string());
                 format!(
                     "OMEGA | ASSEMBLY WORKSHOP\n\nCURRENT PROJECT\n{}\n\nCtrl+Tab: switch active project\nCtrl+Enter: evaluate and submit current design\nF11: configure civilian instrument profile\nV: draw polygon surfaces (Enter closes, H adds holes, M changes material)\nCtrl+S: save assembly | Ctrl+L: load assembly\nCtrl+B: record revision | Ctrl+Backspace: restore latest revision\n\nInstrument profile: {} W, {} GB, uptime {}%, data {}%, {}..{} C\n\nA submitted design is invalidated if its assembly or profile changes.\n\n{}",
                     selected,
@@ -1566,7 +1779,12 @@ pub fn update_hud(
             campus.message
         ),
         CampusView::Computation => {
-            let selected = campus.selected_contract().map(|active| format_active_contract(active, true, current_design.as_ref())).unwrap_or_else(|| "No active project selected. Generic material-conduction study is available.".to_string());
+            let selected = campus
+                .selected_contract()
+                .map(|active| format_active_contract(active, true, current_design.as_ref()))
+                .unwrap_or_else(|| {
+                    "No active project selected. Generic material-conduction study is available.".to_string()
+                });
             format!(
                 "OMEGA | COMPUTATION CENTRE\n\nCURRENT PROJECT\n{}\n\nR: generic rectangular thermal study\nG: generic civil truss study\nM: mesh workshop primitives | P: mesh drawn polygon regions and run thermal study\nO: open latest HTML visualization report\nT: perform 1,000-sample field test after analysis\nC: cancel newest active calculation\n\nAll studies run on background CPU workers. Mesh studies use workshop geometry or the saved multi-material polygon sketch, then export a triangular heat map, full CSV data and numerical diagnostics.\n\n{}",
                 selected, campus.message
@@ -1582,15 +1800,21 @@ fn ray_aabb(origin: Vec3, direction: Vec3, min: Vec3, max: Vec3) -> Option<f32> 
         let o = origin[axis];
         let d = direction[axis];
         if d.abs() < 1e-6 {
-            if o < min[axis] || o > max[axis] { return None; }
+            if o < min[axis] || o > max[axis] {
+                return None;
+            }
             continue;
         }
         let mut t1 = (min[axis] - o) / d;
         let mut t2 = (max[axis] - o) / d;
-        if t1 > t2 { std::mem::swap(&mut t1, &mut t2); }
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
         near = near.max(t1);
         far = far.min(t2);
-        if near > far { return None; }
+        if near > far {
+            return None;
+        }
     }
     if far < 0.0 { None } else { Some(near.max(0.0)) }
 }
@@ -1705,7 +1929,12 @@ mod tests {
         refresh_contract_board(&mut campus);
         assert_eq!(campus.accepted_contracts.len(), 1);
         assert_eq!(campus.accepted_contracts[0].offer.id, active_id);
-        assert!(campus.available_contracts.iter().all(|offer| !old_ids.contains(&offer.id)));
+        assert!(
+            campus
+                .available_contracts
+                .iter()
+                .all(|offer| !old_ids.contains(&offer.id))
+        );
     }
 
     #[test]
@@ -1737,16 +1966,32 @@ mod tests {
     #[test]
     fn ray_aabb_detects_and_rejects_hits() {
         assert_eq!(
-            ray_aabb(Vec3::new(0.0, 0.0, 5.0), Vec3::NEG_Z, Vec3::splat(-1.0), Vec3::splat(1.0)),
+            ray_aabb(
+                Vec3::new(0.0, 0.0, 5.0),
+                Vec3::NEG_Z,
+                Vec3::splat(-1.0),
+                Vec3::splat(1.0)
+            ),
             Some(4.0)
         );
         assert_eq!(
-            ray_aabb(Vec3::new(3.0, 0.0, 5.0), Vec3::NEG_Z, Vec3::splat(-1.0), Vec3::splat(1.0)),
+            ray_aabb(
+                Vec3::new(3.0, 0.0, 5.0),
+                Vec3::NEG_Z,
+                Vec3::splat(-1.0),
+                Vec3::splat(1.0)
+            ),
             None
         );
     }
 
-    fn balance_part(id: &str, kind: crate::design::PartKind, material: crate::design::MaterialKind, dims: [f64; 3], x: f64) -> crate::design::Part {
+    fn balance_part(
+        id: &str,
+        kind: crate::design::PartKind,
+        material: crate::design::MaterialKind,
+        dims: [f64; 3],
+        x: f64,
+    ) -> crate::design::Part {
         crate::design::Part {
             id: id.to_string(),
             label: id.to_string(),
@@ -1763,7 +2008,13 @@ mod tests {
         let mut assembly = Assembly::demo();
         assembly.parts = vec![
             balance_part("beam", PartKind::Beam, MaterialKind::Polymer, [4.0, 0.1, 0.1], 0.0),
-            balance_part("block", PartKind::Enclosure, MaterialKind::Steel, [0.5, 0.5, 0.5], heavy_x),
+            balance_part(
+                "block",
+                PartKind::Enclosure,
+                MaterialKind::Steel,
+                [0.5, 0.5, 0.5],
+                heavy_x,
+            ),
         ];
         assembly.connections.clear();
         assembly

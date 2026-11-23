@@ -1,0 +1,2 @@
+# The code base is written and reviewed at 120 columns; rustfmt's default of 100 reflows most of it.
+max_width = 120

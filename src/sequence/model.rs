@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
 
 pub const CURRENT_PROGRAM_SCHEMA: u32 = 2;
 pub const MAX_PROGRAM_BLOCKS: usize = 128;
@@ -44,24 +42,41 @@ pub struct ProgramBlock {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BlockKind {
     Start,
-    Wait { duration_s: f64 },
-    SetHeaterPower { fraction: f64 },
-    ReadTemperature { sensor_id: String },
+    Wait {
+        duration_s: f64,
+    },
+    SetHeaterPower {
+        fraction: f64,
+    },
+    ReadTemperature {
+        sensor_id: String,
+    },
     BranchTemperature {
         comparison: TemperatureComparison,
         threshold_c: f64,
         target_block_id: u32,
     },
-    SetVariable { name: String, value: f64 },
-    SetVariableExpression { name: String, expression: String },
-    AddVariable { name: String, delta: f64 },
+    SetVariable {
+        name: String,
+        value: f64,
+    },
+    SetVariableExpression {
+        name: String,
+        expression: String,
+    },
+    AddVariable {
+        name: String,
+        delta: f64,
+    },
     BranchVariable {
         name: String,
         comparison: NumericComparison,
         threshold: f64,
         target_block_id: u32,
     },
-    Record { message: String },
+    Record {
+        message: String,
+    },
     End,
 }
 
@@ -86,23 +101,34 @@ impl Program {
             BlockKind::Start,
             BlockKind::SetHeaterPower { fraction: 0.65 },
             BlockKind::Wait { duration_s: 2.0 },
-            BlockKind::ReadTemperature { sensor_id: "chamber_01".to_string() },
+            BlockKind::ReadTemperature {
+                sensor_id: "chamber_01".to_string(),
+            },
             BlockKind::BranchTemperature {
                 comparison: TemperatureComparison::GreaterOrEqual,
                 threshold_c: 24.0,
                 target_block_id: 10,
             },
-            BlockKind::Record { message: "Target not reached; continuing the test".to_string() },
+            BlockKind::Record {
+                message: "Target not reached; continuing the test".to_string(),
+            },
             BlockKind::Wait { duration_s: 2.0 },
-            BlockKind::ReadTemperature { sensor_id: "chamber_01".to_string() },
+            BlockKind::ReadTemperature {
+                sensor_id: "chamber_01".to_string(),
+            },
             BlockKind::BranchTemperature {
                 comparison: TemperatureComparison::LessThan,
                 threshold_c: 24.0,
                 target_block_id: 3,
             },
             BlockKind::SetHeaterPower { fraction: 0.0 },
-            BlockKind::SetVariable { name: "cycles_done".to_string(), value: 1.0 },
-            BlockKind::Record { message: "Thermal acceptance cycle completed".to_string() },
+            BlockKind::SetVariable {
+                name: "cycles_done".to_string(),
+                value: 1.0,
+            },
+            BlockKind::Record {
+                message: "Thermal acceptance cycle completed".to_string(),
+            },
             BlockKind::End,
         ];
         let blocks = kinds
@@ -151,20 +177,30 @@ impl Program {
             }
         }
 
-        if let Some(first) = self.blocks.first() {
-            if !matches!(&first.kind, &BlockKind::Start) {
-                issues.push("The first block must be Start".to_string());
-            }
+        if let Some(first) = self.blocks.first()
+            && !matches!(&first.kind, &BlockKind::Start)
+        {
+            issues.push("The first block must be Start".to_string());
         }
-        if let Some(last) = self.blocks.last() {
-            if !matches!(&last.kind, &BlockKind::End) {
-                issues.push("The last block must be End".to_string());
-            }
+        if let Some(last) = self.blocks.last()
+            && !matches!(&last.kind, &BlockKind::End)
+        {
+            issues.push("The last block must be End".to_string());
         }
-        if self.blocks.iter().skip(1).any(|block| matches!(&block.kind, &BlockKind::Start)) {
+        if self
+            .blocks
+            .iter()
+            .skip(1)
+            .any(|block| matches!(&block.kind, &BlockKind::Start))
+        {
             issues.push("Start can only appear as the first block".to_string());
         }
-        if self.blocks.iter().take(self.blocks.len().saturating_sub(1)).any(|block| matches!(&block.kind, &BlockKind::End)) {
+        if self
+            .blocks
+            .iter()
+            .take(self.blocks.len().saturating_sub(1))
+            .any(|block| matches!(&block.kind, &BlockKind::End))
+        {
             issues.push("End can only appear as the last block".to_string());
         }
 
@@ -185,12 +221,19 @@ impl Program {
                         issues.push(format!("Block #{} has an invalid sensor identifier", block.id));
                     }
                 }
-                BlockKind::BranchTemperature { threshold_c, target_block_id, .. } => {
+                BlockKind::BranchTemperature {
+                    threshold_c,
+                    target_block_id,
+                    ..
+                } => {
                     if !threshold_c.is_finite() || !(-100.0..=1_000.0).contains(threshold_c) {
                         issues.push(format!("Block #{} has an invalid temperature threshold", block.id));
                     }
                     if !self.blocks.iter().any(|candidate| candidate.id == *target_block_id) {
-                        issues.push(format!("Block #{} targets missing block #{}", block.id, target_block_id));
+                        issues.push(format!(
+                            "Block #{} targets missing block #{}",
+                            block.id, target_block_id
+                        ));
                     }
                 }
                 BlockKind::SetVariable { name, value } => {
@@ -212,12 +255,20 @@ impl Program {
                         issues.push(format!("Block #{} has an invalid variable increment", block.id));
                     }
                 }
-                BlockKind::BranchVariable { name, threshold, target_block_id, .. } => {
+                BlockKind::BranchVariable {
+                    name,
+                    threshold,
+                    target_block_id,
+                    ..
+                } => {
                     if !valid_variable_name(name) || !threshold.is_finite() {
                         issues.push(format!("Block #{} has an invalid variable condition", block.id));
                     }
                     if !self.blocks.iter().any(|candidate| candidate.id == *target_block_id) {
-                        issues.push(format!("Block #{} targets missing block #{}", block.id, target_block_id));
+                        issues.push(format!(
+                            "Block #{} targets missing block #{}",
+                            block.id, target_block_id
+                        ));
                     }
                 }
                 BlockKind::Record { message } => {
@@ -233,7 +284,12 @@ impl Program {
     }
 
     pub fn next_id(&self) -> u32 {
-        self.blocks.iter().map(|block| block.id).max().unwrap_or(0).saturating_add(1)
+        self.blocks
+            .iter()
+            .map(|block| block.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
     }
 
     pub fn index_of(&self, id: u32) -> Option<usize> {
@@ -244,7 +300,9 @@ impl Program {
         if self.blocks.len() >= MAX_PROGRAM_BLOCKS {
             return Err(format!("Program is limited to {MAX_PROGRAM_BLOCKS} blocks"));
         }
-        let selected_index = self.index_of(selected_id).ok_or_else(|| "Selected block no longer exists".to_string())?;
+        let selected_index = self
+            .index_of(selected_id)
+            .ok_or_else(|| "Selected block no longer exists".to_string())?;
         let selected_position = self.blocks[selected_index].position;
         let insertion_index = if matches!(&self.blocks[selected_index].kind, &BlockKind::End) {
             selected_index
@@ -253,30 +311,37 @@ impl Program {
         };
         let id = self.next_id();
         let mut candidate = self.clone();
-        candidate.blocks.insert(insertion_index, ProgramBlock {
-            id,
-            kind,
-            position: CanvasPosition {
-                x: selected_position.x,
-                y: selected_position.y + 118.0,
+        candidate.blocks.insert(
+            insertion_index,
+            ProgramBlock {
+                id,
+                kind,
+                position: CanvasPosition {
+                    x: selected_position.x,
+                    y: selected_position.y + 118.0,
+                },
+                breakpoint: false,
             },
-            breakpoint: false,
-        });
+        );
         candidate.validate().map_err(|issues| issues.join("; "))?;
         self.blocks = candidate.blocks;
         Ok(id)
     }
 
     pub fn remove(&mut self, block_id: u32) -> Result<(), String> {
-        let index = self.index_of(block_id).ok_or_else(|| "Selected block no longer exists".to_string())?;
+        let index = self
+            .index_of(block_id)
+            .ok_or_else(|| "Selected block no longer exists".to_string())?;
         if index == 0 || index + 1 == self.blocks.len() {
             return Err("Start and End blocks cannot be removed".to_string());
         }
-        if self.blocks.iter().any(|block| matches!(
-            &block.kind,
-            BlockKind::BranchTemperature { target_block_id, .. }
-                | BlockKind::BranchVariable { target_block_id, .. } if *target_block_id == block_id
-        )) {
+        if self.blocks.iter().any(|block| {
+            matches!(
+                &block.kind,
+                BlockKind::BranchTemperature { target_block_id, .. }
+                    | BlockKind::BranchVariable { target_block_id, .. } if *target_block_id == block_id
+            )
+        }) {
             return Err("Another condition jumps to this block; retarget it before removal".to_string());
         }
         self.blocks.remove(index);
@@ -284,7 +349,9 @@ impl Program {
     }
 
     pub fn move_block(&mut self, block_id: u32, direction: isize) -> bool {
-        let Some(index) = self.index_of(block_id) else { return false };
+        let Some(index) = self.index_of(block_id) else {
+            return false;
+        };
         let target = index as isize + direction;
         if index == 0 || index + 1 == self.blocks.len() || target <= 0 || target >= self.blocks.len() as isize - 1 {
             return false;
@@ -294,7 +361,10 @@ impl Program {
     }
 
     pub fn toggle_breakpoint(&mut self, block_id: u32) -> Result<bool, String> {
-        let block = self.blocks.iter_mut().find(|block| block.id == block_id)
+        let block = self
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == block_id)
             .ok_or_else(|| "Selected block no longer exists".to_string())?;
         block.breakpoint = !block.breakpoint;
         Ok(block.breakpoint)
@@ -304,19 +374,6 @@ impl Program {
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
         self.validate().map_err(|issues| issues.join("; "))?;
         serde_json::to_vec_pretty(self).map_err(|error| error.to_string())
-    }
-
-    pub fn save_to(&self, path: &Path) -> Result<(), String> {
-        let json = self.to_bytes()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        fs::write(path, json).map_err(|error| error.to_string())
-    }
-
-    pub fn load_from(path: &Path) -> Result<Self, String> {
-        let bytes = fs::read(path).map_err(|error| error.to_string())?;
-        Self::from_bytes(&bytes)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
@@ -353,7 +410,11 @@ mod tests {
     #[test]
     fn missing_branch_target_is_rejected() {
         let mut program = Program::demo();
-        let branch = program.blocks.iter_mut().find(|block| matches!(&block.kind, &BlockKind::BranchTemperature { .. })).unwrap();
+        let branch = program
+            .blocks
+            .iter_mut()
+            .find(|block| matches!(&block.kind, &BlockKind::BranchTemperature { .. }))
+            .unwrap();
         if let BlockKind::BranchTemperature { target_block_id, .. } = &mut branch.kind {
             *target_block_id = 999;
         }
@@ -368,7 +429,9 @@ mod tests {
             _ => unreachable!(),
         };
         assert!(program.move_block(6, 1));
-        assert!(matches!(&program.blocks[4].kind, BlockKind::BranchTemperature { target_block_id, .. } if *target_block_id == target));
+        assert!(
+            matches!(&program.blocks[4].kind, BlockKind::BranchTemperature { target_block_id, .. } if *target_block_id == target)
+        );
     }
 
     #[test]
@@ -397,7 +460,10 @@ mod tests {
     #[test]
     fn variable_names_are_validated() {
         let mut program = Program::demo();
-        program.blocks[1].kind = BlockKind::SetVariable { name: "1bad".into(), value: 2.0 };
+        program.blocks[1].kind = BlockKind::SetVariable {
+            name: "1bad".into(),
+            value: 2.0,
+        };
         assert!(program.validate().is_err());
     }
 
@@ -411,10 +477,7 @@ mod tests {
                 {"id": 2, "kind": {"type": "end"}}
             ]
         }"#;
-        let path = std::env::temp_dir().join(format!("omega-sequence-migration-{}.json", std::process::id()));
-        fs::write(&path, old).unwrap();
-        let program = Program::load_from(&path).unwrap();
-        let _ = fs::remove_file(&path);
+        let program = Program::from_bytes(old.as_bytes()).unwrap();
         assert_eq!(program.schema_version, CURRENT_PROGRAM_SCHEMA);
         assert!(program.validate().is_ok());
         assert_eq!(program.blocks[1].position, CanvasPosition::grid(1));

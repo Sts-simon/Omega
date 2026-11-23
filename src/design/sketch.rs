@@ -2,11 +2,12 @@
 //! Sketches are persisted separately from the parametric part assembly and are
 //! passed to the scientific mesher as validated polygon regions.
 
-use omega_sim_core::{PlanarPolygonRegion, mesh_planar_polygon};
-use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 use crate::campus::{CampusState, CampusView};
 use crate::sequence::SequenceWorkspace;
+use crate::ui_kit::UiInteraction;
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
+use omega_sim_core::{PlanarPolygonRegion, mesh_planar_polygon};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -28,7 +29,10 @@ pub struct PolygonSketchDocument {
 
 impl Default for PolygonSketchDocument {
     fn default() -> Self {
-        Self { schema_version: SKETCH_SCHEMA, regions: Vec::new() }
+        Self {
+            schema_version: SKETCH_SCHEMA,
+            regions: Vec::new(),
+        }
     }
 }
 
@@ -105,7 +109,11 @@ impl PolygonSketchSession {
         if snapped[0].abs() > 4.5 || snapped[1].abs() > 3.5 {
             return Err("Point lies outside the workshop sketch pad (X +/-4.5 m, Z +/-3.5 m)".into());
         }
-        if self.pending_points.last().is_some_and(|previous| distance(*previous, snapped) < SNAP_M * 0.25) {
+        if self
+            .pending_points
+            .last()
+            .is_some_and(|previous| distance(*previous, snapped) < SNAP_M * 0.25)
+        {
             return Err("Point is too close to the previous vertex".into());
         }
         self.pending_points.push(snapped);
@@ -135,7 +143,11 @@ impl PolygonSketchSession {
         self.snap_enabled = !self.snap_enabled;
         self.revision = self.revision.wrapping_add(1);
         self.message = if self.snap_enabled {
-            format!("Snapping enabled: {:.0} mm grid, {:.0} mm vertex capture", SNAP_M * 1_000.0, VERTEX_SNAP_RADIUS_M * 1_000.0)
+            format!(
+                "Snapping enabled: {:.0} mm grid, {:.0} mm vertex capture",
+                SNAP_M * 1_000.0,
+                VERTEX_SNAP_RADIUS_M * 1_000.0
+            )
         } else {
             "Snapping disabled; hold no modifier while dragging for free movement".into()
         };
@@ -151,45 +163,71 @@ impl PolygonSketchSession {
             self.revision = self.revision.wrapping_add(1);
             return false;
         };
-        let Some(original) = vertex_at(&self.document, handle) else { return false };
+        let Some(original) = vertex_at(&self.document, handle) else {
+            return false;
+        };
         self.selected_region = handle.region_index;
         self.new_region_mode = false;
         self.selected_vertex = Some(handle);
         let linked = coincident_vertices(&self.document, original, 1.0e-8);
-        self.dragging_vertex = Some(VertexDrag { handle, original_points: linked });
+        self.dragging_vertex = Some(VertexDrag {
+            handle,
+            original_points: linked,
+        });
         self.current_material_id = self.document.regions[handle.region_index].material_id;
         self.current_thickness_m = self.document.regions[handle.region_index].thickness_m;
         self.revision = self.revision.wrapping_add(1);
-        self.message = format!("Dragging vertex {} of {}", handle.vertex_index + 1, self.document.regions[handle.region_index].source_part_id);
+        self.message = format!(
+            "Dragging vertex {} of {}",
+            handle.vertex_index + 1,
+            self.document.regions[handle.region_index].source_part_id
+        );
         true
     }
 
     /// Updates the in-memory geometry during a drag. Persistence and polygon
     /// validation happen on mouse release, so the UI does not write a file per frame.
     pub fn update_vertex_drag(&mut self, point: [f64; 2], bypass_snap: bool) {
-        let Some(drag) = self.dragging_vertex.as_ref() else { return };
-        if !point.iter().all(|value| value.is_finite()) { return; }
+        let Some(drag) = self.dragging_vertex.as_ref() else {
+            return;
+        };
+        if !point.iter().all(|value| value.is_finite()) {
+            return;
+        }
         let excluded: Vec<VertexHandle> = drag.original_points.iter().map(|(handle, _)| *handle).collect();
         let snapped = self.snap_point_excluding(point, &excluded, bypass_snap);
-        if snapped[0].abs() > 4.5 || snapped[1].abs() > 3.5 { return; }
+        if snapped[0].abs() > 4.5 || snapped[1].abs() > 3.5 {
+            return;
+        }
         for handle in excluded {
             set_vertex(&mut self.document, handle, snapped);
         }
     }
 
     pub fn finish_vertex_drag(&mut self) {
-        let Some(drag) = self.dragging_vertex.take() else { return };
-        let Some(region) = self.document.regions.get(drag.handle.region_index).cloned() else { return };
-        let changed = drag.original_points.iter().any(|(handle, original)| {
-            vertex_at(&self.document, *handle).is_some_and(|point| point != *original)
-        });
+        let Some(drag) = self.dragging_vertex.take() else {
+            return;
+        };
+        let Some(region) = self.document.regions.get(drag.handle.region_index).cloned() else {
+            return;
+        };
+        let changed = drag
+            .original_points
+            .iter()
+            .any(|(handle, original)| vertex_at(&self.document, *handle).is_some_and(|point| point != *original));
         if !changed {
             self.message = "Vertex position unchanged".into();
             return;
         }
-        let affected_regions: HashSet<usize> = drag.original_points.iter().map(|(handle, _)| handle.region_index).collect();
+        let affected_regions: HashSet<usize> = drag
+            .original_points
+            .iter()
+            .map(|(handle, _)| handle.region_index)
+            .collect();
         for region_index in affected_regions {
-            let Some(candidate) = self.document.regions.get(region_index) else { continue };
+            let Some(candidate) = self.document.regions.get(region_index) else {
+                continue;
+            };
             if let Err(error) = mesh_planar_polygon(candidate) {
                 restore_vertices(&mut self.document, &drag.original_points);
                 self.revision = self.revision.wrapping_add(1);
@@ -204,11 +242,17 @@ impl PolygonSketchSession {
             return;
         }
         self.revision = self.revision.wrapping_add(1);
-        self.message = format!("Moved vertex {} in {}", drag.handle.vertex_index + 1, region.source_part_id);
+        self.message = format!(
+            "Moved vertex {} in {}",
+            drag.handle.vertex_index + 1,
+            region.source_part_id
+        );
     }
 
     pub fn cancel_vertex_drag(&mut self) {
-        let Some(drag) = self.dragging_vertex.take() else { return };
+        let Some(drag) = self.dragging_vertex.take() else {
+            return;
+        };
         restore_vertices(&mut self.document, &drag.original_points);
         self.revision = self.revision.wrapping_add(1);
         self.message = "Vertex movement cancelled".into();
@@ -219,14 +263,22 @@ impl PolygonSketchSession {
             self.message = "Select a vertex before deleting it".into();
             return;
         };
-        let Some(original_region) = self.document.regions.get(handle.region_index).cloned() else { return };
-        let Some(original_point) = vertex_at(&self.document, handle) else { return };
+        let Some(original_region) = self.document.regions.get(handle.region_index).cloned() else {
+            return;
+        };
+        let Some(original_point) = vertex_at(&self.document, handle) else {
+            return;
+        };
         if coincident_vertices(&self.document, original_point, 1.0e-8).len() > 1 {
             self.message = "This vertex is shared by adjacent material regions; move it instead of deleting it".into();
             return;
         }
-        let Some(region) = self.document.regions.get_mut(handle.region_index) else { return };
-        let Some(ring) = ring_mut(region, handle.ring_index) else { return };
+        let Some(region) = self.document.regions.get_mut(handle.region_index) else {
+            return;
+        };
+        let Some(ring) = ring_mut(region, handle.ring_index) else {
+            return;
+        };
         if ring.len() <= 3 {
             self.message = "A polygon ring must retain at least three vertices".into();
             return;
@@ -255,7 +307,9 @@ impl PolygonSketchSession {
 
     fn snap_point_excluding(&self, point: [f64; 2], excluded: &[VertexHandle], bypass_snap: bool) -> [f64; 2] {
         let mut result = [point[0].clamp(-4.5, 4.5), point[1].clamp(-3.5, 3.5)];
-        if !self.snap_enabled || bypass_snap { return result; }
+        if !self.snap_enabled || bypass_snap {
+            return result;
+        }
         // Divide by the reciprocal grid count instead of multiplying by SNAP_M: for a grid of
         // 0.05 m, -3 / 20 is exactly the nearest double to -0.15 while -3 * 0.05 is not.
         let cells_per_metre = (1.0 / SNAP_M).round();
@@ -263,8 +317,10 @@ impl PolygonSketchSession {
             (result[0] / SNAP_M).round() / cells_per_metre,
             (result[1] / SNAP_M).round() / cells_per_metre,
         ];
-        if let Some(handle) = nearest_vertex_excluding_many(&self.document, point, VERTEX_SNAP_RADIUS_M, excluded) {
-            if let Some(target) = vertex_at(&self.document, handle) { result = target; }
+        if let Some(handle) = nearest_vertex_excluding_many(&self.document, point, VERTEX_SNAP_RADIUS_M, excluded)
+            && let Some(target) = vertex_at(&self.document, handle)
+        {
+            result = target;
         }
         [result[0].clamp(-4.5, 4.5), result[1].clamp(-3.5, 3.5)]
     }
@@ -282,7 +338,9 @@ impl PolygonSketchSession {
         }
         let added_vertices = self.pending_points.len();
         if total_document_vertices(&self.document).saturating_add(added_vertices) > MAX_TOTAL_SKETCH_VERTICES {
-            return Err(format!("A sketch is limited to {MAX_TOTAL_SKETCH_VERTICES} total vertices"));
+            return Err(format!(
+                "A sketch is limited to {MAX_TOTAL_SKETCH_VERTICES} total vertices"
+            ));
         }
 
         if self.drawing_hole {
@@ -311,9 +369,20 @@ impl PolygonSketchSession {
             if self.document.regions.len() >= MAX_REGIONS {
                 return Err(format!("A sketch is limited to {MAX_REGIONS} regions"));
             }
-            let next_id = self.document.regions.iter()
-                .filter_map(|region| region.source_part_id.strip_prefix("sketch-region-")?.parse::<u64>().ok())
-                .max().unwrap_or(0).saturating_add(1);
+            let next_id = self
+                .document
+                .regions
+                .iter()
+                .filter_map(|region| {
+                    region
+                        .source_part_id
+                        .strip_prefix("sketch-region-")?
+                        .parse::<u64>()
+                        .ok()
+                })
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1);
             let region = PlanarPolygonRegion {
                 source_part_id: format!("sketch-region-{next_id:03}"),
                 outer_boundary_m: self.pending_points.clone(),
@@ -355,7 +424,8 @@ impl PolygonSketchSession {
 
     pub fn cycle_material(&mut self) {
         if self.drawing_hole {
-            self.message = "Hole contours inherit their parent region material; exit hole mode before changing it".into();
+            self.message =
+                "Hole contours inherit their parent region material; exit hole mode before changing it".into();
             return;
         }
         let previous = self.current_material_id;
@@ -377,7 +447,8 @@ impl PolygonSketchSession {
 
     pub fn adjust_thickness(&mut self, delta_m: f64) {
         if self.drawing_hole {
-            self.message = "Hole contours inherit their parent region thickness; exit hole mode before changing it".into();
+            self.message =
+                "Hole contours inherit their parent region thickness; exit hole mode before changing it".into();
             return;
         }
         let previous = self.current_thickness_m;
@@ -455,7 +526,10 @@ pub(crate) struct PolygonSketchEdgeHandle {
 pub(crate) struct PolygonSketchVertexHandle(VertexHandle);
 
 #[derive(Resource, Default)]
-pub(crate) struct PolygonSketchRenderState { revision: u64, visible: bool }
+pub(crate) struct PolygonSketchRenderState {
+    revision: u64,
+    visible: bool,
+}
 
 #[derive(Resource)]
 pub(crate) struct PolygonSketchAssets {
@@ -476,11 +550,16 @@ pub(crate) fn initialize_polygon_sketch(mut session: ResMut<PolygonSketchSession
                         || region.thickness_m > 0.25
                         || !region_fits_sketch_pad(region)
                     {
-                        warn!("Ignoring polygon sketch with duplicate IDs or unsupported material, thickness or pad coordinates");
+                        warn!(
+                            "Ignoring polygon sketch with duplicate IDs or unsupported material, thickness or pad coordinates"
+                        );
                         valid = false;
                     }
                     if let Err(error) = mesh_planar_polygon(region) {
-                        warn!("Ignoring invalid persisted polygon region {}: {}", region.source_part_id, error);
+                        warn!(
+                            "Ignoring invalid persisted polygon region {}: {}",
+                            region.source_part_id, error
+                        );
                         valid = false;
                     }
                 }
@@ -506,7 +585,10 @@ pub(crate) fn initialize_polygon_sketch(mut session: ResMut<PolygonSketchSession
 pub(crate) fn setup_polygon_sketch_ui(mut commands: Commands) {
     commands.spawn((
         Text::new("POLYGON SKETCH | Press V to start"),
-        TextFont { font_size: FontSize::Px(14.0), ..default() },
+        TextFont {
+            font_size: FontSize::Px(14.0),
+            ..default()
+        },
         TextColor(Color::srgb(0.96, 0.96, 0.92)),
         Node {
             position_type: PositionType::Absolute,
@@ -516,7 +598,7 @@ pub(crate) fn setup_polygon_sketch_ui(mut commands: Commands) {
             padding: UiRect::all(Val::Px(12.0)),
             ..default()
         },
-        Interaction::None,
+        UiInteraction::None,
         BackgroundColor(Color::srgba(0.025, 0.04, 0.055, 0.88)),
         PolygonSketchHud,
     ));
@@ -549,19 +631,27 @@ pub(crate) fn handle_polygon_sketch_input(
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut session: ResMut<PolygonSketchSession>,
-    ui_buttons: Query<&Interaction>,
+    ui_buttons: Query<&UiInteraction>,
 ) {
     if campus.view != CampusView::Construction || campus.profile_editor_open || sequence.graph_is_open() {
         session.cancel_vertex_drag();
         return;
     }
     if keys.just_pressed(KeyCode::KeyV) {
-        if session.dragging_vertex.is_some() { session.finish_vertex_drag(); }
+        if session.dragging_vertex.is_some() {
+            session.finish_vertex_drag();
+        }
         session.active = !session.active;
         session.revision = session.revision.wrapping_add(1);
-        session.message = if session.active { "Sketch mode active: E edits vertices, otherwise click to draw".into() } else { "Sketch mode paused".into() };
+        session.message = if session.active {
+            "Sketch mode active: E edits vertices, otherwise click to draw".into()
+        } else {
+            "Sketch mode paused".into()
+        };
     }
-    if !session.active { return; }
+    if !session.active {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         session.cancel_vertex_drag();
         session.active = false;
@@ -573,19 +663,28 @@ pub(crate) fn handle_polygon_sketch_input(
         return;
     }
 
-    if keys.just_pressed(KeyCode::KeyE) { session.toggle_vertex_editing(); }
-    if keys.just_pressed(KeyCode::KeyG) { session.toggle_snapping(); }
+    if keys.just_pressed(KeyCode::KeyE) {
+        session.toggle_vertex_editing();
+    }
+    if keys.just_pressed(KeyCode::KeyG) {
+        session.toggle_snapping();
+    }
     if keys.just_pressed(KeyCode::Enter) {
         if session.edit_vertices {
             session.message = "Press E to leave vertex editing before closing a contour".into();
-        } else if let Err(error) = session.finish_ring() { session.message = error; }
+        } else if let Err(error) = session.finish_ring() {
+            session.message = error;
+        }
     }
-    if keys.just_pressed(KeyCode::Backspace) && !session.edit_vertices { session.undo_pending_point(); }
+    if keys.just_pressed(KeyCode::Backspace) && !session.edit_vertices {
+        session.undo_pending_point();
+    }
     if keys.just_pressed(KeyCode::KeyH) {
         if session.edit_vertices {
             session.message = "Press E to leave vertex editing before drawing a hole".into();
         } else if !session.pending_points.is_empty() {
-            session.message = "Finish the current contour or remove its pending points before changing hole mode".into();
+            session.message =
+                "Finish the current contour or remove its pending points before changing hole mode".into();
         } else if session.document.regions.is_empty() {
             session.message = "Create an outer region before drawing a hole".into();
         } else {
@@ -605,7 +704,11 @@ pub(crate) fn handle_polygon_sketch_input(
                 }
             }
             session.pending_points.clear();
-            session.message = if session.drawing_hole { "Hole mode: draw a contour inside the selected region".into() } else { "Outer contour mode".into() };
+            session.message = if session.drawing_hole {
+                "Hole mode: draw a contour inside the selected region".into()
+            } else {
+                "Outer contour mode".into()
+            };
             session.revision = session.revision.wrapping_add(1);
         }
     }
@@ -616,7 +719,8 @@ pub(crate) fn handle_polygon_sketch_input(
         session.new_region_mode = true;
         session.pending_points.clear();
         session.selected_vertex = None;
-        session.message = "New outer region: choose material/thickness, then click at least three vertices and press Enter".into();
+        session.message =
+            "New outer region: choose material/thickness, then click at least three vertices and press Enter".into();
         session.revision = session.revision.wrapping_add(1);
     }
     if keys.just_pressed(KeyCode::KeyF) {
@@ -628,28 +732,37 @@ pub(crate) fn handle_polygon_sketch_input(
         session.revision = session.revision.wrapping_add(1);
         session.message = "Sketch editing finished; regions are saved".into();
     }
-    if keys.just_pressed(KeyCode::Tab) && !session.edit_vertices { session.select_next_region(); }
-    if keys.just_pressed(KeyCode::KeyM) && !session.edit_vertices { session.cycle_material(); }
-    if keys.just_pressed(KeyCode::BracketLeft) && !session.edit_vertices { session.adjust_thickness(-0.001); }
-    if keys.just_pressed(KeyCode::BracketRight) && !session.edit_vertices { session.adjust_thickness(0.001); }
+    if keys.just_pressed(KeyCode::Tab) && !session.edit_vertices {
+        session.select_next_region();
+    }
+    if keys.just_pressed(KeyCode::KeyM) && !session.edit_vertices {
+        session.cycle_material();
+    }
+    if keys.just_pressed(KeyCode::BracketLeft) && !session.edit_vertices {
+        session.adjust_thickness(-0.001);
+    }
+    if keys.just_pressed(KeyCode::BracketRight) && !session.edit_vertices {
+        session.adjust_thickness(0.001);
+    }
     if keys.just_pressed(KeyCode::Delete) {
-        if session.edit_vertices { session.delete_selected_vertex(); }
-        else { session.delete_selected_region(); }
+        if session.edit_vertices {
+            session.delete_selected_vertex();
+        } else {
+            session.delete_selected_region();
+        }
     }
 
     let (camera_ref, camera_transform_ref) = *camera;
     let cursor_point = window.cursor_position().and_then(|cursor| {
         // The top-right sketch HUD is excluded from sketch editing.
-        if (cursor.x < 470.0 && cursor.y < 520.0)
-            || (cursor.x > window.width() - 510.0 && cursor.y < 230.0)
-        {
+        if (cursor.x < 470.0 && cursor.y < 520.0) || (cursor.x > window.width() - 510.0 && cursor.y < 230.0) {
             return None;
         }
         sketch_point_from_cursor(camera_ref, camera_transform_ref, cursor)
     });
 
     if mouse.just_pressed(MouseButton::Left) {
-        if ui_buttons.iter().any(|interaction| *interaction != Interaction::None) {
+        if ui_buttons.iter().any(|interaction| *interaction != UiInteraction::None) {
             return;
         }
         let Some(point) = cursor_point else { return };
@@ -662,14 +775,17 @@ pub(crate) fn handle_polygon_sketch_input(
             } else {
                 session.add_point(point)
             };
-            if let Err(error) = result { session.message = error; }
+            if let Err(error) = result {
+                session.message = error;
+            }
         }
     }
-    if mouse.pressed(MouseButton::Left) && session.dragging_vertex.is_some() {
-        if let Some(point) = cursor_point {
-            let bypass_snap = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-            session.update_vertex_drag(point, bypass_snap);
-        }
+    if mouse.pressed(MouseButton::Left)
+        && session.dragging_vertex.is_some()
+        && let Some(point) = cursor_point
+    {
+        let bypass_snap = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        session.update_vertex_drag(point, bypass_snap);
     }
     if mouse.just_released(MouseButton::Left) {
         session.finish_vertex_drag();
@@ -679,9 +795,13 @@ pub(crate) fn handle_polygon_sketch_input(
 fn sketch_point_from_cursor(camera: &Camera, camera_transform: &GlobalTransform, cursor: Vec2) -> Option<[f64; 2]> {
     let ray = camera.viewport_to_world(camera_transform, cursor).ok()?;
     let direction = ray.direction.as_vec3();
-    if direction.y.abs() < 1.0e-6 { return None; }
+    if direction.y.abs() < 1.0e-6 {
+        return None;
+    }
     let distance = (SKETCH_PLANE_Y - ray.origin.y) / direction.y;
-    if distance <= 0.0 { return None; }
+    if distance <= 0.0 {
+        return None;
+    }
     let hit = ray.origin + direction * distance;
     Some([f64::from(hit.x), f64::from(hit.z) - SKETCH_ANCHOR_Z])
 }
@@ -695,31 +815,80 @@ pub(crate) fn sync_polygon_sketch_visuals(
     assets: Res<PolygonSketchAssets>,
 ) {
     let visible = campus.view == CampusView::Construction;
-    if render_state.revision == session.revision && render_state.visible == visible { return; }
-    for entity in &old_visuals { commands.entity(entity).despawn(); }
+    if render_state.revision == session.revision && render_state.visible == visible {
+        return;
+    }
+    for entity in &old_visuals {
+        commands.entity(entity).despawn();
+    }
     if visible {
         for (region_index, region) in session.document.regions.iter().enumerate() {
             let material = assets.materials[usize::from(region.material_id.min(3))].clone();
-            spawn_ring(&mut commands, &assets.cube, &material, &region.outer_boundary_m, true, Some((region_index, 0)));
+            spawn_ring(
+                &mut commands,
+                &assets.cube,
+                &material,
+                &region.outer_boundary_m,
+                true,
+                Some((region_index, 0)),
+            );
             let hole_material = assets.materials[4].clone();
             for (hole_index, hole) in region.holes_m.iter().enumerate() {
-                spawn_ring(&mut commands, &assets.cube, &hole_material, hole, true, Some((region_index, hole_index + 1)));
+                spawn_ring(
+                    &mut commands,
+                    &assets.cube,
+                    &hole_material,
+                    hole,
+                    true,
+                    Some((region_index, hole_index + 1)),
+                );
             }
             if session.edit_vertices {
                 for (vertex_index, point) in region.outer_boundary_m.iter().copied().enumerate() {
-                    spawn_document_vertex(&mut commands, &assets.cube, &assets.materials, point, VertexHandle { region_index, ring_index: 0, vertex_index }, session.selected_vertex);
+                    spawn_document_vertex(
+                        &mut commands,
+                        &assets.cube,
+                        &assets.materials,
+                        point,
+                        VertexHandle {
+                            region_index,
+                            ring_index: 0,
+                            vertex_index,
+                        },
+                        session.selected_vertex,
+                    );
                 }
                 for (hole_index, hole) in region.holes_m.iter().enumerate() {
                     for (vertex_index, point) in hole.iter().copied().enumerate() {
-                        spawn_document_vertex(&mut commands, &assets.cube, &assets.materials, point, VertexHandle { region_index, ring_index: hole_index + 1, vertex_index }, session.selected_vertex);
+                        spawn_document_vertex(
+                            &mut commands,
+                            &assets.cube,
+                            &assets.materials,
+                            point,
+                            VertexHandle {
+                                region_index,
+                                ring_index: hole_index + 1,
+                                vertex_index,
+                            },
+                            session.selected_vertex,
+                        );
                     }
                 }
             }
         }
         if !session.pending_points.is_empty() {
             let material = assets.materials[5].clone();
-            spawn_ring(&mut commands, &assets.cube, &material, &session.pending_points, false, None);
-            for point in &session.pending_points { spawn_marker(&mut commands, &assets.cube, &material, *point); }
+            spawn_ring(
+                &mut commands,
+                &assets.cube,
+                &material,
+                &session.pending_points,
+                false,
+                None,
+            );
+            for point in &session.pending_points {
+                spawn_marker(&mut commands, &assets.cube, &material, *point);
+            }
         }
     }
     render_state.revision = session.revision;
@@ -733,20 +902,26 @@ pub(crate) fn update_polygon_sketch_drag_visuals(
     mut edges: Query<(&PolygonSketchEdgeHandle, &mut Transform), Without<PolygonSketchVertexHandle>>,
     mut vertices: Query<(&PolygonSketchVertexHandle, &mut Transform), Without<PolygonSketchEdgeHandle>>,
 ) {
-    let Some(drag) = session.dragging_vertex.as_ref() else { return };
+    let Some(drag) = session.dragging_vertex.as_ref() else {
+        return;
+    };
     let dragged_handles: Vec<VertexHandle> = drag.original_points.iter().map(|(handle, _)| *handle).collect();
     for (edge, mut transform) in &mut edges {
         if dragged_handles.contains(&edge.start) || dragged_handles.contains(&edge.end) {
-            let Some(start) = vertex_at(&session.document, edge.start) else { continue };
-            let Some(end) = vertex_at(&session.document, edge.end) else { continue };
+            let Some(start) = vertex_at(&session.document, edge.start) else {
+                continue;
+            };
+            let Some(end) = vertex_at(&session.document, edge.end) else {
+                continue;
+            };
             set_edge_transform(&mut transform, start, end);
         }
     }
     for (marker, mut transform) in &mut vertices {
-        if dragged_handles.contains(&marker.0) {
-            if let Some(point) = vertex_at(&session.document, marker.0) {
-                transform.translation = sketch_world_position(point, SKETCH_PLANE_Y + 0.025);
-            }
+        if dragged_handles.contains(&marker.0)
+            && let Some(point) = vertex_at(&session.document, marker.0)
+        {
+            transform.translation = sketch_world_position(point, SKETCH_PLANE_Y + 0.025);
         }
     }
 }
@@ -759,13 +934,23 @@ fn spawn_ring(
     closed: bool,
     context: Option<(usize, usize)>,
 ) {
-    if points.len() < 2 { return; }
+    if points.len() < 2 {
+        return;
+    }
     let edge_count = if closed { points.len() } else { points.len() - 1 };
     for index in 0..edge_count {
         let next = (index + 1) % points.len();
         let edge_handle = context.map(|(region_index, ring_index)| PolygonSketchEdgeHandle {
-            start: VertexHandle { region_index, ring_index, vertex_index: index },
-            end: VertexHandle { region_index, ring_index, vertex_index: next },
+            start: VertexHandle {
+                region_index,
+                ring_index,
+                vertex_index: index,
+            },
+            end: VertexHandle {
+                region_index,
+                ring_index,
+                vertex_index: next,
+            },
         });
         spawn_edge(commands, cube, material, points[index], points[next], edge_handle);
     }
@@ -783,7 +968,9 @@ fn spawn_edge(
     let end = sketch_world_position(b, SKETCH_PLANE_Y);
     let delta = end - start;
     let length = delta.length();
-    if length <= 1.0e-4 { return; }
+    if length <= 1.0e-4 {
+        return;
+    }
     let bundle = (
         Mesh3d(cube.clone()),
         MeshMaterial3d(material.clone()),
@@ -839,8 +1026,12 @@ fn spawn_marker(commands: &mut Commands, cube: &Handle<Mesh>, material: &Handle<
     commands.spawn((
         Mesh3d(cube.clone()),
         MeshMaterial3d(material.clone()),
-        Transform::from_translation(Vec3::new(point[0] as f32, SKETCH_PLANE_Y + 0.025, point[1] as f32 + SKETCH_ANCHOR_Z as f32))
-            .with_scale(Vec3::splat(0.09)),
+        Transform::from_translation(Vec3::new(
+            point[0] as f32,
+            SKETCH_PLANE_Y + 0.025,
+            point[1] as f32 + SKETCH_ANCHOR_Z as f32,
+        ))
+        .with_scale(Vec3::splat(0.09)),
         PolygonSketchVisual,
     ));
 }
@@ -850,21 +1041,54 @@ pub(crate) fn update_polygon_sketch_hud(
     campus: Res<CampusState>,
     mut hud: Query<(&mut Text, &mut Node), With<PolygonSketchHud>>,
 ) {
-    let Ok((mut text, mut node)) = hud.single_mut() else { return };
-    node.display = if campus.view == CampusView::Construction && session.active { Display::Flex } else { Display::None };
+    let Ok((mut text, mut node)) = hud.single_mut() else {
+        return;
+    };
+    node.display = if campus.view == CampusView::Construction && session.active {
+        Display::Flex
+    } else {
+        Display::None
+    };
     let selected = session.document.regions.get(session.selected_region);
-    let selected_label = selected.map(|region| format!("{} | material {} | {:.1} mm", region.source_part_id, material_name(region.material_id), region.thickness_m * 1_000.0)).unwrap_or_else(|| "No region selected".into());
-    let vertex_label = session.selected_vertex.map(|handle| format!("vertex {} / ring {}", handle.vertex_index + 1, handle.ring_index)).unwrap_or_else(|| "no vertex selected".into());
+    let selected_label = selected
+        .map(|region| {
+            format!(
+                "{} | material {} | {:.1} mm",
+                region.source_part_id,
+                material_name(region.material_id),
+                region.thickness_m * 1_000.0
+            )
+        })
+        .unwrap_or_else(|| "No region selected".into());
+    let vertex_label = session
+        .selected_vertex
+        .map(|handle| format!("vertex {} / ring {}", handle.vertex_index + 1, handle.ring_index))
+        .unwrap_or_else(|| "no vertex selected".into());
     text.0 = format!(
         "POLYGON SKETCH | {}\n{} regions | {}\nMode: {} | snapping: {}\nSelected: {}\nMaterial: {} | thickness: {:.1} mm\n{}\n\nV: toggle sketch | E: edit existing vertices | click + drag: move vertex\nDrawing: click to add | Enter: close contour | Shift: bypass snap\nG: toggle snapping (grid {:.0} mm / vertex {:.0} mm) | Backspace: undo pending point\nN: new region | H: hole mode | Tab: next region\nM: material | [ / ]: thickness | Delete: vertex/region | F: finish\n\n{}",
         if session.active { "EDITING" } else { "INACTIVE" },
-        session.document.regions.len(), selected_label,
-        if session.edit_vertices { "VERTEX EDIT" } else if session.new_region_mode { "NEW REGION" } else if session.drawing_hole { "HOLE" } else { "DRAW CONTOUR" },
+        session.document.regions.len(),
+        selected_label,
+        if session.edit_vertices {
+            "VERTEX EDIT"
+        } else if session.new_region_mode {
+            "NEW REGION"
+        } else if session.drawing_hole {
+            "HOLE"
+        } else {
+            "DRAW CONTOUR"
+        },
         if session.snap_enabled { "ON" } else { "OFF" },
         vertex_label,
-        material_name(session.current_material_id), session.current_thickness_m * 1_000.0,
-        if session.drawing_hole { "Drawing a hole" } else { "Planar polygon editor" },
-        SNAP_M * 1_000.0, VERTEX_SNAP_RADIUS_M * 1_000.0,
+        material_name(session.current_material_id),
+        session.current_thickness_m * 1_000.0,
+        if session.drawing_hole {
+            "Drawing a hole"
+        } else {
+            "Planar polygon editor"
+        },
+        SNAP_M * 1_000.0,
+        VERTEX_SNAP_RADIUS_M * 1_000.0,
         session.message
     );
 }
@@ -873,13 +1097,27 @@ fn nearest_vertex(document: &PolygonSketchDocument, point: [f64; 2], radius: f64
     nearest_vertex_excluding_many(document, point, radius, &[])
 }
 
-fn coincident_vertices(document: &PolygonSketchDocument, point: [f64; 2], tolerance: f64) -> Vec<(VertexHandle, [f64; 2])> {
+fn coincident_vertices(
+    document: &PolygonSketchDocument,
+    point: [f64; 2],
+    tolerance: f64,
+) -> Vec<(VertexHandle, [f64; 2])> {
     let mut result = Vec::new();
     for (region_index, region) in document.regions.iter().enumerate() {
-        for (ring_index, points) in std::iter::once(&region.outer_boundary_m).chain(region.holes_m.iter()).enumerate() {
+        for (ring_index, points) in std::iter::once(&region.outer_boundary_m)
+            .chain(region.holes_m.iter())
+            .enumerate()
+        {
             for (vertex_index, candidate) in points.iter().copied().enumerate() {
                 if distance(point, candidate) <= tolerance {
-                    result.push((VertexHandle { region_index, ring_index, vertex_index }, candidate));
+                    result.push((
+                        VertexHandle {
+                            region_index,
+                            ring_index,
+                            vertex_index,
+                        },
+                        candidate,
+                    ));
                 }
             }
         }
@@ -895,10 +1133,19 @@ fn nearest_vertex_excluding_many(
 ) -> Option<VertexHandle> {
     let mut best: Option<(VertexHandle, f64)> = None;
     for (region_index, region) in document.regions.iter().enumerate() {
-        for (ring_index, points) in std::iter::once(&region.outer_boundary_m).chain(region.holes_m.iter()).enumerate() {
+        for (ring_index, points) in std::iter::once(&region.outer_boundary_m)
+            .chain(region.holes_m.iter())
+            .enumerate()
+        {
             for (vertex_index, candidate) in points.iter().copied().enumerate() {
-                let handle = VertexHandle { region_index, ring_index, vertex_index };
-                if excluded.contains(&handle) { continue; }
+                let handle = VertexHandle {
+                    region_index,
+                    ring_index,
+                    vertex_index,
+                };
+                if excluded.contains(&handle) {
+                    continue;
+                }
                 let candidate_distance = distance(point, candidate);
                 if candidate_distance <= radius && best.is_none_or(|(_, current)| candidate_distance < current) {
                     best = Some((handle, candidate_distance));
@@ -910,13 +1157,19 @@ fn nearest_vertex_excluding_many(
 }
 
 fn ring(region: &PlanarPolygonRegion, ring_index: usize) -> Option<&Vec<[f64; 2]>> {
-    if ring_index == 0 { Some(&region.outer_boundary_m) }
-    else { region.holes_m.get(ring_index - 1) }
+    if ring_index == 0 {
+        Some(&region.outer_boundary_m)
+    } else {
+        region.holes_m.get(ring_index - 1)
+    }
 }
 
 fn ring_mut(region: &mut PlanarPolygonRegion, ring_index: usize) -> Option<&mut Vec<[f64; 2]>> {
-    if ring_index == 0 { Some(&mut region.outer_boundary_m) }
-    else { region.holes_m.get_mut(ring_index - 1) }
+    if ring_index == 0 {
+        Some(&mut region.outer_boundary_m)
+    } else {
+        region.holes_m.get_mut(ring_index - 1)
+    }
 }
 
 fn vertex_at(document: &PolygonSketchDocument, handle: VertexHandle) -> Option<[f64; 2]> {
@@ -930,25 +1183,31 @@ fn vertex_at_mut(document: &mut PolygonSketchDocument, handle: VertexHandle) -> 
 }
 
 fn set_vertex(document: &mut PolygonSketchDocument, handle: VertexHandle, point: [f64; 2]) {
-    if let Some(target) = vertex_at_mut(document, handle) { *target = point; }
+    if let Some(target) = vertex_at_mut(document, handle) {
+        *target = point;
+    }
 }
 
 fn restore_vertices(document: &mut PolygonSketchDocument, originals: &[(VertexHandle, [f64; 2])]) {
-    for (handle, point) in originals.iter().copied() { set_vertex(document, handle, point); }
+    for (handle, point) in originals.iter().copied() {
+        set_vertex(document, handle, point);
+    }
 }
 
 fn region_fits_sketch_pad(region: &PlanarPolygonRegion) -> bool {
-    region.outer_boundary_m.iter().chain(region.holes_m.iter().flatten()).all(|point| {
-        point[0].is_finite()
-            && point[1].is_finite()
-            && point[0].abs() <= 4.5
-            && point[1].abs() <= 3.5
-    })
+    region
+        .outer_boundary_m
+        .iter()
+        .chain(region.holes_m.iter().flatten())
+        .all(|point| point[0].is_finite() && point[1].is_finite() && point[0].abs() <= 4.5 && point[1].abs() <= 3.5)
 }
 
 fn total_document_vertices(document: &PolygonSketchDocument) -> usize {
     document.regions.iter().fold(0_usize, |total, region| {
-        let hole_vertices = region.holes_m.iter().fold(0_usize, |count, hole| count.saturating_add(hole.len()));
+        let hole_vertices = region
+            .holes_m
+            .iter()
+            .fold(0_usize, |count, hole| count.saturating_add(hole.len()));
         total
             .saturating_add(region.outer_boundary_m.len())
             .saturating_add(hole_vertices)
@@ -956,10 +1215,17 @@ fn total_document_vertices(document: &PolygonSketchDocument) -> usize {
 }
 
 fn material_name(material_id: u16) -> &'static str {
-    match material_id { 0 => "aluminium", 1 => "steel", 2 => "polymer", _ => "composite" }
+    match material_id {
+        0 => "aluminium",
+        1 => "steel",
+        2 => "polymer",
+        _ => "composite",
+    }
 }
 
-fn distance(a: [f64; 2], b: [f64; 2]) -> f64 { (a[0] - b[0]).hypot(a[1] - b[1]) }
+fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+    (a[0] - b[0]).hypot(a[1] - b[1])
+}
 
 #[cfg(test)]
 mod tests {
@@ -972,7 +1238,9 @@ mod tests {
             regions: vec![PlanarPolygonRegion {
                 source_part_id: "region-a".into(),
                 outer_boundary_m: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-                holes_m: vec![], material_id: 1, thickness_m: 0.02,
+                holes_m: vec![],
+                material_id: 1,
+                thickness_m: 0.02,
             }],
         };
         let bytes = serde_json::to_vec(&document).unwrap();
@@ -1002,14 +1270,15 @@ mod tests {
         assert!(session.document.regions.is_empty());
     }
 
-
     #[test]
     fn vertex_snap_prefers_near_existing_vertex() {
         let mut session = PolygonSketchSession::default();
         session.document.regions.push(PlanarPolygonRegion {
             source_part_id: "region-a".into(),
             outer_boundary_m: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            holes_m: vec![], material_id: 0, thickness_m: 0.01,
+            holes_m: vec![],
+            material_id: 0,
+            thickness_m: 0.01,
         });
         let snapped = session.snap_point([0.94, 0.04], None, false);
         assert_eq!(snapped, [1.0, 0.0]);
@@ -1030,11 +1299,19 @@ mod tests {
                 source_part_id: "region-a".into(),
                 outer_boundary_m: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]],
                 holes_m: vec![vec![[0.5, 0.5], [1.0, 0.5], [1.0, 1.0], [0.5, 1.0]]],
-                material_id: 0, thickness_m: 0.01,
+                material_id: 0,
+                thickness_m: 0.01,
             }],
         };
         let handle = nearest_vertex(&document, [0.51, 0.49], 0.1).unwrap();
-        assert_eq!(handle, VertexHandle { region_index: 0, ring_index: 1, vertex_index: 0 });
+        assert_eq!(
+            handle,
+            VertexHandle {
+                region_index: 0,
+                ring_index: 1,
+                vertex_index: 0
+            }
+        );
     }
 
     #[test]
@@ -1043,7 +1320,9 @@ mod tests {
         session.document.regions.push(PlanarPolygonRegion {
             source_part_id: "region-a".into(),
             outer_boundary_m: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            holes_m: vec![], material_id: 0, thickness_m: 0.01,
+            holes_m: vec![],
+            material_id: 0,
+            thickness_m: 0.01,
         });
         session.edit_vertices = true;
         assert!(session.begin_vertex_drag([0.01, 0.02]));
@@ -1060,12 +1339,28 @@ mod tests {
             regions: vec![PlanarPolygonRegion {
                 source_part_id: "region-a".into(),
                 outer_boundary_m: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-                holes_m: vec![], material_id: 0, thickness_m: 0.01,
+                holes_m: vec![],
+                material_id: 0,
+                thickness_m: 0.01,
             }],
         };
-        let current = VertexHandle { region_index: 0, ring_index: 0, vertex_index: 0 };
-        assert_eq!(nearest_vertex_excluding_many(&document, [0.02, 0.02], 0.1, &[current]), None);
-        assert_eq!(nearest_vertex_excluding_many(&document, [0.96, 0.02], 0.1, &[current]), Some(VertexHandle { region_index: 0, ring_index: 0, vertex_index: 1 }));
+        let current = VertexHandle {
+            region_index: 0,
+            ring_index: 0,
+            vertex_index: 0,
+        };
+        assert_eq!(
+            nearest_vertex_excluding_many(&document, [0.02, 0.02], 0.1, &[current]),
+            None
+        );
+        assert_eq!(
+            nearest_vertex_excluding_many(&document, [0.96, 0.02], 0.1, &[current]),
+            Some(VertexHandle {
+                region_index: 0,
+                ring_index: 0,
+                vertex_index: 1
+            })
+        );
     }
 
     #[test]
@@ -1075,15 +1370,23 @@ mod tests {
             PlanarPolygonRegion {
                 source_part_id: "left".into(),
                 outer_boundary_m: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-                holes_m: vec![], material_id: 0, thickness_m: 0.01,
+                holes_m: vec![],
+                material_id: 0,
+                thickness_m: 0.01,
             },
             PlanarPolygonRegion {
                 source_part_id: "right".into(),
                 outer_boundary_m: vec![[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]],
-                holes_m: vec![], material_id: 1, thickness_m: 0.02,
+                holes_m: vec![],
+                material_id: 1,
+                thickness_m: 0.02,
             },
         ];
-        session.selected_vertex = Some(VertexHandle { region_index: 0, ring_index: 0, vertex_index: 1 });
+        session.selected_vertex = Some(VertexHandle {
+            region_index: 0,
+            ring_index: 0,
+            vertex_index: 1,
+        });
         session.delete_selected_vertex();
         assert_eq!(session.document.regions[0].outer_boundary_m[1], [1.0, 0.0]);
         assert!(session.message.contains("shared"));
@@ -1095,7 +1398,9 @@ mod tests {
         session.document.regions.push(PlanarPolygonRegion {
             source_part_id: "region-a".into(),
             outer_boundary_m: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            holes_m: vec![], material_id: 0, thickness_m: 0.01,
+            holes_m: vec![],
+            material_id: 0,
+            thickness_m: 0.01,
         });
         session.edit_vertices = true;
         assert!(session.begin_vertex_drag([0.0, 0.0]));
@@ -1112,12 +1417,16 @@ mod tests {
             PlanarPolygonRegion {
                 source_part_id: "left".into(),
                 outer_boundary_m: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-                holes_m: vec![], material_id: 0, thickness_m: 0.01,
+                holes_m: vec![],
+                material_id: 0,
+                thickness_m: 0.01,
             },
             PlanarPolygonRegion {
                 source_part_id: "right".into(),
                 outer_boundary_m: vec![[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]],
-                holes_m: vec![], material_id: 1, thickness_m: 0.02,
+                holes_m: vec![],
+                material_id: 1,
+                thickness_m: 0.02,
             },
         ];
         session.edit_vertices = true;

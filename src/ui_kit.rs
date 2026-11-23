@@ -1,6 +1,17 @@
 //! Shared look and small widgets for the Omega interface: palette, cards, status chips and
 //! buttons whose colour depends on a tone and on hover/press state.
 
+/// Bevy 0.20.1 deprecates `Interaction` in favour of `picking::hover::Hovered` and `ui::Pressed`,
+/// but the `bevy_ui` focus system in this release still only drives `Interaction`: nothing in the
+/// engine maintains the replacement components for UI nodes yet. Re-exporting the deprecated type
+/// here keeps the migration to a single place, and `expect` fails the build once a Bevy upgrade
+/// makes the alias unnecessary, so the cleanup cannot be forgotten.
+#[expect(
+    deprecated,
+    reason = "bevy_ui 0.20.1 focus only maintains Interaction; Hovered/Pressed are not wired for UI nodes yet"
+)]
+pub(crate) type UiInteraction = bevy::ui::Interaction;
+
 use crate::interface::{UiAction, UiActionButton};
 use bevy::prelude::*;
 
@@ -36,7 +47,7 @@ pub enum ButtonTone {
 }
 
 impl ButtonTone {
-    pub fn background(self, interaction: Interaction) -> Color {
+    pub fn background(self, interaction: UiInteraction) -> Color {
         let (idle, hover, pressed) = match self {
             Self::Secondary => ((0.110, 0.170, 0.220), (0.170, 0.270, 0.330), (0.120, 0.400, 0.350)),
             Self::Primary => ((0.100, 0.440, 0.520), (0.130, 0.560, 0.640), (0.170, 0.680, 0.560)),
@@ -45,16 +56,23 @@ impl ButtonTone {
             Self::Disabled => ((0.060, 0.080, 0.095), (0.060, 0.080, 0.095), (0.060, 0.080, 0.095)),
         };
         let (r, g, b) = match interaction {
-            Interaction::None => idle,
-            Interaction::Hovered => hover,
-            Interaction::Pressed => pressed,
+            UiInteraction::None => idle,
+            UiInteraction::Hovered => hover,
+            UiInteraction::Pressed => pressed,
         };
         Color::srgb(r, g, b)
     }
 }
 
 pub fn label(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>, size: f32, color: Color) {
-    parent.spawn((Text::new(text.into()), TextFont { font_size: FontSize::Px(size), ..default() }, TextColor(color)));
+    parent.spawn((
+        Text::new(text.into()),
+        TextFont {
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(color),
+    ));
 }
 
 /// Small rounded pill with a coloured background.
@@ -62,7 +80,12 @@ pub fn chip(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>, colo
     parent
         .spawn((
             Node {
-                padding: UiRect { left: Val::Px(8.0), right: Val::Px(8.0), top: Val::Px(3.0), bottom: Val::Px(3.0) },
+                padding: UiRect {
+                    left: Val::Px(8.0),
+                    right: Val::Px(8.0),
+                    top: Val::Px(3.0),
+                    bottom: Val::Px(3.0),
+                },
                 border_radius: BorderRadius::all(Val::Px(9.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
@@ -81,7 +104,10 @@ pub fn card_node(width: Val, accent: Color) -> (Node, BackgroundColor, BorderCol
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(7.0),
             padding: UiRect::all(Val::Px(12.0)),
-            border: UiRect { top: Val::Px(3.0), ..default() },
+            border: UiRect {
+                top: Val::Px(3.0),
+                ..default()
+            },
             border_radius: BorderRadius::all(Val::Px(7.0)),
             ..default()
         },
@@ -90,21 +116,32 @@ pub fn card_node(width: Val, accent: Color) -> (Node, BackgroundColor, BorderCol
     )
 }
 
-pub fn button(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>, action: UiAction, tone: ButtonTone, width: Val) {
+pub fn button(
+    parent: &mut ChildSpawnerCommands<'_>,
+    text: impl Into<String>,
+    action: UiAction,
+    tone: ButtonTone,
+    width: Val,
+) {
     parent
         .spawn((
-            Interaction::default(),
+            UiInteraction::default(),
             bevy::ui::FocusPolicy::Block,
             Node {
                 width,
                 min_height: Val::Px(32.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(6.0), bottom: Val::Px(6.0) },
+                padding: UiRect {
+                    left: Val::Px(10.0),
+                    right: Val::Px(10.0),
+                    top: Val::Px(6.0),
+                    bottom: Val::Px(6.0),
+                },
                 border_radius: BorderRadius::all(Val::Px(5.0)),
                 ..default()
             },
-            BackgroundColor(tone.background(Interaction::None)),
+            BackgroundColor(tone.background(UiInteraction::None)),
             tone,
             UiActionButton(action),
         ))
@@ -115,10 +152,15 @@ pub fn button(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>, ac
 }
 
 /// Button that shares the width of its row equally with its siblings.
-pub fn button_row_item(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>, action: UiAction, tone: ButtonTone) {
+pub fn button_row_item(
+    parent: &mut ChildSpawnerCommands<'_>,
+    text: impl Into<String>,
+    action: UiAction,
+    tone: ButtonTone,
+) {
     parent
         .spawn((
-            Interaction::default(),
+            UiInteraction::default(),
             bevy::ui::FocusPolicy::Block,
             Node {
                 flex_grow: 1.0,
@@ -126,11 +168,16 @@ pub fn button_row_item(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<St
                 min_height: Val::Px(28.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                padding: UiRect { left: Val::Px(3.0), right: Val::Px(3.0), top: Val::Px(5.0), bottom: Val::Px(5.0) },
+                padding: UiRect {
+                    left: Val::Px(3.0),
+                    right: Val::Px(3.0),
+                    top: Val::Px(5.0),
+                    bottom: Val::Px(5.0),
+                },
                 border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(tone.background(Interaction::None)),
+            BackgroundColor(tone.background(UiInteraction::None)),
             tone,
             UiActionButton(action),
         ))
@@ -142,7 +189,7 @@ pub fn thousands(value: u64) -> String {
     let digits = value.to_string();
     let mut out = String::new();
     for (index, ch) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             out.push(' ');
         }
         out.push(ch);
@@ -165,10 +212,24 @@ mod tests {
 
     #[test]
     fn hovering_and_pressing_change_the_colour() {
-        for tone in [ButtonTone::Secondary, ButtonTone::Primary, ButtonTone::Danger, ButtonTone::Ghost] {
-            assert_ne!(tone.background(Interaction::None), tone.background(Interaction::Hovered));
-            assert_ne!(tone.background(Interaction::Hovered), tone.background(Interaction::Pressed));
+        for tone in [
+            ButtonTone::Secondary,
+            ButtonTone::Primary,
+            ButtonTone::Danger,
+            ButtonTone::Ghost,
+        ] {
+            assert_ne!(
+                tone.background(UiInteraction::None),
+                tone.background(UiInteraction::Hovered)
+            );
+            assert_ne!(
+                tone.background(UiInteraction::Hovered),
+                tone.background(UiInteraction::Pressed)
+            );
         }
-        assert_eq!(ButtonTone::Disabled.background(Interaction::None), ButtonTone::Disabled.background(Interaction::Pressed));
+        assert_eq!(
+            ButtonTone::Disabled.background(UiInteraction::None),
+            ButtonTone::Disabled.background(UiInteraction::Pressed)
+        );
     }
 }

@@ -123,16 +123,24 @@ impl std::error::Error for MeshError {}
 impl TriMesh2D {
     pub fn validate(&self, material_count: usize) -> Result<MeshStats, MeshError> {
         if self.nodes.len() < 3 {
-            return Err(MeshError::InvalidInput("a triangular mesh needs at least three nodes".into()));
+            return Err(MeshError::InvalidInput(
+                "a triangular mesh needs at least three nodes".into(),
+            ));
         }
         if self.triangles.is_empty() {
             return Err(MeshError::InvalidInput("mesh contains no triangles".into()));
         }
         if self.nodes.len() > MAX_MESH_NODES || self.triangles.len() > MAX_MESH_TRIANGLES {
-            return Err(MeshError::LimitExceeded("mesh exceeds the configured node or triangle budget".into()));
+            return Err(MeshError::LimitExceeded(
+                "mesh exceeds the configured node or triangle budget".into(),
+            ));
         }
         for (index, node) in self.nodes.iter().enumerate() {
-            if node.position_m.iter().any(|value| !value.is_finite() || value.abs() > 1.0e4) {
+            if node
+                .position_m
+                .iter()
+                .any(|value| !value.is_finite() || value.abs() > 1.0e4)
+            {
                 return Err(MeshError::InvalidInput(format!("node {index} has invalid coordinates")));
             }
         }
@@ -143,38 +151,54 @@ impl TriMesh2D {
         let mut used = vec![false; self.nodes.len()];
         for (index, triangle) in self.triangles.iter().enumerate() {
             if triangle.node_ids.iter().any(|id| *id >= self.nodes.len()) {
-                return Err(MeshError::InvalidInput(format!("triangle {index} references a missing node")));
+                return Err(MeshError::InvalidInput(format!(
+                    "triangle {index} references a missing node"
+                )));
             }
             let [a, b, c] = triangle.node_ids;
             if a == b || b == c || c == a {
                 return Err(MeshError::InvalidInput(format!("triangle {index} repeats a node")));
             }
             if usize::from(triangle.material_id) >= material_count {
-                return Err(MeshError::InvalidInput(format!("triangle {index} references missing material {}", triangle.material_id)));
+                return Err(MeshError::InvalidInput(format!(
+                    "triangle {index} references missing material {}",
+                    triangle.material_id
+                )));
             }
             if triangle.source_part_id.trim().is_empty() {
-                return Err(MeshError::InvalidInput(format!("triangle {index} has an empty source part ID")));
+                return Err(MeshError::InvalidInput(format!(
+                    "triangle {index} has an empty source part ID"
+                )));
             }
             if !triangle.thickness_m.is_finite() || triangle.thickness_m <= 0.0 {
-                return Err(MeshError::InvalidInput(format!("triangle {index} has invalid thickness")));
+                return Err(MeshError::InvalidInput(format!(
+                    "triangle {index} has invalid thickness"
+                )));
             }
             let p0 = self.nodes[a].position_m;
             let p1 = self.nodes[b].position_m;
             let p2 = self.nodes[c].position_m;
             let twice_area = cross(sub(p1, p0), sub(p2, p0));
             if !twice_area.is_finite() || twice_area <= 1.0e-14 {
-                return Err(MeshError::InvalidInput(format!("triangle {index} is degenerate or not counter-clockwise")));
+                return Err(MeshError::InvalidInput(format!(
+                    "triangle {index} is degenerate or not counter-clockwise"
+                )));
             }
             let area = 0.5 * twice_area;
             area_sum += area;
             volume_sum += area * triangle.thickness_m;
-            for node in [a, b, c] { used[node] = true; }
+            for node in [a, b, c] {
+                used[node] = true;
+            }
             for (left, right) in [(a, b), (b, c), (c, a)] {
                 let key = if left < right { (left, right) } else { (right, left) };
                 let count = edge_counts.entry(key).or_default();
                 *count = count.saturating_add(1);
                 if *count > 2 {
-                    return Err(MeshError::InvalidInput(format!("non-manifold edge ({}, {}) belongs to more than two triangles", key.0, key.1)));
+                    return Err(MeshError::InvalidInput(format!(
+                        "non-manifold edge ({}, {}) belongs to more than two triangles",
+                        key.0, key.1
+                    )));
                 }
             }
         }
@@ -184,9 +208,15 @@ impl TriMesh2D {
         if !area_sum.is_finite() || area_sum <= 0.0 || !volume_sum.is_finite() || volume_sum <= 0.0 {
             return Err(MeshError::InvalidInput("mesh has invalid total area or volume".into()));
         }
-        let boundary_edges: Vec<_> = edge_counts.iter().filter_map(|(edge, count)| (*count == 1).then_some(*edge)).collect();
+        let boundary_edges: Vec<_> = edge_counts
+            .iter()
+            .filter_map(|(edge, count)| (*count == 1).then_some(*edge))
+            .collect();
         let mut boundary_nodes = vec![false; self.nodes.len()];
-        for (a, b) in &boundary_edges { boundary_nodes[*a] = true; boundary_nodes[*b] = true; }
+        for (a, b) in &boundary_edges {
+            boundary_nodes[*a] = true;
+            boundary_nodes[*b] = true;
+        }
         Ok(MeshStats {
             node_count: self.nodes.len(),
             triangle_count: self.triangles.len(),
@@ -199,9 +229,12 @@ impl TriMesh2D {
 
     /// Computes useful geometric quality indicators for the current triangles.
     pub fn quality_stats(&self) -> Result<MeshQualityStats, MeshError> {
-        let material_count = self.triangles.iter()
+        let material_count = self
+            .triangles
+            .iter()
             .map(|triangle| usize::from(triangle.material_id) + 1)
-            .max().unwrap_or(0);
+            .max()
+            .unwrap_or(0);
         self.validate(material_count)?;
 
         let mut minimum_angle = f64::INFINITY;
@@ -249,9 +282,16 @@ impl TriMesh2D {
         }
         let mut nodes = vec![false; self.nodes.len()];
         for ((a, b), count) in counts {
-            if count == 1 { nodes[a] = true; nodes[b] = true; }
+            if count == 1 {
+                nodes[a] = true;
+                nodes[b] = true;
+            }
         }
-        Ok(nodes.iter().enumerate().filter_map(|(index, value)| (*value).then_some(index)).collect())
+        Ok(nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| (*value).then_some(index))
+            .collect())
     }
 
     fn validate_material_independent(&self) -> Result<(), MeshError> {
@@ -260,12 +300,16 @@ impl TriMesh2D {
         }
         for (index, node) in self.nodes.iter().enumerate() {
             if node.position_m.iter().any(|value| !value.is_finite()) {
-                return Err(MeshError::InvalidInput(format!("node {index} has non-finite coordinates")));
+                return Err(MeshError::InvalidInput(format!(
+                    "node {index} has non-finite coordinates"
+                )));
             }
         }
         for (index, tri) in self.triangles.iter().enumerate() {
             if tri.node_ids.iter().any(|id| *id >= self.nodes.len()) {
-                return Err(MeshError::InvalidInput(format!("triangle {index} references a missing node")));
+                return Err(MeshError::InvalidInput(format!(
+                    "triangle {index} references a missing node"
+                )));
             }
         }
         Ok(())
@@ -275,30 +319,43 @@ impl TriMesh2D {
 /// Creates a conforming triangular mesh from coplanar, non-overlapping rectangles.
 /// Adjacent rectangles share nodes and interior edges. Each rectangle may use a
 /// different material and thickness.
-pub fn mesh_planar_rectangles(
-    rectangles: &[PlanarRectangle],
-    max_edge_length_m: f64,
-) -> Result<TriMesh2D, MeshError> {
+pub fn mesh_planar_rectangles(rectangles: &[PlanarRectangle], max_edge_length_m: f64) -> Result<TriMesh2D, MeshError> {
     if rectangles.is_empty() {
         return Err(MeshError::InvalidInput("no planar regions were supplied".into()));
     }
     if !max_edge_length_m.is_finite() || max_edge_length_m <= 0.0 {
-        return Err(MeshError::InvalidInput("maximum edge length must be finite and positive".into()));
+        return Err(MeshError::InvalidInput(
+            "maximum edge length must be finite and positive".into(),
+        ));
     }
     if rectangles.len() > 5_000 {
-        return Err(MeshError::LimitExceeded("at most 5,000 rectangular regions are supported".into()));
+        return Err(MeshError::LimitExceeded(
+            "at most 5,000 rectangular regions are supported".into(),
+        ));
     }
     for (index, rect) in rectangles.iter().enumerate() {
         if rect.source_part_id.trim().is_empty() {
-            return Err(MeshError::InvalidInput(format!("rectangle {index} has an empty source ID")));
+            return Err(MeshError::InvalidInput(format!(
+                "rectangle {index} has an empty source ID"
+            )));
         }
-        if rect.center_m.iter().any(|value| !value.is_finite() || value.abs() > 1.0e4)
-            || rect.size_m.iter().any(|value| !value.is_finite() || *value <= 0.0 || *value > 1_000.0)
+        if rect
+            .center_m
+            .iter()
+            .any(|value| !value.is_finite() || value.abs() > 1.0e4)
+            || rect
+                .size_m
+                .iter()
+                .any(|value| !value.is_finite() || *value <= 0.0 || *value > 1_000.0)
             || !rect.rotation_rad.is_finite()
-            || !rect.thickness_m.is_finite() || rect.thickness_m <= 0.0
+            || !rect.thickness_m.is_finite()
+            || rect.thickness_m <= 0.0
             || rect.material_id >= 64
         {
-            return Err(MeshError::InvalidInput(format!("rectangle '{}' has invalid geometry or thickness", rect.source_part_id)));
+            return Err(MeshError::InvalidInput(format!(
+                "rectangle '{}' has invalid geometry or thickness",
+                rect.source_part_id
+            )));
         }
     }
     for first in 0..rectangles.len() {
@@ -320,7 +377,10 @@ pub fn mesh_planar_rectangles(
         }
     }
 
-    let mut mesh = TriMesh2D { nodes: Vec::new(), triangles: Vec::new() };
+    let mut mesh = TriMesh2D {
+        nodes: Vec::new(),
+        triangles: Vec::new(),
+    };
     let mut node_lookup: HashMap<(i64, i64), usize> = HashMap::new();
     for rectangle in rectangles {
         let nx = (rectangle.size_m[0] / max_edge_length_m).ceil().max(1.0) as usize;
@@ -333,7 +393,9 @@ pub fn mesh_planar_rectangles(
         }
         let estimated_new_triangles = 2usize.saturating_mul(nx).saturating_mul(ny);
         if mesh.triangles.len().saturating_add(estimated_new_triangles) > MAX_MESH_TRIANGLES {
-            return Err(MeshError::LimitExceeded("generated mesh would exceed 250,000 triangles".into()));
+            return Err(MeshError::LimitExceeded(
+                "generated mesh would exceed 250,000 triangles".into(),
+            ));
         }
         let mut grid = vec![0usize; (nx + 1) * (ny + 1)];
         let (sin, cos) = rectangle.rotation_rad.sin_cos();
@@ -350,7 +412,9 @@ pub fn mesh_planar_rectangles(
                     id
                 } else {
                     if mesh.nodes.len() >= MAX_MESH_NODES {
-                        return Err(MeshError::LimitExceeded("generated mesh would exceed 150,000 nodes".into()));
+                        return Err(MeshError::LimitExceeded(
+                            "generated mesh would exceed 150,000 nodes".into(),
+                        ));
                     }
                     let id = mesh.nodes.len();
                     mesh.nodes.push(MeshNode2D { position_m: point });
@@ -367,7 +431,11 @@ pub fn mesh_planar_rectangles(
                 let c = grid[(iy + 1) * (nx + 1) + ix];
                 let d = grid[(iy + 1) * (nx + 1) + ix + 1];
                 // Alternate the diagonal to reduce directional bias on a regular grid.
-                let pair = if (ix + iy) % 2 == 0 { [[a, b, d], [a, d, c]] } else { [[a, b, c], [b, d, c]] };
+                let pair = if (ix + iy) % 2 == 0 {
+                    [[a, b, d], [a, d, c]]
+                } else {
+                    [[a, b, c], [b, d, c]]
+                };
                 for node_ids in pair {
                     mesh.triangles.push(MeshTriangle2D {
                         node_ids,
@@ -379,7 +447,13 @@ pub fn mesh_planar_rectangles(
             }
         }
     }
-    mesh.validate(rectangles.iter().map(|rect| usize::from(rect.material_id) + 1).max().unwrap_or(0))?;
+    mesh.validate(
+        rectangles
+            .iter()
+            .map(|rect| usize::from(rect.material_id) + 1)
+            .max()
+            .unwrap_or(0),
+    )?;
     Ok(mesh)
 }
 
@@ -392,18 +466,26 @@ pub fn mesh_planar_rectangles(
 /// performs the constrained polygon triangulation after these validations.
 pub fn mesh_planar_polygon(region: &PlanarPolygonRegion) -> Result<TriMesh2D, MeshError> {
     if region.source_part_id.trim().is_empty() {
-        return Err(MeshError::InvalidInput("polygon region has an empty source part ID".into()));
+        return Err(MeshError::InvalidInput(
+            "polygon region has an empty source part ID".into(),
+        ));
     }
     if region.material_id >= 64 {
         return Err(MeshError::InvalidInput("polygon material ID must be below 64".into()));
     }
     if !region.thickness_m.is_finite() || region.thickness_m <= 0.0 {
-        return Err(MeshError::InvalidInput("polygon thickness must be finite and positive".into()));
+        return Err(MeshError::InvalidInput(
+            "polygon thickness must be finite and positive".into(),
+        ));
     }
     if region.holes_m.len() > 64 {
-        return Err(MeshError::LimitExceeded("a polygon may contain at most 64 holes".into()));
+        return Err(MeshError::LimitExceeded(
+            "a polygon may contain at most 64 holes".into(),
+        ));
     }
-    let input_vertex_count = region.outer_boundary_m.len()
+    let input_vertex_count = region
+        .outer_boundary_m
+        .len()
         .saturating_add(region.holes_m.iter().map(Vec::len).sum::<usize>());
     if input_vertex_count > MAX_POLYGON_VERTICES {
         return Err(MeshError::LimitExceeded(format!(
@@ -426,10 +508,14 @@ pub fn mesh_planar_polygon(region: &PlanarPolygonRegion) -> Result<TriMesh2D, Me
         }
         validate_simple_ring(&hole, &label)?;
         if rings_intersect_or_touch(&outer, &hole) {
-            return Err(MeshError::InvalidInput(format!("{label} touches or crosses the outer boundary")));
+            return Err(MeshError::InvalidInput(format!(
+                "{label} touches or crosses the outer boundary"
+            )));
         }
         if !point_in_ring(hole[0], &outer) {
-            return Err(MeshError::InvalidInput(format!("{label} is not strictly inside the outer boundary")));
+            return Err(MeshError::InvalidInput(format!(
+                "{label} is not strictly inside the outer boundary"
+            )));
         }
         holes.push(hole);
     }
@@ -454,10 +540,12 @@ pub fn mesh_planar_polygon(region: &PlanarPolygonRegion) -> Result<TriMesh2D, Me
         )));
     }
 
-    let expected_area = signed_ring_area(&outer).abs()
-        - holes.iter().map(|ring| signed_ring_area(ring).abs()).sum::<f64>();
+    let expected_area =
+        signed_ring_area(&outer).abs() - holes.iter().map(|ring| signed_ring_area(ring).abs()).sum::<f64>();
     if !expected_area.is_finite() || expected_area <= 1.0e-14 {
-        return Err(MeshError::InvalidInput("polygon has no positive area after subtracting holes".into()));
+        return Err(MeshError::InvalidInput(
+            "polygon has no positive area after subtracting holes".into(),
+        ));
     }
 
     let mut coordinates = Vec::with_capacity(total_vertices * 2);
@@ -480,35 +568,50 @@ pub fn mesh_planar_polygon(region: &PlanarPolygonRegion) -> Result<TriMesh2D, Me
     let indices = earcutr::earcut(&coordinates, &hole_indices, 2)
         .map_err(|error| MeshError::InvalidInput(format!("polygon triangulation failed: {error:?}")))?;
     if indices.is_empty() || indices.len() % 3 != 0 {
-        return Err(MeshError::InvalidInput("polygon triangulator returned an incomplete triangle index list".into()));
+        return Err(MeshError::InvalidInput(
+            "polygon triangulator returned an incomplete triangle index list".into(),
+        ));
     }
     if indices.len() / 3 > MAX_MESH_TRIANGLES {
-        return Err(MeshError::LimitExceeded("polygon triangulation exceeds 250,000 triangles".into()));
+        return Err(MeshError::LimitExceeded(
+            "polygon triangulation exceeds 250,000 triangles".into(),
+        ));
     }
 
     let mut used = vec![false; points.len()];
     let mut mesh = TriMesh2D {
-        nodes: points.iter().map(|position_m| MeshNode2D { position_m: *position_m }).collect(),
+        nodes: points
+            .iter()
+            .map(|position_m| MeshNode2D {
+                position_m: *position_m,
+            })
+            .collect(),
         triangles: Vec::with_capacity(indices.len() / 3),
     };
     let mut triangulated_area = 0.0;
-    for triangle_indices in indices.chunks_exact(3) {
+    for triangle_indices in indices.as_chunks::<3>().0 {
         let mut node_ids = [triangle_indices[0], triangle_indices[1], triangle_indices[2]];
         if node_ids.iter().any(|index| *index >= points.len()) {
-            return Err(MeshError::InvalidInput("polygon triangulator returned an out-of-range vertex index".into()));
+            return Err(MeshError::InvalidInput(
+                "polygon triangulator returned an out-of-range vertex index".into(),
+            ));
         }
         let signed_twice_area = cross(
             sub(points[node_ids[1]], points[node_ids[0]]),
             sub(points[node_ids[2]], points[node_ids[0]]),
         );
         if !signed_twice_area.is_finite() || signed_twice_area.abs() <= 1.0e-14 {
-            return Err(MeshError::InvalidInput("polygon triangulator returned a degenerate triangle".into()));
+            return Err(MeshError::InvalidInput(
+                "polygon triangulator returned a degenerate triangle".into(),
+            ));
         }
         if signed_twice_area < 0.0 {
             node_ids.swap(1, 2);
         }
         triangulated_area += 0.5 * signed_twice_area.abs();
-        for id in node_ids { used[id] = true; }
+        for id in node_ids {
+            used[id] = true;
+        }
         mesh.triangles.push(MeshTriangle2D {
             node_ids,
             material_id: region.material_id,
@@ -542,24 +645,38 @@ pub fn refine_tri_mesh_longest_edges(
     let material_count = inferred_material_count(mesh);
     let original_stats = mesh.validate(material_count)?;
     if marked_triangles.is_empty() {
-        return Err(MeshError::InvalidInput("at least one triangle must be marked for refinement".into()));
+        return Err(MeshError::InvalidInput(
+            "at least one triangle must be marked for refinement".into(),
+        ));
     }
 
     let mut marked_edges = BTreeSet::new();
     for &triangle_id in marked_triangles {
-        let triangle = mesh.triangles.get(triangle_id).ok_or_else(|| {
-            MeshError::InvalidInput(format!("marked triangle index {triangle_id} is out of range"))
-        })?;
+        let triangle = mesh
+            .triangles
+            .get(triangle_id)
+            .ok_or_else(|| MeshError::InvalidInput(format!("marked triangle index {triangle_id} is out of range")))?;
         let [a, b, c] = triangle.node_ids;
         let candidates = [
-            (edge_key(a, b), distance_squared(mesh.nodes[a].position_m, mesh.nodes[b].position_m)),
-            (edge_key(b, c), distance_squared(mesh.nodes[b].position_m, mesh.nodes[c].position_m)),
-            (edge_key(c, a), distance_squared(mesh.nodes[c].position_m, mesh.nodes[a].position_m)),
+            (
+                edge_key(a, b),
+                distance_squared(mesh.nodes[a].position_m, mesh.nodes[b].position_m),
+            ),
+            (
+                edge_key(b, c),
+                distance_squared(mesh.nodes[b].position_m, mesh.nodes[c].position_m),
+            ),
+            (
+                edge_key(c, a),
+                distance_squared(mesh.nodes[c].position_m, mesh.nodes[a].position_m),
+            ),
         ];
         // Strict comparison preserves a deterministic AB -> BC -> CA tie break.
         let mut longest = candidates[0];
         for candidate in candidates.into_iter().skip(1) {
-            if candidate.1 > longest.1 { longest = candidate; }
+            if candidate.1 > longest.1 {
+                longest = candidate;
+            }
         }
         marked_edges.insert(longest.0);
     }
@@ -589,7 +706,9 @@ pub fn refine_tri_mesh_longest_edges(
         let split_count = (marked_edges.contains(&edge_key(a, b)) as usize)
             + (marked_edges.contains(&edge_key(b, c)) as usize)
             + (marked_edges.contains(&edge_key(c, a)) as usize);
-        if split_count > 0 { elements_split += 1; }
+        if split_count > 0 {
+            elements_split += 1;
+        }
         projected_triangle_count = projected_triangle_count.saturating_add(match split_count {
             0 => 1,
             1 => 2,
@@ -598,7 +717,9 @@ pub fn refine_tri_mesh_longest_edges(
         });
     }
     if projected_triangle_count > MAX_MESH_TRIANGLES {
-        return Err(MeshError::LimitExceeded("refinement would exceed 250,000 triangles".into()));
+        return Err(MeshError::LimitExceeded(
+            "refinement would exceed 250,000 triangles".into(),
+        ));
     }
 
     let midpoint = |a: usize, b: usize| midpoint_by_edge.get(&edge_key(a, b)).copied();
@@ -665,7 +786,9 @@ pub fn refine_tri_mesh_longest_edges(
     if original_area_error > area_tolerance
         || (stats.total_volume_m3 - original_stats.total_volume_m3).abs() > volume_tolerance
     {
-        return Err(MeshError::InvalidInput("refinement failed to preserve mesh area or volume".into()));
+        return Err(MeshError::InvalidInput(
+            "refinement failed to preserve mesh area or volume".into(),
+        ));
     }
 
     Ok(MeshRefinementResult {
@@ -688,16 +811,25 @@ pub fn refine_tri_mesh_local(
     target_edge_length_m: f64,
     max_rounds: usize,
 ) -> Result<MeshRefinementResult, MeshError> {
-    if region_min_m.iter().chain(region_max_m.iter()).any(|value| !value.is_finite())
+    if region_min_m
+        .iter()
+        .chain(region_max_m.iter())
+        .any(|value| !value.is_finite())
         || (0..2).any(|axis| region_min_m[axis] >= region_max_m[axis])
     {
-        return Err(MeshError::InvalidInput("local refinement region must have finite, increasing bounds".into()));
+        return Err(MeshError::InvalidInput(
+            "local refinement region must have finite, increasing bounds".into(),
+        ));
     }
     if !target_edge_length_m.is_finite() || target_edge_length_m <= 0.0 {
-        return Err(MeshError::InvalidInput("target edge length must be finite and positive".into()));
+        return Err(MeshError::InvalidInput(
+            "target edge length must be finite and positive".into(),
+        ));
     }
     if max_rounds == 0 || max_rounds > 16 {
-        return Err(MeshError::InvalidInput("maximum refinement rounds must be between 1 and 16".into()));
+        return Err(MeshError::InvalidInput(
+            "maximum refinement rounds must be between 1 and 16".into(),
+        ));
     }
     let mut current = mesh.clone();
     current.validate(inferred_material_count(&current))?;
@@ -712,17 +844,17 @@ pub fn refine_tri_mesh_local(
             let pa = current.nodes[a].position_m;
             let pb = current.nodes[b].position_m;
             let pc = current.nodes[c].position_m;
-            let centroid = [
-                (pa[0] + pb[0] + pc[0]) / 3.0,
-                (pa[1] + pb[1] + pc[1]) / 3.0,
-            ];
-            let inside = (0..2).all(|axis| centroid[axis] >= region_min_m[axis] && centroid[axis] <= region_max_m[axis]);
+            let centroid = [(pa[0] + pb[0] + pc[0]) / 3.0, (pa[1] + pb[1] + pc[1]) / 3.0];
+            let inside =
+                (0..2).all(|axis| centroid[axis] >= region_min_m[axis] && centroid[axis] <= region_max_m[axis]);
             let longest = distance(pa, pb).max(distance(pb, pc)).max(distance(pc, pa));
             if inside && longest > target_edge_length_m * (1.0 + 1.0e-12) {
                 selected.push(index);
             }
         }
-        if selected.is_empty() { break; }
+        if selected.is_empty() {
+            break;
+        }
         if rounds >= max_rounds {
             return Err(MeshError::LimitExceeded(format!(
                 "local refinement did not reach {:.6e} m within {max_rounds} rounds",
@@ -750,7 +882,11 @@ pub fn refine_tri_mesh_local(
 }
 
 fn inferred_material_count(mesh: &TriMesh2D) -> usize {
-    mesh.triangles.iter().map(|triangle| usize::from(triangle.material_id) + 1).max().unwrap_or(0)
+    mesh.triangles
+        .iter()
+        .map(|triangle| usize::from(triangle.material_id) + 1)
+        .max()
+        .unwrap_or(0)
 }
 
 fn clean_polygon_ring(points: &[[f64; 2]], label: &str) -> Result<Vec<[f64; 2]>, MeshError> {
@@ -761,20 +897,29 @@ fn clean_polygon_ring(points: &[[f64; 2]], label: &str) -> Result<Vec<[f64; 2]>,
     }
     let mut ring = points.to_vec();
     for (index, point) in ring.iter().enumerate() {
-        if point.iter().any(|value| !value.is_finite() || value.abs() > MAX_POLYGON_COORDINATE_ABS_M) {
-            return Err(MeshError::InvalidInput(format!("{label} vertex {index} has invalid coordinates")));
+        if point
+            .iter()
+            .any(|value| !value.is_finite() || value.abs() > MAX_POLYGON_COORDINATE_ABS_M)
+        {
+            return Err(MeshError::InvalidInput(format!(
+                "{label} vertex {index} has invalid coordinates"
+            )));
         }
     }
     if ring.len() >= 2 && distance(ring[0], *ring.last().unwrap()) <= COORDINATE_MERGE_TOLERANCE_M {
         ring.pop();
     }
     if ring.len() < 3 {
-        return Err(MeshError::InvalidInput(format!("{label} has fewer than three distinct vertices")));
+        return Err(MeshError::InvalidInput(format!(
+            "{label} has fewer than three distinct vertices"
+        )));
     }
     for index in 0..ring.len() {
         let next = (index + 1) % ring.len();
         if distance(ring[index], ring[next]) <= COORDINATE_MERGE_TOLERANCE_M {
-            return Err(MeshError::InvalidInput(format!("{label} contains consecutive duplicate vertices")));
+            return Err(MeshError::InvalidInput(format!(
+                "{label} contains consecutive duplicate vertices"
+            )));
         }
     }
 
@@ -788,8 +933,8 @@ fn clean_polygon_ring(points: &[[f64; 2]], label: &str) -> Result<Vec<[f64; 2]>,
             let current = ring[index];
             let next = ring[(index + 1) % ring.len()];
             let edge_scale = distance(previous, current).max(distance(current, next)).max(1.0);
-            let collinear = cross(sub(current, previous), sub(next, current)).abs()
-                <= 1.0e-12 * edge_scale * edge_scale;
+            let collinear =
+                cross(sub(current, previous), sub(next, current)).abs() <= 1.0e-12 * edge_scale * edge_scale;
             let between = dot(sub(current, previous), sub(current, next)) <= OVERLAP_TOLERANCE_M.powi(2);
             if collinear && between {
                 ring.remove(index);
@@ -799,7 +944,9 @@ fn clean_polygon_ring(points: &[[f64; 2]], label: &str) -> Result<Vec<[f64; 2]>,
         }
     }
     if ring.len() < 3 || signed_ring_area(&ring).abs() <= 1.0e-14 {
-        return Err(MeshError::InvalidInput(format!("{label} is degenerate or has zero area")));
+        return Err(MeshError::InvalidInput(format!(
+            "{label} is degenerate or has zero area"
+        )));
     }
     Ok(ring)
 }
@@ -826,10 +973,10 @@ fn validate_simple_ring(ring: &[[f64; 2]], label: &str) -> Result<(), MeshError>
             if first == second || first_next == second || second_next == first {
                 continue;
             }
-            if segments_intersect_or_touch(
-                ring[first], ring[first_next], ring[second], ring[second_next],
-            ) {
-                return Err(MeshError::InvalidInput(format!("{label} self-intersects or touches itself")));
+            if segments_intersect_or_touch(ring[first], ring[first_next], ring[second], ring[second_next]) {
+                return Err(MeshError::InvalidInput(format!(
+                    "{label} self-intersects or touches itself"
+                )));
             }
         }
     }
@@ -842,7 +989,10 @@ fn rings_intersect_or_touch(first: &[[f64; 2]], second: &[[f64; 2]]) -> bool {
         for second_index in 0..second.len() {
             let second_next = (second_index + 1) % second.len();
             if segments_intersect_or_touch(
-                first[first_index], first[first_next], second[second_index], second[second_next],
+                first[first_index],
+                first[first_next],
+                second[second_index],
+                second[second_next],
             ) {
                 return true;
             }
@@ -851,9 +1001,7 @@ fn rings_intersect_or_touch(first: &[[f64; 2]], second: &[[f64; 2]]) -> bool {
     false
 }
 
-fn segments_intersect_or_touch(
-    a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2],
-) -> bool {
+fn segments_intersect_or_touch(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
     let ab_scale = distance(a, b).max(1.0);
     let cd_scale = distance(c, d).max(1.0);
     let eps_ab = OVERLAP_TOLERANCE_M * ab_scale;
@@ -863,10 +1011,18 @@ fn segments_intersect_or_touch(
     let o3 = cross(sub(d, c), sub(a, c));
     let o4 = cross(sub(d, c), sub(b, c));
 
-    if o1.abs() <= eps_ab && point_on_segment(c, a, b) { return true; }
-    if o2.abs() <= eps_ab && point_on_segment(d, a, b) { return true; }
-    if o3.abs() <= eps_cd && point_on_segment(a, c, d) { return true; }
-    if o4.abs() <= eps_cd && point_on_segment(b, c, d) { return true; }
+    if o1.abs() <= eps_ab && point_on_segment(c, a, b) {
+        return true;
+    }
+    if o2.abs() <= eps_ab && point_on_segment(d, a, b) {
+        return true;
+    }
+    if o3.abs() <= eps_cd && point_on_segment(a, c, d) {
+        return true;
+    }
+    if o4.abs() <= eps_cd && point_on_segment(b, c, d) {
+        return true;
+    }
     ((o1 > eps_ab && o2 < -eps_ab) || (o1 < -eps_ab && o2 > eps_ab))
         && ((o3 > eps_cd && o4 < -eps_cd) || (o3 < -eps_cd && o4 > eps_cd))
 }
@@ -876,11 +1032,15 @@ fn point_in_ring(point: [f64; 2], ring: &[[f64; 2]]) -> bool {
     for index in 0..ring.len() {
         let a = ring[index];
         let b = ring[(index + 1) % ring.len()];
-        if point_on_segment(point, a, b) { return false; }
+        if point_on_segment(point, a, b) {
+            return false;
+        }
         let crosses_y = (a[1] > point[1]) != (b[1] > point[1]);
         if crosses_y {
             let intersection_x = a[0] + (point[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1]);
-            if point[0] < intersection_x { inside = !inside; }
+            if point[0] < intersection_x {
+                inside = !inside;
+            }
         }
     }
     inside
@@ -901,7 +1061,8 @@ fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 fn angle_from_sides(adjacent_a: f64, adjacent_b: f64, opposite: f64) -> f64 {
     let cosine = ((adjacent_a * adjacent_a + adjacent_b * adjacent_b - opposite * opposite)
-        / (2.0 * adjacent_a * adjacent_b)).clamp(-1.0, 1.0);
+        / (2.0 * adjacent_a * adjacent_b))
+        .clamp(-1.0, 1.0);
     cosine.acos()
 }
 
@@ -917,10 +1078,14 @@ fn push_refined_triangle(mesh: &mut TriMesh2D, source: &MeshTriangle2D, node_ids
 fn coordinate_key(point: [f64; 2]) -> Result<(i64, i64), MeshError> {
     let scaled_x = (point[0] / COORDINATE_MERGE_TOLERANCE_M).round();
     let scaled_y = (point[1] / COORDINATE_MERGE_TOLERANCE_M).round();
-    if !scaled_x.is_finite() || !scaled_y.is_finite()
-        || scaled_x.abs() > i64::MAX as f64 || scaled_y.abs() > i64::MAX as f64
+    if !scaled_x.is_finite()
+        || !scaled_y.is_finite()
+        || scaled_x.abs() > i64::MAX as f64
+        || scaled_y.abs() > i64::MAX as f64
     {
-        return Err(MeshError::InvalidInput("mesh coordinate is outside the merge-key range".into()));
+        return Err(MeshError::InvalidInput(
+            "mesh coordinate is outside the merge-key range".into(),
+        ));
     }
     Ok((scaled_x as i64, scaled_y as i64))
 }
@@ -933,10 +1098,12 @@ fn rectangle_corners(rect: &PlanarRectangle) -> [[f64; 2]; 4] {
         [0.5 * rect.size_m[0], 0.5 * rect.size_m[1]],
         [-0.5 * rect.size_m[0], 0.5 * rect.size_m[1]],
     ];
-    local.map(|point| [
-        rect.center_m[0] + cos * point[0] - sin * point[1],
-        rect.center_m[1] + sin * point[0] + cos * point[1],
-    ])
+    local.map(|point| {
+        [
+            rect.center_m[0] + cos * point[0] - sin * point[1],
+            rect.center_m[1] + sin * point[0] + cos * point[1],
+        ]
+    })
 }
 
 fn rectangles_overlap(a: &PlanarRectangle, b: &PlanarRectangle) -> bool {
@@ -949,7 +1116,9 @@ fn rectangles_overlap(a: &PlanarRectangle, b: &PlanarRectangle) -> bool {
             let edge = sub(end, start);
             let axis = [-edge[1], edge[0]];
             let length = dot(axis, axis).sqrt();
-            if length <= 0.0 { continue; }
+            if length <= 0.0 {
+                continue;
+            }
             let axis = [axis[0] / length, axis[1] / length];
             let (min_a, max_a) = project(&corners_a, axis);
             let (min_b, max_b) = project(&corners_b, axis);
@@ -971,7 +1140,9 @@ fn rectangles_have_nonconforming_contact(a: &PlanarRectangle, b: &PlanarRectangl
         let a1 = corners_a[(edge_a + 1) % 4];
         let direction_a = sub(a1, a0);
         let length_a = dot(direction_a, direction_a).sqrt();
-        if length_a <= OVERLAP_TOLERANCE_M { continue; }
+        if length_a <= OVERLAP_TOLERANCE_M {
+            continue;
+        }
         let unit_a = [direction_a[0] / length_a, direction_a[1] / length_a];
 
         for edge_b in 0..4 {
@@ -979,17 +1150,19 @@ fn rectangles_have_nonconforming_contact(a: &PlanarRectangle, b: &PlanarRectangl
             let b1 = corners_b[(edge_b + 1) % 4];
             let direction_b = sub(b1, b0);
             let length_b = dot(direction_b, direction_b).sqrt();
-            if length_b <= OVERLAP_TOLERANCE_M { continue; }
+            if length_b <= OVERLAP_TOLERANCE_M {
+                continue;
+            }
 
-            let parallel = cross(direction_a, direction_b).abs()
-                <= ANGLE_TOLERANCE * length_a * length_b;
+            let parallel = cross(direction_a, direction_b).abs() <= ANGLE_TOLERANCE * length_a * length_b;
             let collinear = cross(sub(b0, a0), unit_a).abs() <= OVERLAP_TOLERANCE_M;
-            if !parallel || !collinear { continue; }
+            if !parallel || !collinear {
+                continue;
+            }
 
             let projection_0 = dot(sub(b0, a0), unit_a);
             let projection_1 = dot(sub(b1, a0), unit_a);
-            let overlap = length_a.min(projection_0.max(projection_1))
-                - 0.0_f64.max(projection_0.min(projection_1));
+            let overlap = length_a.min(projection_0.max(projection_1)) - 0.0_f64.max(projection_0.min(projection_1));
             if overlap > OVERLAP_TOLERANCE_M {
                 let full_a = (overlap - length_a).abs() <= OVERLAP_TOLERANCE_M;
                 let full_b = (overlap - length_b).abs() <= OVERLAP_TOLERANCE_M;
@@ -1002,11 +1175,12 @@ fn rectangles_have_nonconforming_contact(a: &PlanarRectangle, b: &PlanarRectangl
         }
     }
 
-    let point_contact = corners_a.iter().any(|point| {
-        (0..4).any(|edge| point_on_segment(*point, corners_b[edge], corners_b[(edge + 1) % 4]))
-    }) || corners_b.iter().any(|point| {
-        (0..4).any(|edge| point_on_segment(*point, corners_a[edge], corners_a[(edge + 1) % 4]))
-    });
+    let point_contact = corners_a
+        .iter()
+        .any(|point| (0..4).any(|edge| point_on_segment(*point, corners_b[edge], corners_b[(edge + 1) % 4])))
+        || corners_b
+            .iter()
+            .any(|point| (0..4).any(|edge| point_on_segment(*point, corners_a[edge], corners_a[(edge + 1) % 4])));
 
     point_contact && !has_complete_shared_edge
 }
@@ -1022,8 +1196,7 @@ fn point_on_segment(point: [f64; 2], start: [f64; 2], end: [f64; 2]) -> bool {
         return false;
     }
     let projection = dot(sub(point, start), direction);
-    projection >= -OVERLAP_TOLERANCE_M * length
-        && projection <= length_squared + OVERLAP_TOLERANCE_M * length
+    projection >= -OVERLAP_TOLERANCE_M * length && projection <= length_squared + OVERLAP_TOLERANCE_M * length
 }
 
 fn project(points: &[[f64; 2]; 4], axis: [f64; 2]) -> (f64, f64) {
@@ -1037,9 +1210,15 @@ fn project(points: &[[f64; 2]; 4], axis: [f64; 2]) -> (f64, f64) {
     (min, max)
 }
 
-fn sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] { [a[0] - b[0], a[1] - b[1]] }
-fn dot(a: [f64; 2], b: [f64; 2]) -> f64 { a[0] * b[0] + a[1] * b[1] }
-fn cross(a: [f64; 2], b: [f64; 2]) -> f64 { a[0] * b[1] - a[1] * b[0] }
+fn sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
+    [a[0] - b[0], a[1] - b[1]]
+}
+fn dot(a: [f64; 2], b: [f64; 2]) -> f64 {
+    a[0] * b[0] + a[1] * b[1]
+}
+fn cross(a: [f64; 2], b: [f64; 2]) -> f64 {
+    a[0] * b[1] - a[1] * b[0]
+}
 
 #[cfg(test)]
 mod tests {
@@ -1047,8 +1226,12 @@ mod tests {
 
     fn rectangle(id: &str, center: [f64; 2], size: [f64; 2]) -> PlanarRectangle {
         PlanarRectangle {
-            source_part_id: id.into(), center_m: center, size_m: size,
-            rotation_rad: 0.0, material_id: 0, thickness_m: 0.01,
+            source_part_id: id.into(),
+            center_m: center,
+            size_m: size,
+            rotation_rad: 0.0,
+            material_id: 0,
+            thickness_m: 0.01,
         }
     }
 
@@ -1064,10 +1247,14 @@ mod tests {
 
     #[test]
     fn adjacent_rectangles_share_interface_nodes() {
-        let mesh = mesh_planar_rectangles(&[
-            rectangle("left", [-0.5, 0.0], [1.0, 1.0]),
-            rectangle("right", [0.5, 0.0], [1.0, 1.0]),
-        ], 0.25).unwrap();
+        let mesh = mesh_planar_rectangles(
+            &[
+                rectangle("left", [-0.5, 0.0], [1.0, 1.0]),
+                rectangle("right", [0.5, 0.0], [1.0, 1.0]),
+            ],
+            0.25,
+        )
+        .unwrap();
         let stats = mesh.validate(1).unwrap();
         assert!((stats.total_area_m2 - 2.0).abs() < 1.0e-12);
         assert_eq!(stats.boundary_edge_count, 24);
@@ -1076,10 +1263,14 @@ mod tests {
 
     #[test]
     fn overlapping_rectangles_are_rejected() {
-        let error = mesh_planar_rectangles(&[
-            rectangle("first", [0.0, 0.0], [1.0, 1.0]),
-            rectangle("second", [0.4, 0.0], [1.0, 1.0]),
-        ], 0.25).unwrap_err();
+        let error = mesh_planar_rectangles(
+            &[
+                rectangle("first", [0.0, 0.0], [1.0, 1.0]),
+                rectangle("second", [0.4, 0.0], [1.0, 1.0]),
+            ],
+            0.25,
+        )
+        .unwrap_err();
         assert!(matches!(error, MeshError::OverlappingRegions { .. }));
     }
 
@@ -1117,10 +1308,7 @@ mod tests {
     fn l_shaped_polygon() -> PlanarPolygonRegion {
         PlanarPolygonRegion {
             source_part_id: "concave-panel".into(),
-            outer_boundary_m: vec![
-                [0.0, 0.0], [2.0, 0.0], [2.0, 0.8],
-                [1.2, 0.8], [1.2, 1.8], [0.0, 1.8],
-            ],
+            outer_boundary_m: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 0.8], [1.2, 0.8], [1.2, 1.8], [0.0, 1.8]],
             holes_m: Vec::new(),
             material_id: 0,
             thickness_m: 0.012,
@@ -1133,7 +1321,11 @@ mod tests {
         let stats = mesh.validate(1).unwrap();
         assert!((stats.total_area_m2 - 2.8).abs() < 1.0e-10);
         assert!((stats.total_volume_m3 - 2.8 * 0.012).abs() < 1.0e-10);
-        assert!(mesh.triangles.iter().all(|triangle| triangle.source_part_id == "concave-panel"));
+        assert!(
+            mesh.triangles
+                .iter()
+                .all(|triangle| triangle.source_part_id == "concave-panel")
+        );
     }
 
     #[test]
@@ -1181,14 +1373,24 @@ mod tests {
     fn polygon_rejects_hole_outside_outer_boundary() {
         let mut region = l_shaped_polygon();
         region.holes_m = vec![vec![[3.0, 3.0], [3.0, 3.2], [3.2, 3.2], [3.2, 3.0]]];
-        assert!(mesh_planar_polygon(&region).unwrap_err().to_string().contains("not strictly inside"));
+        assert!(
+            mesh_planar_polygon(&region)
+                .unwrap_err()
+                .to_string()
+                .contains("not strictly inside")
+        );
     }
 
     #[test]
     fn polygon_rejects_self_intersecting_outer_boundary() {
         let mut region = l_shaped_polygon();
         region.outer_boundary_m = vec![[0.0, 0.0], [3.0, 0.0], [0.0, 2.0], [2.0, 2.0]];
-        assert!(mesh_planar_polygon(&region).unwrap_err().to_string().contains("self-intersects"));
+        assert!(
+            mesh_planar_polygon(&region)
+                .unwrap_err()
+                .to_string()
+                .contains("self-intersects")
+        );
     }
 
     #[test]
@@ -1198,7 +1400,12 @@ mod tests {
             vec![[0.1, 0.1], [0.5, 0.1], [0.5, 0.5], [0.1, 0.5]],
             vec![[0.5, 0.2], [0.8, 0.2], [0.8, 0.5], [0.5, 0.5]],
         ];
-        assert!(mesh_planar_polygon(&region).unwrap_err().to_string().contains("overlap, touch or contain"));
+        assert!(
+            mesh_planar_polygon(&region)
+                .unwrap_err()
+                .to_string()
+                .contains("overlap, touch or contain")
+        );
     }
 
     #[test]
@@ -1210,7 +1417,8 @@ mod tests {
 
     #[test]
     fn bundled_polygon_input_deck_parses_and_meshes() {
-        let region: PlanarPolygonRegion = serde_json::from_str(include_str!("../examples/perforated-panel-polygon.json")).unwrap();
+        let region: PlanarPolygonRegion =
+            serde_json::from_str(include_str!("../examples/perforated-panel-polygon.json")).unwrap();
         let mesh = mesh_planar_polygon(&region).unwrap();
         let stats = mesh.validate(1).unwrap();
         assert!((stats.total_area_m2 - 2.52).abs() < 1.0e-10);
@@ -1275,7 +1483,10 @@ mod tests {
             let longest = distance(pa, pb).max(distance(pb, pc)).max(distance(pc, pa));
             outside && longest > 0.12
         });
-        assert!(outside_has_coarse_element, "elements outside the local region should retain coarse edges");
+        assert!(
+            outside_has_coarse_element,
+            "elements outside the local region should retain coarse edges"
+        );
     }
 
     #[test]
@@ -1284,10 +1495,15 @@ mod tests {
             nodes: vec![
                 MeshNode2D { position_m: [0.0, 0.0] },
                 MeshNode2D { position_m: [1.0, 0.0] },
-                MeshNode2D { position_m: [0.5, 3.0_f64.sqrt() / 2.0] },
+                MeshNode2D {
+                    position_m: [0.5, 3.0_f64.sqrt() / 2.0],
+                },
             ],
             triangles: vec![MeshTriangle2D {
-                node_ids: [0, 1, 2], material_id: 0, thickness_m: 0.01, source_part_id: "equilateral".into(),
+                node_ids: [0, 1, 2],
+                material_id: 0,
+                thickness_m: 0.01,
+                source_part_id: "equilateral".into(),
             }],
         };
         let quality = mesh.quality_stats().unwrap();
@@ -1303,5 +1519,4 @@ mod tests {
         assert!(refine_tri_mesh_local(&mesh, [-0.2, -0.2], [0.2, 0.2], 0.0, 4).is_err());
         assert!(refine_tri_mesh_local(&mesh, [-0.2, -0.2], [0.2, 0.2], 0.1, 0).is_err());
     }
-
 }

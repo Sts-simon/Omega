@@ -1,12 +1,12 @@
 //! Design revisions: named snapshots of the assembly with a parent link, a comparison against
 //! the current design, and live budget figures. Persisted in the save slot.
 
-use super::{assembly_content_hash, assembly_metrics, Assembly, DesignSession, InspectorState, PolygonSketchSession};
+use super::{Assembly, DesignSession, InspectorState, PolygonSketchSession, assembly_content_hash, assembly_metrics};
 use crate::campus::{CampusState, CampusView};
 use crate::save::{self, SaveFile};
 use crate::sequence::SequenceWorkspace;
-use omega_rules::{diff_parts, DesignDiff, PartGeometry};
 use bevy::prelude::*;
+use omega_rules::{DesignDiff, PartGeometry, diff_parts};
 use serde::{Deserialize, Serialize};
 
 const REVISION_SCHEMA: u32 = 1;
@@ -32,7 +32,12 @@ pub(crate) struct RevisionLog {
 
 impl Default for RevisionLog {
     fn default() -> Self {
-        Self { schema_version: REVISION_SCHEMA, revisions: Vec::new(), next_id: 1, head: None }
+        Self {
+            schema_version: REVISION_SCHEMA,
+            revisions: Vec::new(),
+            next_id: 1,
+            head: None,
+        }
     }
 }
 
@@ -102,10 +107,10 @@ impl RevisionLog {
         if log.schema_version != REVISION_SCHEMA {
             return Err(format!("unsupported revision log schema {}", log.schema_version));
         }
-        if let Some(head) = log.head {
-            if !log.revisions.iter().any(|r| r.id == head) {
-                return Err("revision log head points to a missing revision".to_string());
-            }
+        if let Some(head) = log.head
+            && !log.revisions.iter().any(|r| r.id == head)
+        {
+            return Err("revision log head points to a missing revision".to_string());
         }
         Ok(log)
     }
@@ -126,11 +131,21 @@ impl RevisionLog {
         let mut lines = vec!["DESIGN BUDGET".to_string()];
         match assembly_metrics(current) {
             Ok(m) => {
-                let mass = m.get("mass_kg").unwrap_or(omega_rules::Estimate { value: 0.0, uncertainty: 0.0 });
+                let mass = m.get("mass_kg").unwrap_or(omega_rules::Estimate {
+                    value: 0.0,
+                    uncertainty: 0.0,
+                });
                 let length = m.get("length_m").map_or(0.0, |e| e.value);
-                lines.push(format!("Mass {:.2} kg (+/-{:.2}) | length {:.2} m", mass.value, mass.uncertainty, length));
+                lines.push(format!(
+                    "Mass {:.2} kg (+/-{:.2}) | length {:.2} m",
+                    mass.value, mass.uncertainty, length
+                ));
                 if let Some(cg) = m.get("cg_offset_ratio") {
-                    lines.push(format!("CG offset {:.1}% of length (+/-{:.1})", cg.value * 100.0, cg.uncertainty * 100.0));
+                    lines.push(format!(
+                        "CG offset {:.1}% of length (+/-{:.1})",
+                        cg.value * 100.0,
+                        cg.uncertainty * 100.0
+                    ));
                 }
             }
             Err(error) => lines.push(format!("Budget unavailable: {error}")),
@@ -143,7 +158,12 @@ impl RevisionLog {
             for revision in self.revisions.iter().rev().take(SHOWN_REVISIONS) {
                 let marker = if Some(revision.id) == self.head { ">" } else { " " };
                 let parent = revision.parent.map_or(String::new(), |p| format!(" (from {p})"));
-                lines.push(format!("{marker} rev {}{} | {}", revision.id, parent, Self::metrics_text(&revision.assembly)));
+                lines.push(format!(
+                    "{marker} rev {}{} | {}",
+                    revision.id,
+                    parent,
+                    Self::metrics_text(&revision.assembly)
+                ));
             }
             if let (Some(head), Some(diff)) = (self.head(), self.diff_from_head(current)) {
                 lines.push(format!("Since rev {}: {}", head.id, diff.summary()));
@@ -170,7 +190,10 @@ pub(crate) fn initialize_revision_log(mut log: ResMut<RevisionLog>) {
 /// Record the current design as a revision and persist the log. Returns a status message.
 pub(crate) fn record_revision(log: &mut RevisionLog, session: &DesignSession) -> String {
     match log.commit(&session.assembly) {
-        Ok(id) => match log.to_bytes().and_then(|bytes| save::write(SaveFile::Revisions, &bytes)) {
+        Ok(id) => match log
+            .to_bytes()
+            .and_then(|bytes| save::write(SaveFile::Revisions, &bytes))
+        {
             Ok(()) => {
                 info!("Recorded design revision {id}");
                 format!("Recorded revision {id}")
@@ -208,7 +231,12 @@ pub(crate) fn handle_revision_input(
     mut session: ResMut<DesignSession>,
     mut log: ResMut<RevisionLog>,
 ) {
-    if campus.view != CampusView::Construction || campus.profile_editor_open || sequence.graph_is_open() || sketch.active || inspector.is_editing() {
+    if campus.view != CampusView::Construction
+        || campus.profile_editor_open
+        || sequence.graph_is_open()
+        || sketch.active
+        || inspector.is_editing()
+    {
         return;
     }
     let control = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
@@ -232,7 +260,10 @@ mod tests {
         let mut log = RevisionLog::default();
         let mut assembly = Assembly::demo();
         let first = log.commit(&assembly).unwrap();
-        assert!(log.commit(&assembly).is_err(), "identical design must not create a revision");
+        assert!(
+            log.commit(&assembly).is_err(),
+            "identical design must not create a revision"
+        );
         assembly.parts[1].position_m[0] += 0.1;
         let second = log.commit(&assembly).unwrap();
         assert_eq!((first, second), (1, 2));
@@ -284,7 +315,10 @@ mod tests {
     fn hud_text_shows_budget_and_empty_state() {
         let log = RevisionLog::default();
         let text = log.hud_text(&Assembly::demo());
-        assert!(text.contains("DESIGN BUDGET") && text.contains("Mass 5.10 kg"), "{text}");
+        assert!(
+            text.contains("DESIGN BUDGET") && text.contains("Mass 5.10 kg"),
+            "{text}"
+        );
         assert!(text.contains("None yet"));
     }
 }

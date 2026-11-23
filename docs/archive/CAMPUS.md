@@ -1,4 +1,9 @@
+> **Archived document.** Written before the 0.26 missile-only direction and kept for historical
+> reference only. It no longer describes the current project: see `README.md`,
+> `docs/ARCHITECTURE.md` and `docs/ROADMAP_OMEGA.md`.
+
 # Island campus and contract campaign (0.18.0)
+
 
 The island is the application hub. Three tagged 3D buildings can be entered by clicking them:
 

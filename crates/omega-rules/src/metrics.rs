@@ -48,7 +48,11 @@ pub fn derive_metrics(parts: &[PartGeometry]) -> Result<DerivedMetrics, String> 
     let mut max = [f64::NEG_INFINITY; 3];
     for part in parts {
         let finite = part.mass_kg.is_finite()
-            && part.position_m.iter().chain(part.dimensions_m.iter()).all(|v| v.is_finite());
+            && part
+                .position_m
+                .iter()
+                .chain(part.dimensions_m.iter())
+                .all(|v| v.is_finite());
         if !finite || part.mass_kg < 0.0 || part.dimensions_m.iter().any(|d| *d < 0.0) {
             return Err(format!("part '{}' has invalid mass or geometry", part.id));
         }
@@ -65,13 +69,23 @@ pub fn derive_metrics(parts: &[PartGeometry]) -> Result<DerivedMetrics, String> 
     let cg = [moment[0] / total_mass, moment[1] / total_mass, moment[2] / total_mass];
     let extent = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
     let length = extent.iter().copied().fold(0.0, f64::max);
-    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0, (min[2] + max[2]) / 2.0];
+    let centre = [
+        (min[0] + max[0]) / 2.0,
+        (min[1] + max[1]) / 2.0,
+        (min[2] + max[2]) / 2.0,
+    ];
     let offset = ((cg[0] - centre[0]).powi(2) + (cg[1] - centre[1]).powi(2) + (cg[2] - centre[2]).powi(2)).sqrt();
 
     let position_uncertainty = 0.005 * length + 0.002;
     let mut values = BTreeMap::new();
     let mut put = |name: &str, value: f64, unc: f64| {
-        values.insert(name.to_string(), Estimate { value, uncertainty: unc });
+        values.insert(
+            name.to_string(),
+            Estimate {
+                value,
+                uncertainty: unc,
+            },
+        );
     };
     put("mass_kg", total_mass, total_mass * MASS_RELATIVE_UNCERTAINTY);
     put("part_count", parts.len() as f64, 0.0);
@@ -91,7 +105,12 @@ mod tests {
     use super::*;
 
     fn part(id: &str, mass: f64, pos: [f64; 3], dims: [f64; 3]) -> PartGeometry {
-        PartGeometry { id: id.into(), mass_kg: mass, position_m: pos, dimensions_m: dims }
+        PartGeometry {
+            id: id.into(),
+            mass_kg: mass,
+            position_m: pos,
+            dimensions_m: dims,
+        }
     }
 
     #[test]
@@ -135,7 +154,10 @@ mod tests {
 
     #[test]
     fn metrics_are_deterministic() {
-        let parts = [part("a", 3.0, [0.1, 0.2, 0.3], [1.0, 2.0, 0.5]), part("b", 2.0, [1.0, 0.0, -1.0], [0.5; 3])];
+        let parts = [
+            part("a", 3.0, [0.1, 0.2, 0.3], [1.0, 2.0, 0.5]),
+            part("b", 2.0, [1.0, 0.0, -1.0], [0.5; 3]),
+        ];
         assert_eq!(derive_metrics(&parts).unwrap(), derive_metrics(&parts).unwrap());
     }
 }

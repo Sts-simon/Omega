@@ -303,12 +303,13 @@ The workspace contains unit tests in all four crates (application logic in `src/
 integrity, research/vehicle/program/flight rules, sketch validation and revision handling. Run them
 with `cargo test --workspace`; `cargo test -p omega-sim-core` runs the numerical crate alone.
 
-There is no CI configuration in the repository.
+Every change is checked by the GitHub Actions workflow in `.github/workflows/ci.yml`: formatting,
+`clippy -D warnings` and the full test suite.
 
 ## Documentation status
 
 `docs/CHANGELOG.md` is the authoritative release history. `docs/VISION_MISSILES.md` and
-`docs/ARCHITECTURE.md` describe the 0.26 state. `docs/CAMPUS.md`, `docs/ROADMAP.md`,
-`docs/UX_CONTROLS.md` and `docs/SEQUENCE_EDITOR.md` were written for 0.21 and earlier: their
-facility/controls descriptions of the legacy tools remain useful, but their status sections and
-roadmap checkboxes are out of date.
+`docs/ARCHITECTURE.md` describe the 0.26 state, and `docs/ROADMAP_OMEGA.md` is the improvement plan
+that carries the project to a missile-only loop. `docs/CAMPUS.md`, `docs/ROADMAP.md`,
+`docs/UX_CONTROLS.md` and `docs/SEQUENCE_EDITOR.md` were written before 0.26 and now live in
+`docs/archive/`: they are kept for historical reference only and no longer describe the project.

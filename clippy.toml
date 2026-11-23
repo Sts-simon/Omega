@@ -1,0 +1,10 @@
+# Clippy thresholds for a Bevy application.
+#
+# A Bevy system takes one parameter per query, resource, event and command queue, so a screen
+# controller legitimately reaches ten or more. The default limit would force those systems into
+# `SystemParam` structs that hide the dependency list without making anything clearer.
+too-many-arguments-threshold = 16
+
+# Bevy queries carry their components, their filters and their borrow markers in one type. The
+# default score is exceeded by ordinary three-component queries with a filter.
+type-complexity-threshold = 400

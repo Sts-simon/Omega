@@ -9,4 +9,4 @@ pub mod hash;
 pub mod slot;
 
 pub use hash::{ContentHash, hash_serializable};
-pub use slot::{Manifest, SaveSlot, SlotError, CURRENT_SLOT_SCHEMA};
+pub use slot::{CURRENT_SLOT_SCHEMA, Manifest, SaveSlot, SlotError};

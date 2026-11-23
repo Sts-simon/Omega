@@ -32,7 +32,10 @@ pub fn verification_cost(method: VerificationMethod) -> VerificationCost {
     match method {
         VerificationMethod::Analysis => VerificationCost { credits: 200, days: 1 },
         VerificationMethod::Demonstration => VerificationCost { credits: 900, days: 3 },
-        VerificationMethod::Test => VerificationCost { credits: 2_500, days: 7 },
+        VerificationMethod::Test => VerificationCost {
+            credits: 2_500,
+            days: 7,
+        },
     }
 }
 
@@ -60,7 +63,10 @@ impl Estimate {
 
     /// The same estimate as obtained by a different verification method.
     pub fn rescaled_for(self, method: VerificationMethod) -> Self {
-        Self { value: self.value, uncertainty: self.uncertainty * method.uncertainty_scale() }
+        Self {
+            value: self.value,
+            uncertainty: self.uncertainty * method.uncertainty_scale(),
+        }
     }
 }
 
@@ -108,8 +114,14 @@ pub enum RequirementStatus {
 /// Signed distance to the limit of the *conservative* bound (positive = satisfied).
 fn margins(req: &Requirement, estimate: Estimate) -> (f64, f64) {
     match req.cmp {
-        Comparator::AtMost => (req.limit - estimate.value, req.limit - (estimate.value + estimate.uncertainty)),
-        Comparator::AtLeast => (estimate.value - req.limit, (estimate.value - estimate.uncertainty) - req.limit),
+        Comparator::AtMost => (
+            req.limit - estimate.value,
+            req.limit - (estimate.value + estimate.uncertainty),
+        ),
+        Comparator::AtLeast => (
+            estimate.value - req.limit,
+            (estimate.value - estimate.uncertainty) - req.limit,
+        ),
     }
 }
 
@@ -194,9 +206,18 @@ pub(crate) mod tests {
         let other = ContentHash::of_bytes(b"other");
         let req = mass_req();
         let ev = evidence(50.0, 1.0, &d);
-        assert_eq!(evaluate_requirement(&req, Some(&ev), &other, None), RequirementStatus::Stale);
-        assert_eq!(evaluate_requirement(&req, Some(&ev), &d, Some(&other)), RequirementStatus::Stale);
-        assert_eq!(evaluate_requirement(&req, None, &d, None), RequirementStatus::Unverified);
+        assert_eq!(
+            evaluate_requirement(&req, Some(&ev), &other, None),
+            RequirementStatus::Stale
+        );
+        assert_eq!(
+            evaluate_requirement(&req, Some(&ev), &d, Some(&other)),
+            RequirementStatus::Stale
+        );
+        assert_eq!(
+            evaluate_requirement(&req, None, &d, None),
+            RequirementStatus::Unverified
+        );
     }
 
     #[test]
@@ -205,15 +226,23 @@ pub(crate) mod tests {
         let req = mass_req();
         let mut ev = evidence(50.0, 1.0, &d);
         ev.method = VerificationMethod::Demonstration;
-        assert_eq!(evaluate_requirement(&req, Some(&ev), &d, None), RequirementStatus::MethodNotAllowed);
+        assert_eq!(
+            evaluate_requirement(&req, Some(&ev), &d, None),
+            RequirementStatus::MethodNotAllowed
+        );
     }
 
     #[test]
     fn tests_tighten_uncertainty_and_cost_more_than_analysis() {
         let e = Estimate::new(97.0, 4.0).unwrap();
         assert!(e.rescaled_for(VerificationMethod::Test).uncertainty < e.uncertainty);
-        assert!(verification_cost(VerificationMethod::Test).credits > verification_cost(VerificationMethod::Analysis).credits);
-        assert!(verification_cost(VerificationMethod::Test).days > verification_cost(VerificationMethod::Analysis).days);
+        assert!(
+            verification_cost(VerificationMethod::Test).credits
+                > verification_cost(VerificationMethod::Analysis).credits
+        );
+        assert!(
+            verification_cost(VerificationMethod::Test).days > verification_cost(VerificationMethod::Analysis).days
+        );
     }
 
     #[test]

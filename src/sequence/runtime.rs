@@ -97,7 +97,10 @@ impl SequenceRuntime {
     }
 
     pub fn step_once(&mut self, program: &Program) {
-        if self.status == RuntimeStatus::Running || self.status == RuntimeStatus::Completed || self.status == RuntimeStatus::Failed {
+        if self.status == RuntimeStatus::Running
+            || self.status == RuntimeStatus::Completed
+            || self.status == RuntimeStatus::Failed
+        {
             return;
         }
         self.status = RuntimeStatus::Paused;
@@ -201,9 +204,16 @@ impl SequenceRuntime {
         }
     }
 
-    fn execute_block(&mut self, program: &Program, block: super::model::ProgramBlock, instant_wait: bool) -> Result<(), String> {
+    fn execute_block(
+        &mut self,
+        program: &Program,
+        block: super::model::ProgramBlock,
+        instant_wait: bool,
+    ) -> Result<(), String> {
         if self.instructions_executed >= MAX_INSTRUCTIONS_PER_RUN {
-            return Err(format!("Execution safety limit of {MAX_INSTRUCTIONS_PER_RUN} blocks reached"));
+            return Err(format!(
+                "Execution safety limit of {MAX_INSTRUCTIONS_PER_RUN} blocks reached"
+            ));
         }
         match block.kind {
             BlockKind::Start => {
@@ -232,16 +242,21 @@ impl SequenceRuntime {
                 self.push_log(format!("{sensor_id}: {:.2} C", self.chamber_temperature_c));
                 self.program_counter += 1;
             }
-            BlockKind::BranchTemperature { comparison, threshold_c, target_block_id } => {
-                let reading = self.last_temperature_reading_c.ok_or_else(|| {
-                    format!("Condition block #{} has no preceding temperature reading", block.id)
-                })?;
+            BlockKind::BranchTemperature {
+                comparison,
+                threshold_c,
+                target_block_id,
+            } => {
+                let reading = self
+                    .last_temperature_reading_c
+                    .ok_or_else(|| format!("Condition block #{} has no preceding temperature reading", block.id))?;
                 let condition = match comparison {
                     TemperatureComparison::GreaterOrEqual => reading >= threshold_c,
                     TemperatureComparison::LessThan => reading < threshold_c,
                 };
                 if condition {
-                    self.program_counter = program.index_of(target_block_id)
+                    self.program_counter = program
+                        .index_of(target_block_id)
                         .ok_or_else(|| format!("Condition target block #{target_block_id} no longer exists"))?;
                     self.push_log(format!("Condition true: jumping to block #{target_block_id}"));
                 } else {
@@ -270,19 +285,29 @@ impl SequenceRuntime {
                 self.push_log(format!("Variable {name} += {delta:.3} (now {updated:.3})"));
                 self.program_counter += 1;
             }
-            BlockKind::BranchVariable { name, comparison, threshold, target_block_id } => {
-                let value = self.variables.get(&name).copied().ok_or_else(|| {
-                    format!("Condition block #{} reads undefined variable '{name}'", block.id)
-                })?;
+            BlockKind::BranchVariable {
+                name,
+                comparison,
+                threshold,
+                target_block_id,
+            } => {
+                let value = self
+                    .variables
+                    .get(&name)
+                    .copied()
+                    .ok_or_else(|| format!("Condition block #{} reads undefined variable '{name}'", block.id))?;
                 let condition = match comparison {
                     NumericComparison::GreaterOrEqual => value >= threshold,
                     NumericComparison::LessThan => value < threshold,
                     NumericComparison::Equal => (value - threshold).abs() <= 1e-9,
                 };
                 if condition {
-                    self.program_counter = program.index_of(target_block_id)
+                    self.program_counter = program
+                        .index_of(target_block_id)
                         .ok_or_else(|| format!("Condition target block #{target_block_id} no longer exists"))?;
-                    self.push_log(format!("Variable condition true: {name}={value:.3}, jumping to #{target_block_id}"));
+                    self.push_log(format!(
+                        "Variable condition true: {name}={value:.3}, jumping to #{target_block_id}"
+                    ));
                 } else {
                     self.program_counter += 1;
                     self.push_log(format!("Variable condition false: {name}={value:.3}"));
@@ -335,11 +360,9 @@ impl SequenceRuntime {
         }
         // Exact solution of a first-order lumped thermal model. This is a gameplay
         // demonstrator, not a validated thermal-design solver.
-        let equilibrium = AMBIENT_TEMPERATURE_C
-            + (HEATER_GAIN_C_PER_S * self.heater_power / HEAT_LOSS_PER_S);
+        let equilibrium = AMBIENT_TEMPERATURE_C + (HEATER_GAIN_C_PER_S * self.heater_power / HEAT_LOSS_PER_S);
         let decay = (-HEAT_LOSS_PER_S * delta_seconds).exp();
-        self.chamber_temperature_c = equilibrium
-            + (self.chamber_temperature_c - equilibrium) * decay;
+        self.chamber_temperature_c = equilibrium + (self.chamber_temperature_c - equilibrium) * decay;
         self.simulated_time_s += delta_seconds;
     }
 
@@ -431,19 +454,70 @@ mod tests {
 
     #[test]
     fn variables_can_be_assigned_incremented_and_tested() {
-        use super::super::model::ProgramBlock;
         use super::super::model::CanvasPosition;
+        use super::super::model::ProgramBlock;
         let program = Program {
             schema_version: super::super::model::CURRENT_PROGRAM_SCHEMA,
             name: "Variable test".to_string(),
             blocks: vec![
-                ProgramBlock { id: 1, kind: BlockKind::Start, position: CanvasPosition::grid(0), breakpoint: false },
-                ProgramBlock { id: 2, kind: BlockKind::SetVariable { name: "counter".into(), value: 2.0 }, position: CanvasPosition::grid(1), breakpoint: false },
-                ProgramBlock { id: 3, kind: BlockKind::AddVariable { name: "counter".into(), delta: 1.0 }, position: CanvasPosition::grid(2), breakpoint: false },
-                ProgramBlock { id: 4, kind: BlockKind::SetVariableExpression { name: "derived".into(), expression: "(counter + 1) * 2".into() }, position: CanvasPosition::grid(3), breakpoint: false },
-                ProgramBlock { id: 5, kind: BlockKind::BranchVariable { name: "derived".into(), comparison: NumericComparison::GreaterOrEqual, threshold: 8.0, target_block_id: 7 }, position: CanvasPosition::grid(4), breakpoint: false },
-                ProgramBlock { id: 6, kind: BlockKind::Record { message: "not reached".into() }, position: CanvasPosition::grid(5), breakpoint: false },
-                ProgramBlock { id: 7, kind: BlockKind::End, position: CanvasPosition::grid(6), breakpoint: false },
+                ProgramBlock {
+                    id: 1,
+                    kind: BlockKind::Start,
+                    position: CanvasPosition::grid(0),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 2,
+                    kind: BlockKind::SetVariable {
+                        name: "counter".into(),
+                        value: 2.0,
+                    },
+                    position: CanvasPosition::grid(1),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 3,
+                    kind: BlockKind::AddVariable {
+                        name: "counter".into(),
+                        delta: 1.0,
+                    },
+                    position: CanvasPosition::grid(2),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 4,
+                    kind: BlockKind::SetVariableExpression {
+                        name: "derived".into(),
+                        expression: "(counter + 1) * 2".into(),
+                    },
+                    position: CanvasPosition::grid(3),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 5,
+                    kind: BlockKind::BranchVariable {
+                        name: "derived".into(),
+                        comparison: NumericComparison::GreaterOrEqual,
+                        threshold: 8.0,
+                        target_block_id: 7,
+                    },
+                    position: CanvasPosition::grid(4),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 6,
+                    kind: BlockKind::Record {
+                        message: "not reached".into(),
+                    },
+                    position: CanvasPosition::grid(5),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 7,
+                    kind: BlockKind::End,
+                    position: CanvasPosition::grid(6),
+                    breakpoint: false,
+                },
             ],
         };
         assert!(program.validate().is_ok());
@@ -451,7 +525,9 @@ mod tests {
         runtime.toggle_run();
         for _ in 0..10 {
             runtime.tick(&program, 0.05);
-            if runtime.status == RuntimeStatus::Completed || runtime.status == RuntimeStatus::Failed { break; }
+            if runtime.status == RuntimeStatus::Completed || runtime.status == RuntimeStatus::Failed {
+                break;
+            }
         }
         assert_eq!(runtime.status, RuntimeStatus::Completed);
         assert_eq!(runtime.variables.get("counter"), Some(&3.0));
@@ -465,10 +541,36 @@ mod tests {
             schema_version: super::super::model::CURRENT_PROGRAM_SCHEMA,
             name: "Overflow test".to_string(),
             blocks: vec![
-                ProgramBlock { id: 1, kind: BlockKind::Start, position: CanvasPosition::grid(0), breakpoint: false },
-                ProgramBlock { id: 2, kind: BlockKind::SetVariable { name: "large".into(), value: f64::MAX }, position: CanvasPosition::grid(1), breakpoint: false },
-                ProgramBlock { id: 3, kind: BlockKind::AddVariable { name: "large".into(), delta: f64::MAX }, position: CanvasPosition::grid(2), breakpoint: false },
-                ProgramBlock { id: 4, kind: BlockKind::End, position: CanvasPosition::grid(3), breakpoint: false },
+                ProgramBlock {
+                    id: 1,
+                    kind: BlockKind::Start,
+                    position: CanvasPosition::grid(0),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 2,
+                    kind: BlockKind::SetVariable {
+                        name: "large".into(),
+                        value: f64::MAX,
+                    },
+                    position: CanvasPosition::grid(1),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 3,
+                    kind: BlockKind::AddVariable {
+                        name: "large".into(),
+                        delta: f64::MAX,
+                    },
+                    position: CanvasPosition::grid(2),
+                    breakpoint: false,
+                },
+                ProgramBlock {
+                    id: 4,
+                    kind: BlockKind::End,
+                    position: CanvasPosition::grid(3),
+                    breakpoint: false,
+                },
             ],
         };
         let mut runtime = SequenceRuntime::default();

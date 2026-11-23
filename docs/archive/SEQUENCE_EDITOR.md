@@ -1,4 +1,9 @@
+> **Archived document.** Written before the 0.26 missile-only direction and kept for historical
+> reference only. It no longer describes the current project: see `README.md`,
+> `docs/ARCHITECTURE.md` and `docs/ROADMAP_OMEGA.md`.
+
 # Laboratory sequence editor — prototype 0.6
+
 
 The sequence editor now has two synchronized views over the same typed program model: the original keyboard-driven list and a draggable visual graph. The graph is a visualization of the program's execution flow, not a separate runtime. Saving the program stores the node positions and breakpoints in the same JSON file.
 

@@ -4,8 +4,8 @@
 //! writes are atomic, listed in a manifest committed last, and verified by hash when read.
 //! Saves from 0.21 (`saves/*.json`) are imported once, without being modified or deleted.
 
-use omega_data::{SaveSlot, SlotError};
 use bevy::log::{info, warn};
+use omega_data::{SaveSlot, SlotError};
 use std::path::Path;
 
 const SAVES_DIR: &str = "saves";
@@ -37,7 +37,11 @@ impl SaveFile {
 
 fn migrate(slot: &SaveSlot, legacy_dir: &Path) {
     match slot.import_legacy(legacy_dir, GAME_VERSION) {
-        Ok(manifest) => info!("Imported {} file(s) from the 0.21 save layout into {}", manifest.files.len(), slot.root().display()),
+        Ok(manifest) => info!(
+            "Imported {} file(s) from the 0.21 save layout into {}",
+            manifest.files.len(),
+            slot.root().display()
+        ),
         Err(SlotError::AlreadyExists | SlotError::NothingToImport) => {}
         Err(error) => warn!("Could not import 0.21 saves: {error}"),
     }
@@ -45,7 +49,9 @@ fn migrate(slot: &SaveSlot, legacy_dir: &Path) {
 
 pub fn write_to(slot: &SaveSlot, legacy_dir: &Path, file: SaveFile, bytes: &[u8]) -> Result<(), String> {
     migrate(slot, legacy_dir);
-    slot.commit(GAME_VERSION, &[(file.rel(), bytes.to_vec())]).map(|_| ()).map_err(|error| error.to_string())
+    slot.commit(GAME_VERSION, &[(file.rel(), bytes.to_vec())])
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// `Ok(None)` means "nothing saved yet"; `Err` means the slot is unreadable or the file no
@@ -55,7 +61,10 @@ pub fn read_from(slot: &SaveSlot, legacy_dir: &Path, file: SaveFile) -> Result<O
     match slot.read_manifest().map_err(|error| error.to_string())? {
         None => Ok(None),
         Some(manifest) if !manifest.files.iter().any(|entry| entry.path == file.rel()) => Ok(None),
-        Some(_) => slot.read_verified(file.rel()).map(Some).map_err(|error| error.to_string()),
+        Some(_) => slot
+            .read_verified(file.rel())
+            .map(Some)
+            .map_err(|error| error.to_string()),
     }
 }
 
@@ -87,7 +96,10 @@ mod tests {
         let legacy = dir.join("saves");
         assert_eq!(read_from(&slot, &legacy, SaveFile::Campaign).unwrap(), None);
         write_to(&slot, &legacy, SaveFile::Campaign, b"{\"credits\":5}").unwrap();
-        assert_eq!(read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(), b"{\"credits\":5}");
+        assert_eq!(
+            read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(),
+            b"{\"credits\":5}"
+        );
         assert_eq!(read_from(&slot, &legacy, SaveFile::Assembly).unwrap(), None);
         let _ = fs::remove_dir_all(dir);
     }
@@ -100,12 +112,21 @@ mod tests {
         fs::write(legacy.join("assembly.json"), b"{\"old\":true}").unwrap();
         fs::write(legacy.join("lab_sequence.json"), b"{\"prog\":1}").unwrap();
         let slot = SaveSlot::new(dir.join("slot_1"));
-        assert_eq!(read_from(&slot, &legacy, SaveFile::Assembly).unwrap().unwrap(), b"{\"old\":true}");
-        assert_eq!(read_from(&slot, &legacy, SaveFile::Program).unwrap().unwrap(), b"{\"prog\":1}");
+        assert_eq!(
+            read_from(&slot, &legacy, SaveFile::Assembly).unwrap().unwrap(),
+            b"{\"old\":true}"
+        );
+        assert_eq!(
+            read_from(&slot, &legacy, SaveFile::Program).unwrap().unwrap(),
+            b"{\"prog\":1}"
+        );
         assert!(legacy.join("assembly.json").exists());
         // Later changes to the legacy file are ignored once the slot exists.
         fs::write(legacy.join("assembly.json"), b"{\"old\":false}").unwrap();
-        assert_eq!(read_from(&slot, &legacy, SaveFile::Assembly).unwrap().unwrap(), b"{\"old\":true}");
+        assert_eq!(
+            read_from(&slot, &legacy, SaveFile::Assembly).unwrap().unwrap(),
+            b"{\"old\":true}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -117,7 +138,10 @@ mod tests {
         fs::write(legacy.join("campaign.json"), b"{\"credits\":1}").unwrap();
         let slot = SaveSlot::new(dir.join("slot_1"));
         write_to(&slot, &legacy, SaveFile::Assembly, b"{\"a\":1}").unwrap();
-        assert_eq!(read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(), b"{\"credits\":1}");
+        assert_eq!(
+            read_from(&slot, &legacy, SaveFile::Campaign).unwrap().unwrap(),
+            b"{\"credits\":1}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

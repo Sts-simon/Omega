@@ -1,4 +1,4 @@
-use crate::metrics::{derive_metrics, PartGeometry};
+use crate::metrics::{PartGeometry, derive_metrics};
 
 /// Difference between two versions of a design, by part id.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -46,10 +46,10 @@ impl DesignDiff {
         if self.mass_delta_kg.abs() >= 0.005 {
             parts.push(format!("mass {:+.2} kg", self.mass_delta_kg));
         }
-        if let Some(delta) = self.cg_offset_ratio_delta {
-            if delta.abs() >= 0.0005 {
-                parts.push(format!("CG offset {:+.1} pts", delta * 100.0));
-            }
+        if let Some(delta) = self.cg_offset_ratio_delta
+            && delta.abs() >= 0.0005
+        {
+            parts.push(format!("CG offset {:+.1} pts", delta * 100.0));
         }
         parts.join(", ")
     }
@@ -78,7 +78,12 @@ pub fn diff_parts(before: &[PartGeometry], after: &[PartGeometry]) -> DesignDiff
                 if moved > EPS {
                     diff.moved.push((part.id.clone(), moved));
                 }
-                if old.dimensions_m.iter().zip(&part.dimensions_m).any(|(a, b)| (a - b).abs() > EPS) {
+                if old
+                    .dimensions_m
+                    .iter()
+                    .zip(&part.dimensions_m)
+                    .any(|(a, b)| (a - b).abs() > EPS)
+                {
                     diff.resized.push(part.id.clone());
                 }
             }
@@ -89,10 +94,10 @@ pub fn diff_parts(before: &[PartGeometry], after: &[PartGeometry]) -> DesignDiff
             diff.removed.push(old.id.clone());
         }
     }
-    if let (Ok(a), Ok(b)) = (derive_metrics(before), derive_metrics(after)) {
-        if let (Some(x), Some(y)) = (a.get("cg_offset_ratio"), b.get("cg_offset_ratio")) {
-            diff.cg_offset_ratio_delta = Some(y.value - x.value);
-        }
+    if let (Ok(a), Ok(b)) = (derive_metrics(before), derive_metrics(after))
+        && let (Some(x), Some(y)) = (a.get("cg_offset_ratio"), b.get("cg_offset_ratio"))
+    {
+        diff.cg_offset_ratio_delta = Some(y.value - x.value);
     }
     diff
 }
@@ -102,7 +107,12 @@ mod tests {
     use super::*;
 
     fn part(id: &str, mass: f64, x: f64, size: f64) -> PartGeometry {
-        PartGeometry { id: id.into(), mass_kg: mass, position_m: [x, 0.0, 0.0], dimensions_m: [size, 0.1, 0.1] }
+        PartGeometry {
+            id: id.into(),
+            mass_kg: mass,
+            position_m: [x, 0.0, 0.0],
+            dimensions_m: [size, 0.1, 0.1],
+        }
     }
 
     #[test]
@@ -116,8 +126,16 @@ mod tests {
 
     #[test]
     fn additions_removals_moves_and_resizes_are_detected() {
-        let before = [part("a", 1.0, 0.0, 1.0), part("b", 2.0, 1.0, 0.5), part("gone", 1.0, -1.0, 0.2)];
-        let after = [part("a", 1.0, 0.0, 1.5), part("b", 2.0, 1.2, 0.5), part("new", 0.5, 2.0, 0.2)];
+        let before = [
+            part("a", 1.0, 0.0, 1.0),
+            part("b", 2.0, 1.0, 0.5),
+            part("gone", 1.0, -1.0, 0.2),
+        ];
+        let after = [
+            part("a", 1.0, 0.0, 1.5),
+            part("b", 2.0, 1.2, 0.5),
+            part("new", 0.5, 2.0, 0.2),
+        ];
         let diff = diff_parts(&before, &after);
         assert_eq!(diff.added, vec!["new".to_string()]);
         assert_eq!(diff.removed, vec!["gone".to_string()]);
@@ -126,7 +144,13 @@ mod tests {
         assert!((diff.moved[0].1 - 0.2).abs() < 1e-9);
         assert!((diff.mass_delta_kg - (-0.5)).abs() < 1e-9);
         let text = diff.summary();
-        assert!(text.contains("1 added") && text.contains("1 removed") && text.contains("1 moved") && text.contains("1 resized"), "{text}");
+        assert!(
+            text.contains("1 added")
+                && text.contains("1 removed")
+                && text.contains("1 moved")
+                && text.contains("1 resized"),
+            "{text}"
+        );
         assert!(text.contains("mass -0.50 kg"), "{text}");
     }
 

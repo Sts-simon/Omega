@@ -57,17 +57,34 @@ impl ComputerClass {
 #[serde(tag = "part", rename_all = "snake_case")]
 pub enum PartSpec {
     /// Solid motor: a shorter burn time gives more thrust and a heavier casing.
-    SolidMotor { length_m: f64, diameter_m: f64, burn_time_s: f64 },
-    FuelTank { length_m: f64, diameter_m: f64 },
+    SolidMotor {
+        length_m: f64,
+        diameter_m: f64,
+        burn_time_s: f64,
+    },
+    FuelTank {
+        length_m: f64,
+        diameter_m: f64,
+    },
     /// Liquid engine drawing from tanks in the same stage; `scale` resizes the engine.
-    LiquidEngine { scale: f64 },
+    LiquidEngine {
+        scale: f64,
+    },
     /// Cruise engine: needs a minimum airspeed to run, very economical.
-    AirBreathing { scale: f64 },
-    Sensor { kind: SensorKind },
-    Computer { class: ComputerClass },
+    AirBreathing {
+        scale: f64,
+    },
+    Sensor {
+        kind: SensorKind,
+    },
+    Computer {
+        class: ComputerClass,
+    },
     Decoupler,
     /// Abstract mission module: only mass matters here.
-    MissionModule { mass_kg: f64 },
+    MissionModule {
+        mass_kg: f64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -106,7 +123,11 @@ impl PartSpec {
             }
         };
         match *self {
-            Self::SolidMotor { length_m, diameter_m, burn_time_s } => {
+            Self::SolidMotor {
+                length_m,
+                diameter_m,
+                burn_time_s,
+            } => {
                 in_range("motor length (m)", length_m, 0.3, 8.0)?;
                 in_range("motor diameter (m)", diameter_m, 0.1, 1.2)?;
                 in_range("burn time (s)", burn_time_s, 1.0, 60.0)
@@ -123,7 +144,11 @@ impl PartSpec {
 
     pub fn stats(&self) -> PartStats {
         match *self {
-            Self::SolidMotor { length_m, diameter_m, burn_time_s } => {
+            Self::SolidMotor {
+                length_m,
+                diameter_m,
+                burn_time_s,
+            } => {
                 let propellant = 0.88 * cylinder_volume(length_m, diameter_m) * SOLID_DENSITY;
                 // Faster burns mean higher chamber pressure and a heavier casing.
                 let pressure_factor = (20.0 / burn_time_s).clamp(1.0, 2.5).sqrt();
@@ -174,8 +199,14 @@ impl PartSpec {
                 },
                 ..PartStats::default()
             },
-            Self::Decoupler => PartStats { dry_mass_kg: 6.0, ..PartStats::default() },
-            Self::MissionModule { mass_kg } => PartStats { dry_mass_kg: mass_kg, ..PartStats::default() },
+            Self::Decoupler => PartStats {
+                dry_mass_kg: 6.0,
+                ..PartStats::default()
+            },
+            Self::MissionModule { mass_kg } => PartStats {
+                dry_mass_kg: mass_kg,
+                ..PartStats::default()
+            },
         }
     }
 
@@ -186,13 +217,27 @@ impl PartSpec {
             Self::FuelTank { .. } => "part:fuel_tank",
             Self::LiquidEngine { .. } => "part:liquid_engine",
             Self::AirBreathing { .. } => "part:air_breathing",
-            Self::Sensor { kind: SensorKind::Pitot } => "sensor:pitot",
-            Self::Sensor { kind: SensorKind::Barometer } => "sensor:barometer",
-            Self::Sensor { kind: SensorKind::Radar(RadarClass::Basic) } => "sensor:radar_basic",
-            Self::Sensor { kind: SensorKind::Radar(RadarClass::Active) } => "sensor:radar_active",
-            Self::Computer { class: ComputerClass::Basic } => "computer:basic",
-            Self::Computer { class: ComputerClass::Standard } => "computer:standard",
-            Self::Computer { class: ComputerClass::Advanced } => "computer:advanced",
+            Self::Sensor {
+                kind: SensorKind::Pitot,
+            } => "sensor:pitot",
+            Self::Sensor {
+                kind: SensorKind::Barometer,
+            } => "sensor:barometer",
+            Self::Sensor {
+                kind: SensorKind::Radar(RadarClass::Basic),
+            } => "sensor:radar_basic",
+            Self::Sensor {
+                kind: SensorKind::Radar(RadarClass::Active),
+            } => "sensor:radar_active",
+            Self::Computer {
+                class: ComputerClass::Basic,
+            } => "computer:basic",
+            Self::Computer {
+                class: ComputerClass::Standard,
+            } => "computer:standard",
+            Self::Computer {
+                class: ComputerClass::Advanced,
+            } => "computer:advanced",
             Self::Decoupler => "part:decoupler",
             Self::MissionModule { .. } => "part:mission_module",
         }
@@ -240,8 +285,16 @@ pub struct RadarSpec {
 impl RadarClass {
     pub fn spec(self) -> RadarSpec {
         match self {
-            Self::Basic => RadarSpec { class: self, max_lock_speed_ms: 450.0, base_lock_probability: 0.55 },
-            Self::Active => RadarSpec { class: self, max_lock_speed_ms: 900.0, base_lock_probability: 0.80 },
+            Self::Basic => RadarSpec {
+                class: self,
+                max_lock_speed_ms: 450.0,
+                base_lock_probability: 0.55,
+            },
+            Self::Active => RadarSpec {
+                class: self,
+                max_lock_speed_ms: 900.0,
+                base_lock_probability: 0.80,
+            },
         }
     }
 }
@@ -263,7 +316,11 @@ impl Vehicle {
                     issues.push(format!("{} (stage {}): {error}", part.id, index + 1));
                 }
                 if matches!(part.spec, PartSpec::LiquidEngine { .. } | PartSpec::AirBreathing { .. }) && !has_tank {
-                    issues.push(format!("{} (stage {}): needs a fuel tank in the same stage", part.id, index + 1));
+                    issues.push(format!(
+                        "{} (stage {}): needs a fuel tank in the same stage",
+                        part.id,
+                        index + 1
+                    ));
                 }
             }
         }
@@ -271,13 +328,22 @@ impl Vehicle {
             .stages
             .iter()
             .enumerate()
-            .flat_map(|(i, s)| s.parts.iter().filter(|p| matches!(p.spec, PartSpec::Computer { .. })).map(move |p| (i, p)))
+            .flat_map(|(i, s)| {
+                s.parts
+                    .iter()
+                    .filter(|p| matches!(p.spec, PartSpec::Computer { .. }))
+                    .map(move |p| (i, p))
+            })
             .collect();
         match computers.as_slice() {
             [] => issues.push("the vehicle needs a flight computer".to_string()),
             [(index, part)] => {
                 if *index + 1 != self.stages.len() {
-                    issues.push(format!("{} would be dropped with stage {}: put the computer in the last stage", part.id, index + 1));
+                    issues.push(format!(
+                        "{} would be dropped with stage {}: put the computer in the last stage",
+                        part.id,
+                        index + 1
+                    ));
                 }
             }
             _ => issues.push("only one flight computer is allowed".to_string()),
@@ -286,7 +352,10 @@ impl Vehicle {
     }
 
     pub fn parts(&self) -> impl Iterator<Item = (usize, &Part)> {
-        self.stages.iter().enumerate().flat_map(|(i, s)| s.parts.iter().map(move |p| (i, p)))
+        self.stages
+            .iter()
+            .enumerate()
+            .flat_map(|(i, s)| s.parts.iter().map(move |p| (i, p)))
     }
 
     pub fn computer(&self) -> Option<ComputerClass> {
@@ -301,7 +370,9 @@ impl Vehicle {
         self.parts()
             .filter(|(stage, _)| *stage >= min_stage)
             .filter_map(|(_, p)| match p.spec {
-                PartSpec::Sensor { kind: SensorKind::Radar(class) } => Some(class.spec()),
+                PartSpec::Sensor {
+                    kind: SensorKind::Radar(class),
+                } => Some(class.spec()),
                 _ => None,
             })
             .max_by(|a, b| a.base_lock_probability.total_cmp(&b.base_lock_probability))
@@ -328,7 +399,11 @@ impl Vehicle {
     /// Research capabilities this design needs that are not owned yet.
     pub fn missing_research(&self, owned: &BTreeSet<String>) -> Vec<String> {
         let needed: BTreeSet<&str> = self.parts().map(|(_, p)| p.spec.required_capability()).collect();
-        needed.into_iter().filter(|c| !owned.contains(*c)).map(str::to_string).collect()
+        needed
+            .into_iter()
+            .filter(|c| !owned.contains(*c))
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn max_diameter_m(&self) -> f64 {
@@ -336,10 +411,14 @@ impl Vehicle {
     }
 
     fn stage_wet_mass(stage: &Stage) -> f64 {
-        stage.parts.iter().map(|p| {
-            let s = p.spec.stats();
-            s.dry_mass_kg + s.propellant_kg
-        }).sum()
+        stage
+            .parts
+            .iter()
+            .map(|p| {
+                let s = p.spec.stats();
+                s.dry_mass_kg + s.propellant_kg
+            })
+            .sum()
     }
 
     pub fn total_wet_mass_kg(&self) -> f64 {
@@ -367,9 +446,17 @@ impl Vehicle {
                     burn_time = Some(burn_time.map_or(bt, |b: f64| b.max(bt)));
                 }
             }
-            let isp = if mass_flow_weight > 0.0 { thrust / (mass_flow_weight * G0) } else { 0.0 };
+            let isp = if mass_flow_weight > 0.0 {
+                thrust / (mass_flow_weight * G0)
+            } else {
+                0.0
+            };
             let burnout_mass = (ignition_mass - propellant).max(1e-9);
-            let delta_v = if isp > 0.0 { isp * G0 * (ignition_mass / burnout_mass).ln() } else { 0.0 };
+            let delta_v = if isp > 0.0 {
+                isp * G0 * (ignition_mass / burnout_mass).ln()
+            } else {
+                0.0
+            };
             reports.push(StageReport {
                 index,
                 stage_wet_mass_kg: wet,
@@ -389,19 +476,51 @@ pub(crate) mod tests {
     use super::*;
 
     pub fn part(id: &str, spec: PartSpec) -> Part {
-        Part { id: id.to_string(), spec }
+        Part {
+            id: id.to_string(),
+            spec,
+        }
     }
 
     pub fn sounding_rocket() -> Vehicle {
         Vehicle {
             name: "Test rocket".into(),
             stages: vec![
-                Stage { parts: vec![part("booster", PartSpec::SolidMotor { length_m: 2.0, diameter_m: 0.4, burn_time_s: 20.0 }), part("dec1", PartSpec::Decoupler)] },
                 Stage {
                     parts: vec![
-                        part("sustainer", PartSpec::SolidMotor { length_m: 1.0, diameter_m: 0.3, burn_time_s: 25.0 }),
-                        part("pc", PartSpec::Computer { class: ComputerClass::Basic }),
-                        part("pitot", PartSpec::Sensor { kind: SensorKind::Pitot }),
+                        part(
+                            "booster",
+                            PartSpec::SolidMotor {
+                                length_m: 2.0,
+                                diameter_m: 0.4,
+                                burn_time_s: 20.0,
+                            },
+                        ),
+                        part("dec1", PartSpec::Decoupler),
+                    ],
+                },
+                Stage {
+                    parts: vec![
+                        part(
+                            "sustainer",
+                            PartSpec::SolidMotor {
+                                length_m: 1.0,
+                                diameter_m: 0.3,
+                                burn_time_s: 25.0,
+                            },
+                        ),
+                        part(
+                            "pc",
+                            PartSpec::Computer {
+                                class: ComputerClass::Basic,
+                            },
+                        ),
+                        part(
+                            "pitot",
+                            PartSpec::Sensor {
+                                kind: SensorKind::Pitot,
+                            },
+                        ),
                         part("module", PartSpec::MissionModule { mass_kg: 40.0 }),
                     ],
                 },
@@ -411,17 +530,44 @@ pub(crate) mod tests {
 
     #[test]
     fn solid_motor_burn_time_trades_thrust_for_duration_and_casing_mass() {
-        let slow = PartSpec::SolidMotor { length_m: 2.0, diameter_m: 0.4, burn_time_s: 40.0 }.stats();
-        let fast = PartSpec::SolidMotor { length_m: 2.0, diameter_m: 0.4, burn_time_s: 10.0 }.stats();
-        assert!((slow.propellant_kg - fast.propellant_kg).abs() < 1e-9, "same propellant");
-        assert!((fast.thrust_n / slow.thrust_n - 4.0).abs() < 1e-9, "4x faster burn = 4x thrust");
-        assert!(fast.dry_mass_kg > slow.dry_mass_kg, "faster burn needs a heavier casing");
+        let slow = PartSpec::SolidMotor {
+            length_m: 2.0,
+            diameter_m: 0.4,
+            burn_time_s: 40.0,
+        }
+        .stats();
+        let fast = PartSpec::SolidMotor {
+            length_m: 2.0,
+            diameter_m: 0.4,
+            burn_time_s: 10.0,
+        }
+        .stats();
+        assert!(
+            (slow.propellant_kg - fast.propellant_kg).abs() < 1e-9,
+            "same propellant"
+        );
+        assert!(
+            (fast.thrust_n / slow.thrust_n - 4.0).abs() < 1e-9,
+            "4x faster burn = 4x thrust"
+        );
+        assert!(
+            fast.dry_mass_kg > slow.dry_mass_kg,
+            "faster burn needs a heavier casing"
+        );
     }
 
     #[test]
     fn lengthening_a_tank_and_scaling_an_engine_changes_mass_and_thrust() {
-        let short = PartSpec::FuelTank { length_m: 1.0, diameter_m: 0.4 }.stats();
-        let long = PartSpec::FuelTank { length_m: 2.0, diameter_m: 0.4 }.stats();
+        let short = PartSpec::FuelTank {
+            length_m: 1.0,
+            diameter_m: 0.4,
+        }
+        .stats();
+        let long = PartSpec::FuelTank {
+            length_m: 2.0,
+            diameter_m: 0.4,
+        }
+        .stats();
         assert!((long.propellant_kg / short.propellant_kg - 2.0).abs() < 1e-9);
         let small = PartSpec::LiquidEngine { scale: 1.0 }.stats();
         let big = PartSpec::LiquidEngine { scale: 2.0 }.stats();
@@ -444,7 +590,12 @@ pub(crate) mod tests {
     fn valid_vehicle_passes_and_problems_are_listed() {
         assert!(sounding_rocket().validate().is_ok());
         let mut bad = sounding_rocket();
-        bad.stages[0].parts.push(part("pc2", PartSpec::Computer { class: ComputerClass::Basic }));
+        bad.stages[0].parts.push(part(
+            "pc2",
+            PartSpec::Computer {
+                class: ComputerClass::Basic,
+            },
+        ));
         bad.stages[1].parts.push(part("booster", PartSpec::Decoupler));
         let issues = bad.validate().unwrap_err().join(" | ");
         assert!(issues.contains("only one flight computer"), "{issues}");
@@ -456,11 +607,17 @@ pub(crate) mod tests {
         assert!(dropped.validate().unwrap_err().join(" ").contains("last stage"));
 
         let mut no_tank = sounding_rocket();
-        no_tank.stages[1].parts.push(part("eng", PartSpec::LiquidEngine { scale: 1.0 }));
+        no_tank.stages[1]
+            .parts
+            .push(part("eng", PartSpec::LiquidEngine { scale: 1.0 }));
         assert!(no_tank.validate().unwrap_err().join(" ").contains("fuel tank"));
 
         let mut huge = sounding_rocket();
-        huge.stages[0].parts[0].spec = PartSpec::SolidMotor { length_m: 20.0, diameter_m: 0.4, burn_time_s: 20.0 };
+        huge.stages[0].parts[0].spec = PartSpec::SolidMotor {
+            length_m: 20.0,
+            diameter_m: 0.4,
+            burn_time_s: 20.0,
+        };
         assert!(huge.validate().is_err());
         assert!(Vehicle::default().validate().is_err());
     }
@@ -470,8 +627,18 @@ pub(crate) mod tests {
         let mut vehicle = sounding_rocket();
         let blocks = vehicle.available_blocks();
         assert!(blocks.contains("hold_speed") && !blocks.contains("lock_target") && !blocks.contains("hold_pressure"));
-        vehicle.stages[1].parts.push(part("radar", PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Active) }));
-        vehicle.stages[1].parts.push(part("baro", PartSpec::Sensor { kind: SensorKind::Barometer }));
+        vehicle.stages[1].parts.push(part(
+            "radar",
+            PartSpec::Sensor {
+                kind: SensorKind::Radar(RadarClass::Active),
+            },
+        ));
+        vehicle.stages[1].parts.push(part(
+            "baro",
+            PartSpec::Sensor {
+                kind: SensorKind::Barometer,
+            },
+        ));
         let blocks = vehicle.available_blocks();
         assert!(blocks.contains("lock_target") && blocks.contains("hold_pressure"));
         assert!(vehicle.best_radar(0).unwrap().class == RadarClass::Active);
@@ -483,9 +650,25 @@ pub(crate) mod tests {
     #[test]
     fn missing_research_lists_only_what_is_not_owned() {
         let mut vehicle = sounding_rocket();
-        vehicle.stages[1].parts.push(part("radar", PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Active) }));
-        let owned: BTreeSet<String> = ["part:solid_motor", "part:decoupler", "part:mission_module", "computer:basic", "sensor:pitot"]
-            .into_iter().map(String::from).collect();
-        assert_eq!(vehicle.missing_research(&owned), vec!["sensor:radar_active".to_string()]);
+        vehicle.stages[1].parts.push(part(
+            "radar",
+            PartSpec::Sensor {
+                kind: SensorKind::Radar(RadarClass::Active),
+            },
+        ));
+        let owned: BTreeSet<String> = [
+            "part:solid_motor",
+            "part:decoupler",
+            "part:mission_module",
+            "computer:basic",
+            "sensor:pitot",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        assert_eq!(
+            vehicle.missing_research(&owned),
+            vec!["sensor:radar_active".to_string()]
+        );
     }
 }

@@ -1,9 +1,10 @@
 //! Numeric component inspector for the workshop.
 //! Values are edited as SI coordinates, metre dimensions and degree rotations.
 use super::DesignSession;
+use super::PolygonSketchSession;
 use crate::campus::{CampusState, CampusView};
 use crate::sequence::SequenceWorkspace;
-use super::PolygonSketchSession;
+use crate::ui_kit::UiInteraction;
 use bevy::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,25 +97,27 @@ pub(crate) struct InspectorStepButton {
 pub(crate) struct InspectorStatusText;
 
 pub fn setup_ui(mut commands: Commands) {
-    let panel = commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(14.0),
-            top: Val::Px(78.0),
-            width: Val::Px(286.0),
-            max_height: Val::Percent(87.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(7.0),
-            padding: UiRect::all(Val::Px(12.0)),
-            overflow: Overflow::scroll_y(),
-            display: Display::None,
-            ..default()
-        },
-        Interaction::None,
-        ScrollPosition::default(),
-        BackgroundColor(Color::srgba(0.018, 0.032, 0.046, 0.96)),
-        InspectorPanel,
-    )).id();
+    let panel = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(14.0),
+                top: Val::Px(78.0),
+                width: Val::Px(286.0),
+                max_height: Val::Percent(87.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(7.0),
+                padding: UiRect::all(Val::Px(12.0)),
+                overflow: Overflow::scroll_y(),
+                display: Display::None,
+                ..default()
+            },
+            UiInteraction::None,
+            ScrollPosition::default(),
+            BackgroundColor(Color::srgba(0.018, 0.032, 0.046, 0.96)),
+            InspectorPanel,
+        ))
+        .id();
 
     commands.entity(panel).with_children(|parent| {
         parent.spawn((
@@ -158,95 +161,133 @@ pub fn setup_ui(mut commands: Commands) {
 fn inspector_section(parent: &mut ChildSpawnerCommands<'_>, label: &'static str) {
     parent.spawn((
         Text::new(label),
-        TextFont { font_size: FontSize::Px(9.5), ..default() },
+        TextFont {
+            font_size: FontSize::Px(9.5),
+            ..default()
+        },
         TextColor(Color::srgb(0.35, 0.72, 0.80)),
         Node {
             width: Val::Percent(100.0),
-            margin: UiRect { top: Val::Px(8.0), bottom: Val::Px(1.0), ..default() },
+            margin: UiRect {
+                top: Val::Px(8.0),
+                bottom: Val::Px(1.0),
+                ..default()
+            },
             ..default()
         },
     ));
 }
 
 fn inspector_row(parent: &mut ChildSpawnerCommands<'_>, axis_label: &'static str, field: InspectorField) {
-    parent.spawn(Node {
-        width: Val::Percent(100.0),
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(4.0),
-        ..default()
-    }).with_children(|row| {
-        row.spawn((
-            Text::new(format!("{} {axis_label}", field.label().split_whitespace().next().unwrap_or("Value"))),
-            TextFont { font_size: FontSize::Px(10.5), ..default() },
-            TextColor(Color::srgb(0.72, 0.79, 0.83)),
-            Node { width: Val::Px(78.0), ..default() },
-        ));
-        row.spawn((
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(4.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new(format!(
+                    "{} {axis_label}",
+                    field.label().split_whitespace().next().unwrap_or("Value")
+                )),
+                TextFont {
+                    font_size: FontSize::Px(10.5),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.72, 0.79, 0.83)),
+                Node {
+                    width: Val::Px(78.0),
+                    ..default()
+                },
+            ));
+            row.spawn((
+                // Bevy 0.20 deprecated the `Button` marker; recreate the components it required.
+                UiInteraction::default(),
+                bevy::ui::FocusPolicy::Block,
+                Node {
+                    width: Val::Px(112.0),
+                    height: Val::Px(29.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    flex_grow: 1.0,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.075, 0.12, 0.16)),
+                InspectorEditButton(field),
+            ))
+            .with_children(|button| {
+                button.spawn((
+                    Text::new("0.000"),
+                    TextFont {
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.93, 0.96, 0.98)),
+                    InspectorValueText(field),
+                ));
+            });
+            inspector_step_button(row, field, -field.step(), "-");
+            inspector_step_button(row, field, field.step(), "+");
+        });
+}
+
+fn inspector_step_button(
+    parent: &mut ChildSpawnerCommands<'_>,
+    field: InspectorField,
+    delta: f64,
+    label: &'static str,
+) {
+    parent
+        .spawn((
             // Bevy 0.20 deprecated the `Button` marker; recreate the components it required.
-            Interaction::default(),
+            UiInteraction::default(),
             bevy::ui::FocusPolicy::Block,
             Node {
-                width: Val::Px(112.0),
+                width: Val::Px(24.0),
                 height: Val::Px(29.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                flex_grow: 1.0,
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.075, 0.12, 0.16)),
-            InspectorEditButton(field),
-        )).with_children(|button| {
+            BackgroundColor(Color::srgb(0.08, 0.15, 0.19)),
+            InspectorStepButton { field, delta },
+        ))
+        .with_children(|button| {
             button.spawn((
-                Text::new("0.000"),
-                TextFont { font_size: FontSize::Px(11.0), ..default() },
-                TextColor(Color::srgb(0.93, 0.96, 0.98)),
-                InspectorValueText(field),
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.90, 0.94, 0.97)),
             ));
         });
-        inspector_step_button(row, field, -field.step(), "-");
-        inspector_step_button(row, field, field.step(), "+");
-    });
-}
-
-fn inspector_step_button(parent: &mut ChildSpawnerCommands<'_>, field: InspectorField, delta: f64, label: &'static str) {
-    parent.spawn((
-        // Bevy 0.20 deprecated the `Button` marker; recreate the components it required.
-        Interaction::default(),
-        bevy::ui::FocusPolicy::Block,
-        Node {
-            width: Val::Px(24.0),
-            height: Val::Px(29.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgb(0.08, 0.15, 0.19)),
-        InspectorStepButton { field, delta },
-    )).with_children(|button| {
-        button.spawn((
-            Text::new(label),
-            TextFont { font_size: FontSize::Px(14.0), ..default() },
-            TextColor(Color::srgb(0.90, 0.94, 0.97)),
-        ));
-    });
 }
 
 pub fn handle_input(
-    mut edit_buttons: Query<(&Interaction, &InspectorEditButton), Changed<Interaction>>,
-    mut step_buttons: Query<(&Interaction, &InspectorStepButton), Changed<Interaction>>,
+    mut edit_buttons: Query<(&UiInteraction, &InspectorEditButton), Changed<UiInteraction>>,
+    mut step_buttons: Query<(&UiInteraction, &InspectorStepButton), Changed<UiInteraction>>,
     campus: Res<CampusState>,
     sketch: Res<PolygonSketchSession>,
     sequence: Res<SequenceWorkspace>,
     mut session: ResMut<DesignSession>,
     mut state: ResMut<InspectorState>,
 ) {
-    if campus.view != CampusView::Construction || campus.profile_editor_open || sketch.active || sequence.graph_is_open() {
+    if campus.view != CampusView::Construction
+        || campus.profile_editor_open
+        || sketch.active
+        || sequence.graph_is_open()
+    {
         return;
     }
 
     for (interaction, button) in &mut edit_buttons {
-        if *interaction != Interaction::Pressed { continue; }
+        if *interaction != UiInteraction::Pressed {
+            continue;
+        }
         let Some(index) = session.selected_index() else {
             state.active = None;
             state.message = "Select a component first".to_string();
@@ -257,21 +298,38 @@ pub fn handle_input(
         state.editing_part_id = Some(part.id.clone());
         state.draft = button.0.format(button.0.value(part));
         state.replace_on_first_input = true;
-        state.message = format!("Editing {} {} ({}) — first typed key replaces the value", part.label, button.0.label(), button.0.unit());
+        state.message = format!(
+            "Editing {} {} ({}) — first typed key replaces the value",
+            part.label,
+            button.0.label(),
+            button.0.unit()
+        );
     }
 
     for (interaction, button) in &mut step_buttons {
-        if *interaction != Interaction::Pressed { continue; }
-        let Some(index) = session.selected_index() else { continue; };
+        if *interaction != UiInteraction::Pressed {
+            continue;
+        }
+        let Some(index) = session.selected_index() else {
+            continue;
+        };
         let current = button.field.value(&session.assembly.parts[index]);
         let next = current + button.delta;
         let changed = apply_value(button.field, next, &mut session);
         state.active = None;
         state.editing_part_id = None;
         state.replace_on_first_input = false;
-        let actual = session.selected_index().map(|index| button.field.value(&session.assembly.parts[index])).unwrap_or(next);
+        let actual = session
+            .selected_index()
+            .map(|index| button.field.value(&session.assembly.parts[index]))
+            .unwrap_or(next);
         state.message = if changed {
-            format!("Adjusted {} to {} {}", button.field.label(), button.field.format(actual), button.field.unit())
+            format!(
+                "Adjusted {} to {} {}",
+                button.field.label(),
+                button.field.format(actual),
+                button.field.unit()
+            )
         } else {
             "Value unchanged".to_string()
         };
@@ -287,8 +345,14 @@ pub fn handle_text_input(
     mut state: ResMut<InspectorState>,
     mut session: ResMut<DesignSession>,
 ) {
-    let Some(field) = state.active else { return; };
-    if campus.view != CampusView::Construction || campus.profile_editor_open || sketch.active || sequence.graph_is_open() {
+    let Some(field) = state.active else {
+        return;
+    };
+    if campus.view != CampusView::Construction
+        || campus.profile_editor_open
+        || sketch.active
+        || sequence.graph_is_open()
+    {
         state.active = None;
         state.editing_part_id = None;
         state.replace_on_first_input = false;
@@ -314,7 +378,8 @@ pub fn handle_text_input(
         match parsed {
             Ok(value) if value.is_finite() => {
                 if apply_value(field, value, &mut session) {
-                    let actual = session.selected_index()
+                    let actual = session
+                        .selected_index()
                         .map(|index| field.value(&session.assembly.parts[index]))
                         .unwrap_or(value);
                     state.message = format!("Applied {} = {} {}", field.label(), field.format(actual), field.unit());
@@ -342,24 +407,43 @@ pub fn handle_text_input(
             state.draft.push('-');
         }
     }
-    if keys.just_pressed(KeyCode::Period) || keys.just_pressed(KeyCode::NumpadDecimal) || keys.just_pressed(KeyCode::Comma) || keys.just_pressed(KeyCode::NumpadComma) {
+    if keys.just_pressed(KeyCode::Period)
+        || keys.just_pressed(KeyCode::NumpadDecimal)
+        || keys.just_pressed(KeyCode::Comma)
+        || keys.just_pressed(KeyCode::NumpadComma)
+    {
         if state.replace_on_first_input {
             state.draft.clear();
             state.replace_on_first_input = false;
         }
         if !state.draft.contains('.') && !state.draft.contains(',') {
-            if state.draft.is_empty() || state.draft == "-" { state.draft.push('0'); }
+            if state.draft.is_empty() || state.draft == "-" {
+                state.draft.push('0');
+            }
             state.draft.push('.');
         }
     }
     for (key, digit) in [
-        (KeyCode::Digit0, '0'), (KeyCode::Digit1, '1'), (KeyCode::Digit2, '2'),
-        (KeyCode::Digit3, '3'), (KeyCode::Digit4, '4'), (KeyCode::Digit5, '5'),
-        (KeyCode::Digit6, '6'), (KeyCode::Digit7, '7'), (KeyCode::Digit8, '8'),
-        (KeyCode::Digit9, '9'), (KeyCode::Numpad0, '0'), (KeyCode::Numpad1, '1'),
-        (KeyCode::Numpad2, '2'), (KeyCode::Numpad3, '3'), (KeyCode::Numpad4, '4'),
-        (KeyCode::Numpad5, '5'), (KeyCode::Numpad6, '6'), (KeyCode::Numpad7, '7'),
-        (KeyCode::Numpad8, '8'), (KeyCode::Numpad9, '9'),
+        (KeyCode::Digit0, '0'),
+        (KeyCode::Digit1, '1'),
+        (KeyCode::Digit2, '2'),
+        (KeyCode::Digit3, '3'),
+        (KeyCode::Digit4, '4'),
+        (KeyCode::Digit5, '5'),
+        (KeyCode::Digit6, '6'),
+        (KeyCode::Digit7, '7'),
+        (KeyCode::Digit8, '8'),
+        (KeyCode::Digit9, '9'),
+        (KeyCode::Numpad0, '0'),
+        (KeyCode::Numpad1, '1'),
+        (KeyCode::Numpad2, '2'),
+        (KeyCode::Numpad3, '3'),
+        (KeyCode::Numpad4, '4'),
+        (KeyCode::Numpad5, '5'),
+        (KeyCode::Numpad6, '6'),
+        (KeyCode::Numpad7, '7'),
+        (KeyCode::Numpad8, '8'),
+        (KeyCode::Numpad9, '9'),
     ] {
         if keys.just_pressed(key) && state.draft.len() < 20 {
             if state.replace_on_first_input {
@@ -379,6 +463,18 @@ fn apply_value(field: InspectorField, value: f64, session: &mut DesignSession) -
     }
 }
 
+type InspectorButtons<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static UiInteraction,
+        &'static mut BackgroundColor,
+        Option<&'static InspectorEditButton>,
+        Option<&'static InspectorStepButton>,
+    ),
+    Or<(With<InspectorEditButton>, With<InspectorStepButton>)>,
+>;
+
 pub fn update_ui(
     campus: Res<CampusState>,
     sketch: Res<PolygonSketchSession>,
@@ -388,27 +484,50 @@ pub fn update_ui(
     mut panel: Query<&mut Node, With<InspectorPanel>>,
     mut selection_text: Query<&mut Text, (With<InspectorSelectionText>, Without<InspectorValueText>)>,
     mut values: Query<(&mut Text, &InspectorValueText)>,
-    mut buttons: Query<(
-        &Interaction,
-        &mut BackgroundColor,
-        Option<&InspectorEditButton>,
-        Option<&InspectorStepButton>,
-    ), Or<(With<InspectorEditButton>, With<InspectorStepButton>)>>,
-    mut status: Query<&mut Text, (With<InspectorStatusText>, Without<InspectorSelectionText>, Without<InspectorValueText>)>,
+    mut buttons: InspectorButtons,
+    mut status: Query<
+        &mut Text,
+        (
+            With<InspectorStatusText>,
+            Without<InspectorSelectionText>,
+            Without<InspectorValueText>,
+        ),
+    >,
 ) {
     if let Ok(mut node) = panel.single_mut() {
-        node.display = if campus.view == CampusView::Construction && !campus.profile_editor_open && !sketch.active && !sequence.graph_is_open() { Display::Flex } else { Display::None };
+        node.display = if campus.view == CampusView::Construction
+            && !campus.profile_editor_open
+            && !sketch.active
+            && !sequence.graph_is_open()
+        {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
     let selected = session.selected_index().map(|index| &session.assembly.parts[index]);
     if let Ok(mut text) = selection_text.single_mut() {
-        text.0 = selected.map(|part| format!("{}  |  {:?}  |  {:?}\nMass estimate: {:.3} kg", part.label, part.kind, part.material, part.estimated_mass_kg()))
+        text.0 = selected
+            .map(|part| {
+                format!(
+                    "{}  |  {:?}  |  {:?}\nMass estimate: {:.3} kg",
+                    part.label,
+                    part.kind,
+                    part.material,
+                    part.estimated_mass_kg()
+                )
+            })
             .unwrap_or_else(|| "No component selected".to_string());
     }
     for (mut text, value_text) in &mut values {
         if Some(value_text.0) == state.active {
             text.0 = format!("> {} {}", state.draft, value_text.0.unit());
         } else if let Some(part) = selected {
-            text.0 = format!("{} {}", value_text.0.format(value_text.0.value(part)), value_text.0.unit());
+            text.0 = format!(
+                "{} {}",
+                value_text.0.format(value_text.0.value(part)),
+                value_text.0.unit()
+            );
         } else {
             text.0 = "—".to_string();
         }
@@ -419,17 +538,17 @@ pub fn update_ui(
                 Color::srgb(0.10, 0.34, 0.38)
             } else {
                 match *interaction {
-                    Interaction::Pressed => Color::srgb(0.12, 0.40, 0.35),
-                    Interaction::Hovered => Color::srgb(0.13, 0.22, 0.27),
-                    Interaction::None => Color::srgb(0.075, 0.12, 0.16),
+                    UiInteraction::Pressed => Color::srgb(0.12, 0.40, 0.35),
+                    UiInteraction::Hovered => Color::srgb(0.13, 0.22, 0.27),
+                    UiInteraction::None => Color::srgb(0.075, 0.12, 0.16),
                 }
             };
         } else if let Some(button) = step_button {
             background.0 = match *interaction {
-                Interaction::Pressed => Color::srgb(0.12, 0.40, 0.35),
-                Interaction::Hovered => Color::srgb(0.13, 0.22, 0.27),
-                Interaction::None if Some(button.field) == state.active => Color::srgb(0.10, 0.23, 0.27),
-                Interaction::None => Color::srgb(0.08, 0.15, 0.19),
+                UiInteraction::Pressed => Color::srgb(0.12, 0.40, 0.35),
+                UiInteraction::Hovered => Color::srgb(0.13, 0.22, 0.27),
+                UiInteraction::None if Some(button.field) == state.active => Color::srgb(0.10, 0.23, 0.27),
+                UiInteraction::None => Color::srgb(0.08, 0.15, 0.19),
             };
         }
     }

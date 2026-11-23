@@ -1,4 +1,9 @@
+> **Archived document.** Written before the 0.26 missile-only direction and kept for historical
+> reference only. It no longer describes the current project: see `README.md`,
+> `docs/ARCHITECTURE.md` and `docs/ROADMAP_OMEGA.md`.
+
 ## Completed in 0.18.0
+
 - [x] Persistent mouse-clickable navigation between island and facilities.
 - [x] Contextual scrollable tool shelves for contracts, workshop and laboratory.
 - [x] Mouse-driven workshop transforms: translation, rotation and per-axis dimension changes.

@@ -3,7 +3,7 @@
 //! Boards are rebuilt only when what they show changes.
 
 use super::*;
-use crate::design::{record_revision, restore_revision, InspectorState, RevisionLog};
+use crate::design::{InspectorState, RevisionLog, record_revision, restore_revision};
 use crate::interface::{UiAction, UiActionButton};
 use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
 use crate::ui_kit::{self, ButtonTone, NavStatus, UiState};
@@ -22,7 +22,11 @@ pub(crate) enum BoardKind {
 pub(crate) struct ToastText;
 
 fn root_node(kind: BoardKind) -> Node {
-    let mut node = Node { position_type: PositionType::Absolute, display: Display::None, ..default() };
+    let mut node = Node {
+        position_type: PositionType::Absolute,
+        display: Display::None,
+        ..default()
+    };
     match kind {
         BoardKind::Island => {
             node.left = Val::Px(0.0);
@@ -31,7 +35,12 @@ fn root_node(kind: BoardKind) -> Node {
             node.bottom = Val::Px(0.0);
             node.flex_direction = FlexDirection::Column;
             node.justify_content = JustifyContent::SpaceBetween;
-            node.padding = UiRect { left: Val::Px(18.0), right: Val::Px(18.0), top: Val::Px(20.0), bottom: Val::Px(18.0) };
+            node.padding = UiRect {
+                left: Val::Px(18.0),
+                right: Val::Px(18.0),
+                top: Val::Px(20.0),
+                bottom: Val::Px(18.0),
+            };
         }
         BoardKind::Contracts | BoardKind::Research | BoardKind::Missile => {
             node.left = Val::Px(14.0);
@@ -52,7 +61,13 @@ fn root_node(kind: BoardKind) -> Node {
 }
 
 pub(crate) fn setup_boards(mut commands: Commands) {
-    for kind in [BoardKind::Island, BoardKind::Contracts, BoardKind::Research, BoardKind::Project, BoardKind::Missile] {
+    for kind in [
+        BoardKind::Island,
+        BoardKind::Contracts,
+        BoardKind::Research,
+        BoardKind::Project,
+        BoardKind::Missile,
+    ] {
         commands.spawn((root_node(kind), kind));
     }
 }
@@ -106,19 +121,40 @@ fn badge_color(badge: &str) -> Color {
 
 fn heading(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>) {
     parent
-        .spawn(Node { margin: UiRect { top: Val::Px(4.0), ..default() }, ..default() })
+        .spawn(Node {
+            margin: UiRect {
+                top: Val::Px(4.0),
+                ..default()
+            },
+            ..default()
+        })
         .with_children(|h| ui_kit::label(h, text, 11.0, ui_kit::TEXT_DIM));
 }
 
 fn difficulty_bar(parent: &mut ChildSpawnerCommands<'_>, difficulty: u8) {
-    parent.spawn(Node { column_gap: Val::Px(3.0), align_items: AlignItems::Center, ..default() }).with_children(|bar| {
-        for step in 1..=5u8 {
-            bar.spawn((
-                Node { width: Val::Px(9.0), height: Val::Px(9.0), border_radius: BorderRadius::all(Val::Px(2.0)), ..default() },
-                BackgroundColor(if step <= difficulty { ui_kit::WARN } else { Color::srgb(0.14, 0.19, 0.24) }),
-            ));
-        }
-    });
+    parent
+        .spawn(Node {
+            column_gap: Val::Px(3.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|bar| {
+            for step in 1..=5u8 {
+                bar.spawn((
+                    Node {
+                        width: Val::Px(9.0),
+                        height: Val::Px(9.0),
+                        border_radius: BorderRadius::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(if step <= difficulty {
+                        ui_kit::WARN
+                    } else {
+                        Color::srgb(0.14, 0.19, 0.24)
+                    }),
+                ));
+            }
+        });
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -126,38 +162,120 @@ fn difficulty_bar(parent: &mut ChildSpawnerCommands<'_>, difficulty: u8) {
 // ----------------------------------------------------------------------------------------------
 
 fn build_island(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
-    root.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), ..default() }).with_children(|hero| {
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(8.0),
+        ..default()
+    })
+    .with_children(|hero| {
         ui_kit::label(hero, "RESEARCH ISLAND", 30.0, ui_kit::ACCENT);
-        ui_kit::label(hero, "A fictional civil and scientific engineering campus. Take contracts, design, test and deliver.", 12.0, ui_kit::TEXT_DIM);
-        ui_kit::label(hero, "Camera: right drag to orbit | middle drag to pan | wheel to zoom", 10.5, ui_kit::TEXT_DIM);
-        hero.spawn(Node { column_gap: Val::Px(8.0), margin: UiRect { top: Val::Px(4.0), ..default() }, ..default() }).with_children(|stats| {
+        ui_kit::label(
+            hero,
+            "A fictional civil and scientific engineering campus. Take contracts, design, test and deliver.",
+            12.0,
+            ui_kit::TEXT_DIM,
+        );
+        ui_kit::label(
+            hero,
+            "Camera: right drag to orbit | middle drag to pan | wheel to zoom",
+            10.5,
+            ui_kit::TEXT_DIM,
+        );
+        hero.spawn(Node {
+            column_gap: Val::Px(8.0),
+            margin: UiRect {
+                top: Val::Px(4.0),
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|stats| {
             ui_kit::chip(stats, format!("{} cr", ui_kit::thousands(campus.credits)), ui_kit::GOOD);
-            ui_kit::chip(stats, format!("{}/{} active projects", campus.accepted_contracts.len(), MAX_ACTIVE_CONTRACTS), ui_kit::WARN);
-            ui_kit::chip(stats, format!("{} completed", campus.completed_contracts.len()), ui_kit::NEUTRAL);
+            ui_kit::chip(
+                stats,
+                format!(
+                    "{}/{} active projects",
+                    campus.accepted_contracts.len(),
+                    MAX_ACTIVE_CONTRACTS
+                ),
+                ui_kit::WARN,
+            );
+            ui_kit::chip(
+                stats,
+                format!("{} completed", campus.completed_contracts.len()),
+                ui_kit::NEUTRAL,
+            );
         });
     });
 
     let facilities: [(&str, &str, &str, CampusView, Color); 5] = [
-        ("CONTRACT OFFICE", "F1", "Client offers, requirements, deadlines and payment. Deliver a verified dossier.", CampusView::Contracts, Color::srgb(0.92, 0.62, 0.30)),
-        ("MISSILE WORKSHOP", "F2", "Build a staged vehicle from resizable parts: tanks, motors, engines, sensors and a computer.", CampusView::Missile, Color::srgb(0.36, 0.84, 0.94)),
-        ("RESEARCH", "F3", "Spend credits and days to unlock engines, sensors, computers and missile families.", CampusView::Research, Color::srgb(0.62, 0.50, 0.90)),
-        ("PROGRAMMING", "F4", "Visual editor for abstract sequences. Hardware decides which blocks exist.", CampusView::Programming, Color::srgb(0.35, 0.75, 0.55)),
-        ("COMPUTE", "F5", "Thermal and structural studies, meshing, field tests and reports.", CampusView::Computation, Color::srgb(0.36, 0.62, 0.95)),
+        (
+            "CONTRACT OFFICE",
+            "F1",
+            "Client offers, requirements, deadlines and payment. Deliver a verified dossier.",
+            CampusView::Contracts,
+            Color::srgb(0.92, 0.62, 0.30),
+        ),
+        (
+            "MISSILE WORKSHOP",
+            "F2",
+            "Build a staged vehicle from resizable parts: tanks, motors, engines, sensors and a computer.",
+            CampusView::Missile,
+            Color::srgb(0.36, 0.84, 0.94),
+        ),
+        (
+            "RESEARCH",
+            "F3",
+            "Spend credits and days to unlock engines, sensors, computers and missile families.",
+            CampusView::Research,
+            Color::srgb(0.62, 0.50, 0.90),
+        ),
+        (
+            "PROGRAMMING",
+            "F4",
+            "Visual editor for abstract sequences. Hardware decides which blocks exist.",
+            CampusView::Programming,
+            Color::srgb(0.35, 0.75, 0.55),
+        ),
+        (
+            "COMPUTE",
+            "F5",
+            "Thermal and structural studies, meshing, field tests and reports.",
+            CampusView::Computation,
+            Color::srgb(0.36, 0.62, 0.95),
+        ),
     ];
-    root.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(10.0), ..default() }).with_children(|row| {
+    root.spawn(Node {
+        width: Val::Percent(100.0),
+        column_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|row| {
         for (title, key, text, view, color) in facilities {
             let (node, bg, border) = ui_kit::card_node(Val::Px(0.0), color);
             let mut node = node;
             node.flex_grow = 1.0;
             node.flex_basis = Val::Px(0.0);
-            row.spawn((node, bg, border, Interaction::None)).with_children(|card| {
-                card.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|top| {
-                    ui_kit::label(top, title, 14.0, ui_kit::TEXT);
-                    ui_kit::chip(top, key, color);
+            row.spawn((node, bg, border, UiInteraction::None))
+                .with_children(|card| {
+                    card.spawn(Node {
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|top| {
+                        ui_kit::label(top, title, 14.0, ui_kit::TEXT);
+                        ui_kit::chip(top, key, color);
+                    });
+                    ui_kit::label(card, text, 10.5, ui_kit::TEXT_DIM);
+                    ui_kit::button(
+                        card,
+                        "OPEN",
+                        UiAction::Navigate(view),
+                        ButtonTone::Primary,
+                        Val::Percent(100.0),
+                    );
                 });
-                ui_kit::label(card, text, 10.5, ui_kit::TEXT_DIM);
-                ui_kit::button(card, "OPEN", UiAction::Navigate(view), ButtonTone::Primary, Val::Percent(100.0));
-            });
         }
     });
 }
@@ -169,131 +287,338 @@ fn build_island(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
 fn offer_card(parent: &mut ChildSpawnerCommands<'_>, index: usize, offer: &ContractOffer, can_accept: bool) {
     let color = domain_color(offer.domain);
     let (node, bg, border) = ui_kit::card_node(Val::Px(298.0), color);
-    parent.spawn((node, bg, border, Interaction::None)).with_children(|card| {
-        card.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|top| {
-            ui_kit::chip(top, offer.domain.label(), color);
-            difficulty_bar(top, offer.difficulty);
-        });
-        card.spawn(Node { min_height: Val::Px(38.0), ..default() })
-            .with_children(|t| ui_kit::label(t, offer.title.clone(), 15.0, ui_kit::TEXT));
-        ui_kit::label(card, offer.client.clone(), 10.0, ui_kit::TEXT_DIM);
-        let r = &offer.requirements;
-        let balance = r.max_cg_offset_ratio.map_or("n/a".to_string(), |ratio| format!("{:.0}%", ratio * 100.0));
-        for line in [
-            format!("Mass <= {} kg    Power <= {} W", r.max_unit_mass_kg, r.max_unit_power_w),
-            format!("Uptime >= {}%    Data >= {}%", r.min_uptime_percent, r.min_data_completeness_percent),
-            format!("Storage >= {} GB    Units: {}", r.min_storage_gb, r.required_units),
-            format!("Balance <= {balance}    Unit budget {} cr", ui_kit::thousands(r.max_unit_cost_cr)),
-        ] {
-            ui_kit::label(card, line, 10.5, Color::srgb(0.78, 0.84, 0.88));
-        }
-        card.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, margin: UiRect { top: Val::Px(4.0), ..default() }, ..default() }).with_children(|bottom| {
-            bottom.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(|pay| {
-                ui_kit::label(pay, format!("{} cr", ui_kit::thousands(offer.reward)), 17.0, ui_kit::GOOD);
-                ui_kit::label(pay, format!("{} days", offer.deadline_days), 10.0, ui_kit::TEXT_DIM);
+    parent
+        .spawn((node, bg, border, UiInteraction::None))
+        .with_children(|card| {
+            card.spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|top| {
+                ui_kit::chip(top, offer.domain.label(), color);
+                difficulty_bar(top, offer.difficulty);
             });
-            let tone = if can_accept { ButtonTone::Primary } else { ButtonTone::Disabled };
-            ui_kit::button(bottom, "ACCEPT", UiAction::AcceptOffer(index), tone, Val::Px(110.0));
+            card.spawn(Node {
+                min_height: Val::Px(38.0),
+                ..default()
+            })
+            .with_children(|t| ui_kit::label(t, offer.title.clone(), 15.0, ui_kit::TEXT));
+            ui_kit::label(card, offer.client.clone(), 10.0, ui_kit::TEXT_DIM);
+            let r = &offer.requirements;
+            let balance = r
+                .max_cg_offset_ratio
+                .map_or("n/a".to_string(), |ratio| format!("{:.0}%", ratio * 100.0));
+            for line in [
+                format!("Mass <= {} kg    Power <= {} W", r.max_unit_mass_kg, r.max_unit_power_w),
+                format!(
+                    "Uptime >= {}%    Data >= {}%",
+                    r.min_uptime_percent, r.min_data_completeness_percent
+                ),
+                format!("Storage >= {} GB    Units: {}", r.min_storage_gb, r.required_units),
+                format!(
+                    "Balance <= {balance}    Unit budget {} cr",
+                    ui_kit::thousands(r.max_unit_cost_cr)
+                ),
+            ] {
+                ui_kit::label(card, line, 10.5, Color::srgb(0.78, 0.84, 0.88));
+            }
+            card.spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect {
+                    top: Val::Px(4.0),
+                    ..default()
+                },
+                ..default()
+            })
+            .with_children(|bottom| {
+                bottom
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    })
+                    .with_children(|pay| {
+                        ui_kit::label(
+                            pay,
+                            format!("{} cr", ui_kit::thousands(offer.reward)),
+                            17.0,
+                            ui_kit::GOOD,
+                        );
+                        ui_kit::label(pay, format!("{} days", offer.deadline_days), 10.0, ui_kit::TEXT_DIM);
+                    });
+                let tone = if can_accept {
+                    ButtonTone::Primary
+                } else {
+                    ButtonTone::Disabled
+                };
+                ui_kit::button(bottom, "ACCEPT", UiAction::AcceptOffer(index), tone, Val::Px(110.0));
+            });
         });
-    });
 }
 
 fn active_card(parent: &mut ChildSpawnerCommands<'_>, active: &ActiveContract, selected: bool) {
     let (status, status_color) = phase_chip(active.phase);
     let (step, failed) = step_of(active.phase);
-    let accent = if selected { ui_kit::ACCENT } else { domain_color(active.offer.domain) };
+    let accent = if selected {
+        ui_kit::ACCENT
+    } else {
+        domain_color(active.offer.domain)
+    };
     let (mut node, mut bg, border) = ui_kit::card_node(Val::Px(298.0), accent);
     if selected {
         bg = BackgroundColor(ui_kit::CARD_SELECTED);
     }
     node.min_height = Val::Px(170.0);
-    parent.spawn((node, bg, border, Interaction::None)).with_children(|card| {
-        card.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|top| {
-            ui_kit::chip(top, status, status_color);
-            ui_kit::label(top, format!("#{:04}", active.offer.id), 10.0, ui_kit::TEXT_DIM);
-        });
-        card.spawn(Node { min_height: Val::Px(36.0), ..default() })
+    parent
+        .spawn((node, bg, border, UiInteraction::None))
+        .with_children(|card| {
+            card.spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|top| {
+                ui_kit::chip(top, status, status_color);
+                ui_kit::label(top, format!("#{:04}", active.offer.id), 10.0, ui_kit::TEXT_DIM);
+            });
+            card.spawn(Node {
+                min_height: Val::Px(36.0),
+                ..default()
+            })
             .with_children(|t| ui_kit::label(t, active.offer.title.clone(), 14.0, ui_kit::TEXT));
-        ui_kit::label(card, active.offer.client.clone(), 10.0, ui_kit::TEXT_DIM);
-        card.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(4.0), margin: UiRect { top: Val::Px(2.0), ..default() }, ..default() }).with_children(|steps| {
-            for (index, name) in ["DESIGN", "ANALYSIS", "FIELD TEST", "DELIVERY"].into_iter().enumerate() {
-                steps.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0), ..default() }).with_children(|cell| {
-                    let color = if index < step {
-                        ui_kit::GOOD
-                    } else if index == step {
-                        if failed { ui_kit::BAD } else if active.phase == ContractPhase::TestPassed { ui_kit::GOOD } else { ui_kit::ACCENT }
+            ui_kit::label(card, active.offer.client.clone(), 10.0, ui_kit::TEXT_DIM);
+            card.spawn(Node {
+                width: Val::Percent(100.0),
+                column_gap: Val::Px(4.0),
+                margin: UiRect {
+                    top: Val::Px(2.0),
+                    ..default()
+                },
+                ..default()
+            })
+            .with_children(|steps| {
+                for (index, name) in ["DESIGN", "ANALYSIS", "FIELD TEST", "DELIVERY"].into_iter().enumerate() {
+                    steps
+                        .spawn(Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(3.0),
+                            ..default()
+                        })
+                        .with_children(|cell| {
+                            let color = if index < step {
+                                ui_kit::GOOD
+                            } else if index == step {
+                                if failed {
+                                    ui_kit::BAD
+                                } else if active.phase == ContractPhase::TestPassed {
+                                    ui_kit::GOOD
+                                } else {
+                                    ui_kit::ACCENT
+                                }
+                            } else {
+                                Color::srgb(0.14, 0.19, 0.24)
+                            };
+                            cell.spawn((
+                                Node {
+                                    height: Val::Px(6.0),
+                                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(color),
+                            ));
+                            ui_kit::label(
+                                cell,
+                                name,
+                                8.5,
+                                if index <= step { ui_kit::TEXT } else { ui_kit::TEXT_DIM },
+                            );
+                        });
+                }
+            });
+            card.spawn(Node {
+                column_gap: Val::Px(6.0),
+                margin: UiRect {
+                    top: Val::Px(4.0),
+                    ..default()
+                },
+                ..default()
+            })
+            .with_children(|buttons| {
+                if selected {
+                    ui_kit::button_row_item(
+                        buttons,
+                        "LEGACY BENCH",
+                        UiAction::Navigate(CampusView::Construction),
+                        ButtonTone::Secondary,
+                    );
+                    ui_kit::button_row_item(
+                        buttons,
+                        "COMPUTE",
+                        UiAction::Navigate(CampusView::Computation),
+                        ButtonTone::Secondary,
+                    );
+                    let tone = if active.phase == ContractPhase::TestPassed {
+                        ButtonTone::Primary
                     } else {
-                        Color::srgb(0.14, 0.19, 0.24)
+                        ButtonTone::Disabled
                     };
-                    cell.spawn((Node { height: Val::Px(6.0), border_radius: BorderRadius::all(Val::Px(3.0)), ..default() }, BackgroundColor(color)));
-                    ui_kit::label(cell, name, 8.5, if index <= step { ui_kit::TEXT } else { ui_kit::TEXT_DIM });
-                });
-            }
+                    ui_kit::button_row_item(buttons, "DELIVER", UiAction::DeliverContract, tone);
+                } else {
+                    ui_kit::button_row_item(
+                        buttons,
+                        "SELECT PROJECT",
+                        UiAction::SelectContract(active.offer.id),
+                        ButtonTone::Primary,
+                    );
+                }
+            });
         });
-        card.spawn(Node { column_gap: Val::Px(6.0), margin: UiRect { top: Val::Px(4.0), ..default() }, ..default() }).with_children(|buttons| {
-            if selected {
-                ui_kit::button_row_item(buttons, "LEGACY BENCH", UiAction::Navigate(CampusView::Construction), ButtonTone::Secondary);
-                ui_kit::button_row_item(buttons, "COMPUTE", UiAction::Navigate(CampusView::Computation), ButtonTone::Secondary);
-                let tone = if active.phase == ContractPhase::TestPassed { ButtonTone::Primary } else { ButtonTone::Disabled };
-                ui_kit::button_row_item(buttons, "DELIVER", UiAction::DeliverContract, tone);
-            } else {
-                ui_kit::button_row_item(buttons, "SELECT PROJECT", UiAction::SelectContract(active.offer.id), ButtonTone::Primary);
-            }
-        });
-    });
 }
 
 fn dossier_rows(parent: &mut ChildSpawnerCommands<'_>, active: &ActiveContract, design: &ContentHash, compact: bool) {
     let view = verification::matrix_view(active, design);
     for row in &view.rows {
-        parent.spawn(Node { width: Val::Percent(100.0), align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() }).with_children(|line| {
-            line.spawn(Node { width: Val::Px(50.0), justify_content: JustifyContent::Center, ..default() }).with_children(|cell| {
-                ui_kit::chip(cell, row.badge, badge_color(row.badge));
-            });
-            if compact {
-                line.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), ..default() })
-                    .with_children(|c| ui_kit::label(c, format!("{} {}", row.label, row.rule), 10.5, ui_kit::TEXT));
-                ui_kit::label(line, row.value.clone(), 10.0, ui_kit::TEXT_DIM);
-            } else {
-                line.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, flex_basis: Val::Px(0.0), ..default() }).with_children(|c| {
-                    ui_kit::label(c, format!("{} {}", row.label, row.rule), 11.0, ui_kit::TEXT);
-                    ui_kit::label(c, row.detail.clone(), 9.5, ui_kit::TEXT_DIM);
+        parent
+            .spawn(Node {
+                width: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|line| {
+                line.spawn(Node {
+                    width: Val::Px(50.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                })
+                .with_children(|cell| {
+                    ui_kit::chip(cell, row.badge, badge_color(row.badge));
                 });
-            }
-        });
+                if compact {
+                    line.spawn(Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        ..default()
+                    })
+                    .with_children(|c| ui_kit::label(c, format!("{} {}", row.label, row.rule), 10.5, ui_kit::TEXT));
+                    ui_kit::label(line, row.value.clone(), 10.0, ui_kit::TEXT_DIM);
+                } else {
+                    line.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        ..default()
+                    })
+                    .with_children(|c| {
+                        ui_kit::label(c, format!("{} {}", row.label, row.rule), 11.0, ui_kit::TEXT);
+                        ui_kit::label(c, row.detail.clone(), 9.5, ui_kit::TEXT_DIM);
+                    });
+                }
+            });
     }
     let (text, color) = if view.ready {
         (format!("DOSSIER READY - score {}%", view.score_percent), ui_kit::GOOD)
     } else {
-        (format!("DOSSIER NOT READY - {} open item(s)", view.open_items), ui_kit::WARN)
+        (
+            format!("DOSSIER NOT READY - {} open item(s)", view.open_items),
+            ui_kit::WARN,
+        )
     };
-    parent.spawn(Node { margin: UiRect { top: Val::Px(4.0), ..default() }, ..default() }).with_children(|v| ui_kit::chip(v, text, color));
+    parent
+        .spawn(Node {
+            margin: UiRect {
+                top: Val::Px(4.0),
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|v| ui_kit::chip(v, text, color));
 }
 
 fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, design: &ContentHash) {
     let can_accept = campus.accepted_contracts.len() < MAX_ACTIVE_CONTRACTS;
-    root.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 2.0, flex_basis: Val::Px(0.0), row_gap: Val::Px(10.0), ..default() }).with_children(|left| {
-        left.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() }).with_children(|head| {
-            head.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, ..default() }).with_children(|title| {
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_grow: 2.0,
+        flex_basis: Val::Px(0.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|left| {
+        left.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|head| {
+            head.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                ..default()
+            })
+            .with_children(|title| {
                 ui_kit::label(title, "CONTRACT OFFICE", 22.0, ui_kit::ACCENT);
-                ui_kit::label(title, "Accept up to two projects. Payment follows design, analysis, field test and an accepted dossier.", 10.5, ui_kit::TEXT_DIM);
+                ui_kit::label(
+                    title,
+                    "Accept up to two projects. Payment follows design, analysis, field test and an accepted dossier.",
+                    10.5,
+                    ui_kit::TEXT_DIM,
+                );
             });
             ui_kit::chip(head, format!("{} cr", ui_kit::thousands(campus.credits)), ui_kit::GOOD);
-            ui_kit::button(head, "REFRESH BOARD", UiAction::RefreshContracts, ButtonTone::Secondary, Val::Px(140.0));
+            ui_kit::button(
+                head,
+                "REFRESH BOARD",
+                UiAction::RefreshContracts,
+                ButtonTone::Secondary,
+                Val::Px(140.0),
+            );
         });
         heading(left, "OFFERS");
-        left.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(10.0), ..default() }).with_children(|offers| {
+        left.spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(10.0),
+            row_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|offers| {
             if campus.available_contracts.is_empty() {
-                ui_kit::label(offers, "No offers remain. Refresh the board for new ones.", 12.0, ui_kit::TEXT_DIM);
+                ui_kit::label(
+                    offers,
+                    "No offers remain. Refresh the board for new ones.",
+                    12.0,
+                    ui_kit::TEXT_DIM,
+                );
             }
             for (index, offer) in campus.available_contracts.iter().enumerate() {
                 offer_card(offers, index, offer, can_accept);
             }
         });
-        heading(left, format!("ACTIVE PROJECTS  {}/{}", campus.accepted_contracts.len(), MAX_ACTIVE_CONTRACTS));
-        left.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(10.0), ..default() }).with_children(|active| {
+        heading(
+            left,
+            format!(
+                "ACTIVE PROJECTS  {}/{}",
+                campus.accepted_contracts.len(),
+                MAX_ACTIVE_CONTRACTS
+            ),
+        );
+        left.spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(10.0),
+            row_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|active| {
             if campus.accepted_contracts.is_empty() {
-                ui_kit::label(active, "None yet. Accept an offer above to start a project.", 12.0, ui_kit::TEXT_DIM);
+                ui_kit::label(
+                    active,
+                    "None yet. Accept an offer above to start a project.",
+                    12.0,
+                    ui_kit::TEXT_DIM,
+                );
             }
             for contract in &campus.accepted_contracts {
                 active_card(active, contract, Some(contract.offer.id) == campus.selected_contract_id);
@@ -301,7 +626,14 @@ fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, de
         });
     });
 
-    root.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, flex_basis: Val::Px(0.0), row_gap: Val::Px(10.0), ..default() }).with_children(|right| {
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_grow: 1.0,
+        flex_basis: Val::Px(0.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|right| {
         right
             .spawn((
                 Node {
@@ -312,7 +644,7 @@ fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, de
                     ..default()
                 },
                 BackgroundColor(ui_kit::PANEL),
-                Interaction::None,
+                UiInteraction::None,
             ))
             .with_children(|panel| {
                 ui_kit::label(panel, "DOSSIER", 16.0, ui_kit::ACCENT);
@@ -320,11 +652,21 @@ fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, de
                     Some(active) => {
                         ui_kit::label(panel, active.offer.title.clone(), 12.0, ui_kit::TEXT);
                         if active.snapshot.is_none() {
-                            ui_kit::label(panel, "No design submitted yet. Submit one from the workshop to start gathering evidence.", 10.0, ui_kit::TEXT_DIM);
+                            ui_kit::label(
+                                panel,
+                                "No design submitted yet. Submit one from the workshop to start gathering evidence.",
+                                10.0,
+                                ui_kit::TEXT_DIM,
+                            );
                         }
                         dossier_rows(panel, active, design, false);
                     }
-                    None => ui_kit::label(panel, "Select an active project to see its verification matrix.", 11.0, ui_kit::TEXT_DIM),
+                    None => ui_kit::label(
+                        panel,
+                        "Select an active project to see its verification matrix.",
+                        11.0,
+                        ui_kit::TEXT_DIM,
+                    ),
                 }
             });
         if !campus.completed_contracts.is_empty() {
@@ -338,15 +680,20 @@ fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, de
                         ..default()
                     },
                     BackgroundColor(ui_kit::PANEL),
-                    Interaction::None,
+                    UiInteraction::None,
                 ))
                 .with_children(|panel| {
                     ui_kit::label(panel, "COMPLETED", 12.0, ui_kit::TEXT_DIM);
                     for completed in campus.completed_contracts.iter().rev().take(4) {
-                        let dossier = completed.dossier_score_percent.map_or(String::new(), |s| format!("  | dossier {s}%"));
+                        let dossier = completed
+                            .dossier_score_percent
+                            .map_or(String::new(), |s| format!("  | dossier {s}%"));
                         ui_kit::label(
                             panel,
-                            format!("#{:04} {}  | net {} cr{}", completed.id, completed.title, completed.profit_cr, dossier),
+                            format!(
+                                "#{:04} {}  | net {} cr{}",
+                                completed.id, completed.title, completed.profit_cr, dossier
+                            ),
                             10.5,
                             ui_kit::TEXT,
                         );
@@ -372,16 +719,38 @@ fn department_color(dept: omega_rules::Department) -> Color {
 }
 
 fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
-    use omega_rules::{default_tree, Department, ResearchError};
+    use omega_rules::{Department, ResearchError, default_tree};
     let tree = default_tree();
-    root.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: Val::Px(12.0), ..default() }).with_children(|col| {
-        col.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() }).with_children(|head| {
-            head.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, ..default() }).with_children(|title| {
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_grow: 1.0,
+        row_gap: Val::Px(12.0),
+        ..default()
+    })
+    .with_children(|col| {
+        col.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|head| {
+            head.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                ..default()
+            })
+            .with_children(|title| {
                 ui_kit::label(title, "RESEARCH CENTRE", 22.0, ui_kit::ACCENT);
                 let status = match &campus.research.active {
                     Some(active) => {
-                        let label = tree.iter().find(|t| t.id == active.id).map_or(active.id.as_str(), |t| t.label.as_str());
-                        format!("Researching: {label} - {} day(s) left. One project at a time; press NEXT DAY to advance.", active.days_left)
+                        let label = tree
+                            .iter()
+                            .find(|t| t.id == active.id)
+                            .map_or(active.id.as_str(), |t| t.label.as_str());
+                        format!(
+                            "Researching: {label} - {} day(s) left. One project at a time; press NEXT DAY to advance.",
+                            active.days_left
+                        )
                     }
                     None => "The lab is free. Start a technology, then press NEXT DAY to let time pass.".to_string(),
                 };
@@ -391,42 +760,92 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
             ui_kit::chip(head, format!("{} cr", ui_kit::thousands(campus.credits)), ui_kit::GOOD);
             ui_kit::button(head, "NEXT DAY", UiAction::NextDay, ButtonTone::Primary, Val::Px(130.0));
         });
-        col.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(10.0), ..default() }).with_children(|grid| {
+        col.spawn(Node {
+            width: Val::Percent(100.0),
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|grid| {
             for dept in Department::ALL {
                 let color = department_color(dept);
-                grid.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, flex_basis: Val::Px(0.0), row_gap: Val::Px(8.0), ..default() }).with_children(|column| {
-                    column.spawn(Node { padding: UiRect::bottom(Val::Px(2.0)), ..default() }).with_children(|h| ui_kit::label(h, dept.label(), 11.0, color));
+                grid.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|column| {
+                    column
+                        .spawn(Node {
+                            padding: UiRect::bottom(Val::Px(2.0)),
+                            ..default()
+                        })
+                        .with_children(|h| ui_kit::label(h, dept.label(), 11.0, color));
                     for (index, tech) in tree.iter().enumerate().filter(|(_, t)| t.department == dept) {
                         let (mut node, bg, border) = ui_kit::card_node(Val::Percent(100.0), color);
                         node.row_gap = Val::Px(5.0);
-                        column.spawn((node, bg, border, Interaction::None)).with_children(|card| {
-                            ui_kit::label(card, tech.label.clone(), 13.0, ui_kit::TEXT);
-                            ui_kit::label(card, tech.description.clone(), 10.0, ui_kit::TEXT_DIM);
-                            ui_kit::label(card, format!("{} cr | {} days", ui_kit::thousands(tech.cost_cr), tech.duration_days), 10.5, Color::srgb(0.78, 0.84, 0.88));
-                            if !tech.prereqs.is_empty() {
-                                let names: Vec<&str> = tech.prereqs.iter().filter_map(|p| tree.iter().find(|t| &t.id == p).map(|t| t.label.as_str())).collect();
-                                ui_kit::label(card, format!("Requires: {}", names.join(", ")), 9.5, ui_kit::TEXT_DIM);
-                            }
-                            if campus.research.is_completed(&tech.id) {
-                                card.spawn(Node::default()).with_children(|c| ui_kit::chip(c, "RESEARCHED", ui_kit::GOOD));
-                            } else if campus.research.active.as_ref().is_some_and(|a| a.id == tech.id) {
-                                let left = campus.research.active.as_ref().map_or(0, |a| a.days_left);
-                                card.spawn(Node::default()).with_children(|c| ui_kit::chip(c, format!("{left} DAY(S) LEFT"), ui_kit::PURPLE));
-                            } else {
-                                match campus.research.can_start(&tree, &tech.id, campus.credits) {
-                                    Ok(()) => ui_kit::button(card, "START RESEARCH", UiAction::StartResearch(index), ButtonTone::Primary, Val::Percent(100.0)),
-                                    Err(ResearchError::MissingPrerequisite(_)) => {
-                                        card.spawn(Node::default()).with_children(|c| ui_kit::chip(c, "LOCKED", ui_kit::NEUTRAL));
-                                    }
-                                    Err(ResearchError::InsufficientCredits { needed, .. }) => {
-                                        card.spawn(Node::default()).with_children(|c| ui_kit::chip(c, format!("NEED {} cr", ui_kit::thousands(needed)), ui_kit::WARN));
-                                    }
-                                    Err(_) => {
-                                        card.spawn(Node::default()).with_children(|c| ui_kit::chip(c, "LAB BUSY", ui_kit::NEUTRAL));
+                        column
+                            .spawn((node, bg, border, UiInteraction::None))
+                            .with_children(|card| {
+                                ui_kit::label(card, tech.label.clone(), 13.0, ui_kit::TEXT);
+                                ui_kit::label(card, tech.description.clone(), 10.0, ui_kit::TEXT_DIM);
+                                ui_kit::label(
+                                    card,
+                                    format!("{} cr | {} days", ui_kit::thousands(tech.cost_cr), tech.duration_days),
+                                    10.5,
+                                    Color::srgb(0.78, 0.84, 0.88),
+                                );
+                                if !tech.prereqs.is_empty() {
+                                    let names: Vec<&str> = tech
+                                        .prereqs
+                                        .iter()
+                                        .filter_map(|p| tree.iter().find(|t| &t.id == p).map(|t| t.label.as_str()))
+                                        .collect();
+                                    ui_kit::label(
+                                        card,
+                                        format!("Requires: {}", names.join(", ")),
+                                        9.5,
+                                        ui_kit::TEXT_DIM,
+                                    );
+                                }
+                                if campus.research.is_completed(&tech.id) {
+                                    card.spawn(Node::default())
+                                        .with_children(|c| ui_kit::chip(c, "RESEARCHED", ui_kit::GOOD));
+                                } else if campus.research.active.as_ref().is_some_and(|a| a.id == tech.id) {
+                                    let left = campus.research.active.as_ref().map_or(0, |a| a.days_left);
+                                    card.spawn(Node::default()).with_children(|c| {
+                                        ui_kit::chip(c, format!("{left} DAY(S) LEFT"), ui_kit::PURPLE)
+                                    });
+                                } else {
+                                    match campus.research.can_start(&tree, &tech.id, campus.credits) {
+                                        Ok(()) => ui_kit::button(
+                                            card,
+                                            "START RESEARCH",
+                                            UiAction::StartResearch(index),
+                                            ButtonTone::Primary,
+                                            Val::Percent(100.0),
+                                        ),
+                                        Err(ResearchError::MissingPrerequisite(_)) => {
+                                            card.spawn(Node::default())
+                                                .with_children(|c| ui_kit::chip(c, "LOCKED", ui_kit::NEUTRAL));
+                                        }
+                                        Err(ResearchError::InsufficientCredits { needed, .. }) => {
+                                            card.spawn(Node::default()).with_children(|c| {
+                                                ui_kit::chip(
+                                                    c,
+                                                    format!("NEED {} cr", ui_kit::thousands(needed)),
+                                                    ui_kit::WARN,
+                                                )
+                                            });
+                                        }
+                                        Err(_) => {
+                                            card.spawn(Node::default())
+                                                .with_children(|c| ui_kit::chip(c, "LAB BUSY", ui_kit::NEUTRAL));
+                                        }
                                     }
                                 }
-                            }
-                        });
+                            });
                     }
                 });
             }
@@ -441,7 +860,11 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
 fn spec_summary(spec: &omega_rules::PartSpec) -> String {
     use omega_rules::PartSpec::*;
     match *spec {
-        SolidMotor { length_m, diameter_m, burn_time_s } => format!("Solid motor {length_m:.1} m x {diameter_m:.2} m, {burn_time_s:.0} s"),
+        SolidMotor {
+            length_m,
+            diameter_m,
+            burn_time_s,
+        } => format!("Solid motor {length_m:.1} m x {diameter_m:.2} m, {burn_time_s:.0} s"),
         FuelTank { length_m, diameter_m } => format!("Fuel tank {length_m:.1} m x {diameter_m:.2} m"),
         LiquidEngine { scale } => format!("Liquid engine x{scale:.1}"),
         AirBreathing { scale } => format!("Turbofan x{scale:.1}"),
@@ -453,15 +876,44 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
 }
 
 fn param_row(parent: &mut ChildSpawnerCommands<'_>, param: missile::Param, value: f64) {
-    parent.spawn(Node { width: Val::Percent(100.0), align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() }).with_children(|row| {
-        row.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), ..default() }).with_children(|l| ui_kit::label(l, param.label(), 10.5, ui_kit::TEXT_DIM));
-        ui_kit::button(row, "-", UiAction::Missile(MissileAction::Adjust(param, -1)), ButtonTone::Secondary, Val::Px(34.0));
-        row.spawn(Node { width: Val::Px(56.0), justify_content: JustifyContent::Center, ..default() }).with_children(|v| ui_kit::label(v, format!("{value:.2}"), 12.0, ui_kit::TEXT));
-        ui_kit::button(row, "+", UiAction::Missile(MissileAction::Adjust(param, 1)), ButtonTone::Secondary, Val::Px(34.0));
-    });
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                ..default()
+            })
+            .with_children(|l| ui_kit::label(l, param.label(), 10.5, ui_kit::TEXT_DIM));
+            ui_kit::button(
+                row,
+                "-",
+                UiAction::Missile(MissileAction::Adjust(param, -1)),
+                ButtonTone::Secondary,
+                Val::Px(34.0),
+            );
+            row.spawn(Node {
+                width: Val::Px(56.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|v| ui_kit::label(v, format!("{value:.2}"), 12.0, ui_kit::TEXT));
+            ui_kit::button(
+                row,
+                "+",
+                UiAction::Missile(MissileAction::Adjust(param, 1)),
+                ButtonTone::Secondary,
+                Val::Px(34.0),
+            );
+        });
 }
 
-fn panel_node(width: Val) -> (Node, BackgroundColor, Interaction) {
+fn panel_node(width: Val) -> (Node, BackgroundColor, UiInteraction) {
     (
         Node {
             width,
@@ -472,7 +924,7 @@ fn panel_node(width: Val) -> (Node, BackgroundColor, Interaction) {
             ..default()
         },
         BackgroundColor(ui_kit::PANEL),
-        Interaction::None,
+        UiInteraction::None,
     )
 }
 
@@ -481,17 +933,39 @@ fn build_missile(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, sess
     let vehicle = &session.vehicle;
 
     // Left: palette
-    root.spawn(Node { flex_direction: FlexDirection::Column, width: Val::Px(252.0), row_gap: Val::Px(10.0), ..default() }).with_children(|left| {
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        width: Val::Px(252.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|left| {
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         left.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "MISSILE WORKSHOP", 15.0, ui_kit::ACCENT);
             ui_kit::label(panel, vehicle.name.clone(), 10.5, ui_kit::TEXT_DIM);
             heading(panel, "START FROM");
-            panel.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(4.0), ..default() }).with_children(|row| {
-                ui_kit::button_row_item(row, "ROCKET", UiAction::Missile(MissileAction::Preset(0)), ButtonTone::Ghost);
-                ui_kit::button_row_item(row, "CRUISE", UiAction::Missile(MissileAction::Preset(1)), ButtonTone::Ghost);
-                ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
-            });
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    ui_kit::button_row_item(
+                        row,
+                        "ROCKET",
+                        UiAction::Missile(MissileAction::Preset(0)),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "CRUISE",
+                        UiAction::Missile(MissileAction::Preset(1)),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
+                });
             heading(panel, format!("ADD TO STAGE {}", session.active_stage + 1));
             let rows: [&[PartTemplate]; 6] = [
                 &[PartTemplate::SolidMotor, PartTemplate::FuelTank],
@@ -499,105 +973,245 @@ fn build_missile(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, sess
                 &[PartTemplate::Pitot, PartTemplate::Barometer],
                 &[PartTemplate::RadarBasic, PartTemplate::RadarActive],
                 &[PartTemplate::Decoupler, PartTemplate::MissionModule],
-                &[PartTemplate::ComputerBasic, PartTemplate::ComputerStandard, PartTemplate::ComputerAdvanced],
+                &[
+                    PartTemplate::ComputerBasic,
+                    PartTemplate::ComputerStandard,
+                    PartTemplate::ComputerAdvanced,
+                ],
             ];
             for row in rows {
-                panel.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(4.0), ..default() }).with_children(|r| {
-                    for template in row {
-                        let unlocked = owned.contains(template.spec().required_capability());
-                        let tone = if unlocked { ButtonTone::Secondary } else { ButtonTone::Disabled };
-                        ui_kit::button_row_item(r, template.label(), UiAction::Missile(MissileAction::AddPart(*template)), tone);
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|r| {
+                        for template in row {
+                            let unlocked = owned.contains(template.spec().required_capability());
+                            let tone = if unlocked {
+                                ButtonTone::Secondary
+                            } else {
+                                ButtonTone::Disabled
+                            };
+                            ui_kit::button_row_item(
+                                r,
+                                template.label(),
+                                UiAction::Missile(MissileAction::AddPart(*template)),
+                                tone,
+                            );
+                        }
+                    });
+            }
+            ui_kit::label(
+                panel,
+                "Greyed parts need research. The computer sits in the last stage.",
+                9.5,
+                ui_kit::TEXT_DIM,
+            );
+            heading(panel, "STAGES");
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for index in 0..vehicle.stages.len() {
+                        let tone = if index == session.active_stage {
+                            ButtonTone::Primary
+                        } else {
+                            ButtonTone::Secondary
+                        };
+                        ui_kit::button_row_item(
+                            row,
+                            format!("{}", index + 1),
+                            UiAction::Missile(MissileAction::ActiveStage(index)),
+                            tone,
+                        );
                     }
                 });
-            }
-            ui_kit::label(panel, "Greyed parts need research. The computer sits in the last stage.", 9.5, ui_kit::TEXT_DIM);
-            heading(panel, "STAGES");
-            panel.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(4.0), ..default() }).with_children(|row| {
-                for index in 0..vehicle.stages.len() {
-                    let tone = if index == session.active_stage { ButtonTone::Primary } else { ButtonTone::Secondary };
-                    ui_kit::button_row_item(row, format!("{}", index + 1), UiAction::Missile(MissileAction::ActiveStage(index)), tone);
-                }
-            });
-            panel.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(4.0), ..default() }).with_children(|row| {
-                ui_kit::button_row_item(row, "+ STAGE", UiAction::Missile(MissileAction::NewStage), ButtonTone::Secondary);
-                ui_kit::button_row_item(row, "- STAGE", UiAction::Missile(MissileAction::RemoveStage), ButtonTone::Danger);
-            });
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    ui_kit::button_row_item(
+                        row,
+                        "+ STAGE",
+                        UiAction::Missile(MissileAction::NewStage),
+                        ButtonTone::Secondary,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "- STAGE",
+                        UiAction::Missile(MissileAction::RemoveStage),
+                        ButtonTone::Danger,
+                    );
+                });
         });
     });
 
     // Middle: stage statistics at the bottom
-    root.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, flex_basis: Val::Px(0.0), justify_content: JustifyContent::FlexEnd, ..default() }).with_children(|middle| {
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_grow: 1.0,
+        flex_basis: Val::Px(0.0),
+        justify_content: JustifyContent::FlexEnd,
+        ..default()
+    })
+    .with_children(|middle| {
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         middle.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "STAGE FIGURES", 12.0, ui_kit::ACCENT);
             let reports = vehicle.stage_reports();
-            panel.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(8.0), ..default() }).with_children(|row| {
-                for report in &reports {
-                    let (mut node, bg, border) = ui_kit::card_node(Val::Px(0.0), ui_kit::ACCENT);
-                    node.flex_grow = 1.0;
-                    node.flex_basis = Val::Px(0.0);
-                    node.row_gap = Val::Px(3.0);
-                    row.spawn((node, bg, border)).with_children(|card| {
-                        card.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|top| {
-                            ui_kit::label(top, format!("STAGE {}", report.index + 1), 11.0, ui_kit::TEXT);
-                            let twr_color = if report.thrust_n <= 0.0 {
-                                ui_kit::NEUTRAL
-                            } else if report.index == 0 && report.twr_at_ignition < 1.0 {
-                                ui_kit::BAD
-                            } else if report.index == 0 && report.twr_at_ignition < 1.3 {
-                                ui_kit::WARN
-                            } else {
-                                ui_kit::GOOD
-                            };
-                            ui_kit::chip(top, format!("TWR {:.2}", report.twr_at_ignition), twr_color);
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for report in &reports {
+                        let (mut node, bg, border) = ui_kit::card_node(Val::Px(0.0), ui_kit::ACCENT);
+                        node.flex_grow = 1.0;
+                        node.flex_basis = Val::Px(0.0);
+                        node.row_gap = Val::Px(3.0);
+                        row.spawn((node, bg, border)).with_children(|card| {
+                            card.spawn(Node {
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|top| {
+                                ui_kit::label(top, format!("STAGE {}", report.index + 1), 11.0, ui_kit::TEXT);
+                                let twr_color = if report.thrust_n <= 0.0 {
+                                    ui_kit::NEUTRAL
+                                } else if report.index == 0 && report.twr_at_ignition < 1.0 {
+                                    ui_kit::BAD
+                                } else if report.index == 0 && report.twr_at_ignition < 1.3 {
+                                    ui_kit::WARN
+                                } else {
+                                    ui_kit::GOOD
+                                };
+                                ui_kit::chip(top, format!("TWR {:.2}", report.twr_at_ignition), twr_color);
+                            });
+                            ui_kit::label(
+                                card,
+                                format!(
+                                    "Mass {:.0} kg (carries {:.0} kg)",
+                                    report.stage_wet_mass_kg, report.ignition_mass_kg
+                                ),
+                                10.0,
+                                ui_kit::TEXT_DIM,
+                            );
+                            ui_kit::label(
+                                card,
+                                format!("Thrust {:.1} kN", report.thrust_n / 1000.0),
+                                10.0,
+                                ui_kit::TEXT_DIM,
+                            );
+                            let burn = report
+                                .burn_time_s
+                                .map_or("tank-fed".to_string(), |b| format!("{b:.0} s"));
+                            ui_kit::label(
+                                card,
+                                format!("Burn {burn} | dv {:.0} m/s", report.delta_v_ms),
+                                10.0,
+                                ui_kit::TEXT_DIM,
+                            );
                         });
-                        ui_kit::label(card, format!("Mass {:.0} kg (carries {:.0} kg)", report.stage_wet_mass_kg, report.ignition_mass_kg), 10.0, ui_kit::TEXT_DIM);
-                        ui_kit::label(card, format!("Thrust {:.1} kN", report.thrust_n / 1000.0), 10.0, ui_kit::TEXT_DIM);
-                        let burn = report.burn_time_s.map_or("tank-fed".to_string(), |b| format!("{b:.0} s"));
-                        ui_kit::label(card, format!("Burn {burn} | dv {:.0} m/s", report.delta_v_ms), 10.0, ui_kit::TEXT_DIM);
-                    });
-                }
-            });
-            ui_kit::label(panel, format!("Total mass {:.0} kg", vehicle.total_wet_mass_kg()), 11.0, ui_kit::TEXT);
+                    }
+                });
+            ui_kit::label(
+                panel,
+                format!("Total mass {:.0} kg", vehicle.total_wet_mass_kg()),
+                11.0,
+                ui_kit::TEXT,
+            );
             match vehicle.computer() {
                 Some(class) => ui_kit::label(
                     panel,
-                    format!("Computer {:?}: {} thread(s), {} blocks of memory", class, class.threads(), class.ram_blocks()),
+                    format!(
+                        "Computer {:?}: {} thread(s), {} blocks of memory",
+                        class,
+                        class.threads(),
+                        class.ram_blocks()
+                    ),
                     10.5,
                     ui_kit::TEXT_DIM,
                 ),
-                None => ui_kit::label(panel, "No flight computer: add one to be able to program the vehicle.", 10.5, ui_kit::WARN),
+                None => ui_kit::label(
+                    panel,
+                    "No flight computer: add one to be able to program the vehicle.",
+                    10.5,
+                    ui_kit::WARN,
+                ),
             }
             let blocks: Vec<&str> = vehicle.available_blocks().into_iter().collect();
-            ui_kit::label(panel, format!("Programming blocks unlocked: {}", blocks.join(", ").replace('_', " ")), 10.0, ui_kit::TEXT_DIM);
+            ui_kit::label(
+                panel,
+                format!("Programming blocks unlocked: {}", blocks.join(", ").replace('_', " ")),
+                10.0,
+                ui_kit::TEXT_DIM,
+            );
             let missing = vehicle.missing_research(&owned);
             if !missing.is_empty() {
-                ui_kit::label(panel, format!("Needs research: {}", missing.join(", ")), 10.0, ui_kit::WARN);
+                ui_kit::label(
+                    panel,
+                    format!("Needs research: {}", missing.join(", ")),
+                    10.0,
+                    ui_kit::WARN,
+                );
             }
             if let Err(issues) = vehicle.validate() {
                 for issue in issues.iter().take(4) {
                     ui_kit::label(panel, format!("- {issue}"), 10.0, Color::srgb(0.90, 0.60, 0.55));
                 }
             } else {
-                panel.spawn(Node::default()).with_children(|c| ui_kit::chip(c, "DESIGN VALID", ui_kit::GOOD));
+                panel
+                    .spawn(Node::default())
+                    .with_children(|c| ui_kit::chip(c, "DESIGN VALID", ui_kit::GOOD));
             }
         });
     });
 
     // Right: stage tree and selected part
-    root.spawn(Node { flex_direction: FlexDirection::Column, width: Val::Px(350.0), row_gap: Val::Px(10.0), ..default() }).with_children(|right| {
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        width: Val::Px(350.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|right| {
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         right.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "PARTS BY STAGE", 12.0, ui_kit::ACCENT);
             for (s, stage) in vehicle.stages.iter().enumerate() {
-                let marker = if s == session.active_stage { "  (receives new parts)" } else { "" };
+                let marker = if s == session.active_stage {
+                    "  (receives new parts)"
+                } else {
+                    ""
+                };
                 heading(panel, format!("STAGE {}{}", s + 1, marker));
                 if stage.parts.is_empty() {
                     ui_kit::label(panel, "empty", 10.0, ui_kit::TEXT_DIM);
                 }
                 for (p, part) in stage.parts.iter().enumerate() {
-                    let tone = if session.selected == Some((s, p)) { ButtonTone::Primary } else { ButtonTone::Ghost };
-                    ui_kit::button(panel, spec_summary(&part.spec), UiAction::Missile(MissileAction::Select { stage: s, part: p }), tone, Val::Percent(100.0));
+                    let tone = if session.selected == Some((s, p)) {
+                        ButtonTone::Primary
+                    } else {
+                        ButtonTone::Ghost
+                    };
+                    ui_kit::button(
+                        panel,
+                        spec_summary(&part.spec),
+                        UiAction::Missile(MissileAction::Select { stage: s, part: p }),
+                        tone,
+                        Val::Percent(100.0),
+                    );
                 }
             }
         });
@@ -606,7 +1220,12 @@ fn build_missile(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, sess
             ui_kit::label(panel, "SELECTED PART", 12.0, ui_kit::ACCENT);
             match session.selected_part() {
                 Some(part) => {
-                    ui_kit::label(panel, format!("{}  -  {}", part.id, spec_summary(&part.spec)), 11.0, ui_kit::TEXT);
+                    ui_kit::label(
+                        panel,
+                        format!("{}  -  {}", part.id, spec_summary(&part.spec)),
+                        11.0,
+                        ui_kit::TEXT,
+                    );
                     let params = missile::params_of(&part.spec);
                     if params.is_empty() {
                         ui_kit::label(panel, "This part has no adjustable setting.", 10.0, ui_kit::TEXT_DIM);
@@ -623,9 +1242,20 @@ fn build_missile(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, sess
                         line.push_str(&format!(" | thrust {:.1} kN", stats.thrust_n / 1000.0));
                     }
                     ui_kit::label(panel, line, 10.0, ui_kit::TEXT_DIM);
-                    ui_kit::button(panel, "REMOVE PART", UiAction::Missile(MissileAction::RemovePart), ButtonTone::Danger, Val::Percent(100.0));
+                    ui_kit::button(
+                        panel,
+                        "REMOVE PART",
+                        UiAction::Missile(MissileAction::RemovePart),
+                        ButtonTone::Danger,
+                        Val::Percent(100.0),
+                    );
                 }
-                None => ui_kit::label(panel, "Click a part in the list above to resize or remove it.", 10.5, ui_kit::TEXT_DIM),
+                None => ui_kit::label(
+                    panel,
+                    "Click a part in the list above to resize or remove it.",
+                    10.5,
+                    ui_kit::TEXT_DIM,
+                ),
             }
         });
     });
@@ -641,25 +1271,43 @@ fn build_project(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, desi
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(6.0),
             padding: UiRect::all(Val::Px(12.0)),
-            border: UiRect { top: Val::Px(3.0), ..default() },
+            border: UiRect {
+                top: Val::Px(3.0),
+                ..default()
+            },
             border_radius: BorderRadius::all(Val::Px(7.0)),
             ..default()
         },
         BackgroundColor(ui_kit::PANEL),
         BorderColor::all(ui_kit::ACCENT),
-        Interaction::None,
+        UiInteraction::None,
     ))
     .with_children(|card| {
         match campus.selected_contract() {
             Some(active) => {
                 let (status, color) = phase_chip(active.phase);
-                card.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|top| {
+                card.spawn(Node {
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|top| {
                     ui_kit::label(top, "CURRENT PROJECT", 11.0, ui_kit::TEXT_DIM);
                     ui_kit::chip(top, status, color);
                 });
-                ui_kit::label(card, format!("#{:04}  {}", active.offer.id, active.offer.title), 13.0, ui_kit::TEXT);
+                ui_kit::label(
+                    card,
+                    format!("#{:04}  {}", active.offer.id, active.offer.title),
+                    13.0,
+                    ui_kit::TEXT,
+                );
                 if active.snapshot.is_none() {
-                    ui_kit::label(card, "Submit your design to start collecting evidence.", 10.0, ui_kit::TEXT_DIM);
+                    ui_kit::label(
+                        card,
+                        "Submit your design to start collecting evidence.",
+                        10.0,
+                        ui_kit::TEXT_DIM,
+                    );
                 }
                 dossier_rows(card, active, design, true);
                 for issue in active.last_issues.iter().take(3) {
@@ -668,7 +1316,12 @@ fn build_project(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, desi
             }
             None => {
                 ui_kit::label(card, "NO ACTIVE PROJECT", 12.0, ui_kit::TEXT_DIM);
-                ui_kit::label(card, "Accept a contract in the Contract Office to give your design a purpose.", 10.5, ui_kit::TEXT_DIM);
+                ui_kit::label(
+                    card,
+                    "Accept a contract in the Contract Office to give your design a purpose.",
+                    10.5,
+                    ui_kit::TEXT_DIM,
+                );
             }
         }
         let profile = &campus.instrument_profile;
@@ -676,17 +1329,40 @@ fn build_project(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, desi
             card,
             format!(
                 "Profile: {} W | {} GB | uptime {}% | data {}% | {}..{} C",
-                profile.power_draw_w, profile.storage_gb, profile.uptime_percent, profile.data_completeness_percent, profile.operating_min_c, profile.operating_max_c
+                profile.power_draw_w,
+                profile.storage_gb,
+                profile.uptime_percent,
+                profile.data_completeness_percent,
+                profile.operating_min_c,
+                profile.operating_max_c
             ),
             9.5,
             ui_kit::TEXT_DIM,
         );
-        card.spawn(Node { column_gap: Val::Px(6.0), margin: UiRect { top: Val::Px(2.0), ..default() }, ..default() }).with_children(|buttons| {
+        card.spawn(Node {
+            column_gap: Val::Px(6.0),
+            margin: UiRect {
+                top: Val::Px(2.0),
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|buttons| {
             if campus.selected_contract().is_some() {
                 ui_kit::button_row_item(buttons, "SUBMIT DESIGN", UiAction::SubmitDesign, ButtonTone::Primary);
-                ui_kit::button_row_item(buttons, "COMPUTE", UiAction::Navigate(CampusView::Computation), ButtonTone::Secondary);
+                ui_kit::button_row_item(
+                    buttons,
+                    "COMPUTE",
+                    UiAction::Navigate(CampusView::Computation),
+                    ButtonTone::Secondary,
+                );
             }
-            ui_kit::button_row_item(buttons, "CONTRACT OFFICE", UiAction::Navigate(CampusView::Contracts), ButtonTone::Secondary);
+            ui_kit::button_row_item(
+                buttons,
+                "CONTRACT OFFICE",
+                UiAction::Navigate(CampusView::Contracts),
+                ButtonTone::Secondary,
+            );
         });
     });
 }
@@ -710,7 +1386,16 @@ fn signature(kind: BoardKind, campus: &CampusState, design: &str, missile: &Miss
         let active: Vec<String> = campus
             .accepted_contracts
             .iter()
-            .map(|a| format!("{}:{:?}:{}:{}:{}", a.offer.id, a.phase, a.evidence.len(), a.last_issues.len(), a.snapshot.is_some()))
+            .map(|a| {
+                format!(
+                    "{}:{:?}:{}:{}:{}",
+                    a.offer.id,
+                    a.phase,
+                    a.evidence.len(),
+                    a.last_issues.len(),
+                    a.snapshot.is_some()
+                )
+            })
             .collect();
         let offers: Vec<u32> = campus.available_contracts.iter().map(|o| o.id).collect();
         format!(
@@ -724,10 +1409,21 @@ fn signature(kind: BoardKind, campus: &CampusState, design: &str, missile: &Miss
         )
     };
     match kind {
-        BoardKind::Island => format!("{}|{}|{}", campus.credits, campus.accepted_contracts.len(), campus.completed_contracts.len()),
+        BoardKind::Island => format!(
+            "{}|{}|{}",
+            campus.credits,
+            campus.accepted_contracts.len(),
+            campus.completed_contracts.len()
+        ),
         BoardKind::Contracts => contracts(),
         BoardKind::Research => format!("{:?}|{}|{}", campus.research, campus.credits, campus.day),
-        BoardKind::Missile => format!("{:?}|{:?}|{}|{:?}", missile.vehicle, (missile.selected, missile.active_stage), campus.credits, campus.research),
+        BoardKind::Missile => format!(
+            "{:?}|{:?}|{}|{:?}",
+            missile.vehicle,
+            (missile.selected, missile.active_stage),
+            campus.credits,
+            campus.research
+        ),
         BoardKind::Project => format!("{}|{:?}", contracts(), campus.instrument_profile),
     }
 }
@@ -784,7 +1480,11 @@ pub(crate) fn update_toast(
     }
     state.1 = (state.1 - time.delta_secs()).max(0.0);
     if let Ok(mut text) = text.single_mut() {
-        let wanted = if state.1 > 0.0 { format!("> {}", state.0) } else { String::new() };
+        let wanted = if state.1 > 0.0 {
+            format!("> {}", state.0)
+        } else {
+            String::new()
+        };
         if text.0 != wanted {
             text.0 = wanted;
         }
@@ -822,7 +1522,7 @@ pub(crate) fn friendly_capabilities(message: &str) -> String {
 
 /// Actions that need resources `interface::handle_actions` does not have (revisions, help toggle).
 pub(crate) fn handle_extra_actions(
-    buttons: Query<(&Interaction, &UiActionButton), Changed<Interaction>>,
+    buttons: Query<(&UiInteraction, &UiActionButton), Changed<UiInteraction>>,
     keys: Res<ButtonInput<KeyCode>>,
     sketch: Res<PolygonSketchSession>,
     inspector: Res<InspectorState>,
@@ -833,7 +1533,7 @@ pub(crate) fn handle_extra_actions(
     mut missile: ResMut<MissileSession>,
 ) {
     for (interaction, button) in &buttons {
-        if *interaction != Interaction::Pressed {
+        if *interaction != UiInteraction::Pressed {
             continue;
         }
         match button.0 {

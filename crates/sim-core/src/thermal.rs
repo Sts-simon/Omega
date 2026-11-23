@@ -1,6 +1,6 @@
 use crate::SimulationMetadata;
-use rayon::prelude::*;
 use rayon::ThreadPool;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -34,9 +34,7 @@ impl Material {
 
     fn validate(&self) -> Result<(), ThermalError> {
         if self.name.trim().is_empty() {
-            return Err(ThermalError::InvalidInput(
-                "Material names cannot be empty".to_string(),
-            ));
+            return Err(ThermalError::InvalidInput("Material names cannot be empty".to_string()));
         }
         for (name, value) in [
             ("thermal conductivity", self.conductivity_w_m_k),
@@ -270,9 +268,7 @@ impl ThermalConfig {
         self.boundary_conditions.validate()?;
         if let Some(patch) = self.heat_patch {
             validate_absolute_temperature(patch.temperature_k, "Heat-patch temperature")?;
-            if patch.half_width_cells >= self.width / 2
-                || patch.half_height_cells >= self.height / 2
-            {
+            if patch.half_width_cells >= self.width / 2 || patch.half_height_cells >= self.height / 2 {
                 return Err(ThermalError::InvalidInput(
                     "Heat patch must fit inside the grid".to_string(),
                 ));
@@ -285,9 +281,7 @@ impl ThermalConfig {
                 "Cell volume is outside the supported numeric range".to_string(),
             ));
         }
-        let total_source_power_w = self.volumetric_heat_source_w_m3
-            * cell_volume_m3
-            * cell_count as f64;
+        let total_source_power_w = self.volumetric_heat_source_w_m3 * cell_volume_m3 * cell_count as f64;
         if !total_source_power_w.is_finite() {
             return Err(ThermalError::InvalidInput(
                 "Total heat-source power is outside the supported numeric range".to_string(),
@@ -305,30 +299,25 @@ impl ThermalConfig {
                     conductance_sum_w_per_k += self.horizontal_conductance(index, index - 1);
                 } else if self.boundary_conditions.left.fixed_temperature().is_some() {
                     conductance_sum_w_per_k +=
-                        2.0 * material.conductivity_w_m_k * self.thickness_m
-                            * self.cell_size_y_m / self.cell_size_x_m;
+                        2.0 * material.conductivity_w_m_k * self.thickness_m * self.cell_size_y_m / self.cell_size_x_m;
                 }
                 if x + 1 < self.width {
                     conductance_sum_w_per_k += self.horizontal_conductance(index, index + 1);
                 } else if self.boundary_conditions.right.fixed_temperature().is_some() {
                     conductance_sum_w_per_k +=
-                        2.0 * material.conductivity_w_m_k * self.thickness_m
-                            * self.cell_size_y_m / self.cell_size_x_m;
+                        2.0 * material.conductivity_w_m_k * self.thickness_m * self.cell_size_y_m / self.cell_size_x_m;
                 }
                 if y > 0 {
                     conductance_sum_w_per_k += self.vertical_conductance(index, index - self.width);
                 } else if self.boundary_conditions.top.fixed_temperature().is_some() {
                     conductance_sum_w_per_k +=
-                        2.0 * material.conductivity_w_m_k * self.thickness_m
-                            * self.cell_size_x_m / self.cell_size_y_m;
+                        2.0 * material.conductivity_w_m_k * self.thickness_m * self.cell_size_x_m / self.cell_size_y_m;
                 }
                 if y + 1 < self.height {
-                    conductance_sum_w_per_k +=
-                        self.vertical_conductance(index, index + self.width);
+                    conductance_sum_w_per_k += self.vertical_conductance(index, index + self.width);
                 } else if self.boundary_conditions.bottom.fixed_temperature().is_some() {
                     conductance_sum_w_per_k +=
-                        2.0 * material.conductivity_w_m_k * self.thickness_m
-                            * self.cell_size_x_m / self.cell_size_y_m;
+                        2.0 * material.conductivity_w_m_k * self.thickness_m * self.cell_size_x_m / self.cell_size_y_m;
                 }
 
                 let capacity_j_per_k = material.volumetric_heat_capacity() * cell_volume_m3;
@@ -337,8 +326,7 @@ impl ThermalConfig {
                         "Cell heat capacity is outside the supported numeric range".to_string(),
                     ));
                 }
-                maximum_rate_per_second = maximum_rate_per_second
-                    .max(conductance_sum_w_per_k / capacity_j_per_k);
+                maximum_rate_per_second = maximum_rate_per_second.max(conductance_sum_w_per_k / capacity_j_per_k);
             }
         }
         if !maximum_rate_per_second.is_finite() || maximum_rate_per_second <= 0.0 {
@@ -431,7 +419,9 @@ impl std::fmt::Display for ThermalError {
                 formatter,
                 "Time step {requested_s:.6e} s exceeds the safe explicit limit {maximum_s:.6e} s"
             ),
-            Self::NonPhysicalState(message) => write!(formatter, "Numerical solver stopped: {message}"),
+            Self::NonPhysicalState(message) => {
+                write!(formatter, "Numerical solver stopped: {message}")
+            }
             Self::Cancelled => write!(formatter, "Cancelled by user"),
         }
     }
@@ -502,37 +492,41 @@ impl ThermalCoefficients {
         let mut top_boundary_w_per_k = vec![0.0; width];
         let mut bottom_boundary_w_per_k = vec![0.0; width];
 
-        if matches!(config.boundary_conditions.left, BoundaryCondition::FixedTemperature { .. }) {
-            for y in 0..height {
+        if matches!(
+            config.boundary_conditions.left,
+            BoundaryCondition::FixedTemperature { .. }
+        ) {
+            for (y, boundary) in left_boundary_w_per_k.iter_mut().enumerate() {
                 let conductivity = config.material_at(y * width).conductivity_w_m_k;
-                left_boundary_w_per_k[y] =
-                    2.0 * conductivity * config.thickness_m * config.cell_size_y_m
-                        / config.cell_size_x_m;
+                *boundary = 2.0 * conductivity * config.thickness_m * config.cell_size_y_m / config.cell_size_x_m;
             }
         }
-        if matches!(config.boundary_conditions.right, BoundaryCondition::FixedTemperature { .. }) {
-            for y in 0..height {
+        if matches!(
+            config.boundary_conditions.right,
+            BoundaryCondition::FixedTemperature { .. }
+        ) {
+            for (y, boundary) in right_boundary_w_per_k.iter_mut().enumerate() {
                 let conductivity = config.material_at(y * width + width - 1).conductivity_w_m_k;
-                right_boundary_w_per_k[y] =
-                    2.0 * conductivity * config.thickness_m * config.cell_size_y_m
-                        / config.cell_size_x_m;
+                *boundary = 2.0 * conductivity * config.thickness_m * config.cell_size_y_m / config.cell_size_x_m;
             }
         }
-        if matches!(config.boundary_conditions.top, BoundaryCondition::FixedTemperature { .. }) {
-            for x in 0..width {
+        if matches!(
+            config.boundary_conditions.top,
+            BoundaryCondition::FixedTemperature { .. }
+        ) {
+            for (x, boundary) in top_boundary_w_per_k.iter_mut().enumerate() {
                 let conductivity = config.material_at(x).conductivity_w_m_k;
-                top_boundary_w_per_k[x] =
-                    2.0 * conductivity * config.thickness_m * config.cell_size_x_m
-                        / config.cell_size_y_m;
+                *boundary = 2.0 * conductivity * config.thickness_m * config.cell_size_x_m / config.cell_size_y_m;
             }
         }
-        if matches!(config.boundary_conditions.bottom, BoundaryCondition::FixedTemperature { .. }) {
+        if matches!(
+            config.boundary_conditions.bottom,
+            BoundaryCondition::FixedTemperature { .. }
+        ) {
             let row_start = (height - 1) * width;
-            for x in 0..width {
+            for (x, boundary) in bottom_boundary_w_per_k.iter_mut().enumerate() {
                 let conductivity = config.material_at(row_start + x).conductivity_w_m_k;
-                bottom_boundary_w_per_k[x] =
-                    2.0 * conductivity * config.thickness_m * config.cell_size_x_m
-                        / config.cell_size_y_m;
+                *boundary = 2.0 * conductivity * config.thickness_m * config.cell_size_x_m / config.cell_size_y_m;
             }
         }
 
@@ -570,11 +564,7 @@ impl ThermalCoefficients {
 }
 
 /// Runs the solver without cancellation. Progress is reported from 0 to 1.
-pub fn simulate<F>(
-    config: &ThermalConfig,
-    pool: &ThreadPool,
-    report_progress: F,
-) -> Result<ThermalResult, ThermalError>
+pub fn simulate<F>(config: &ThermalConfig, pool: &ThreadPool, report_progress: F) -> Result<ThermalResult, ThermalError>
 where
     F: FnMut(f32) + Send,
 {
@@ -677,8 +667,7 @@ where
                         let conductance = coefficients.horizontal_faces_w_per_k[face];
                         net_power_w += conductance * (current[index - 1] - temperature);
                     } else if let Some(boundary_k) = boundaries.left.fixed_temperature() {
-                        net_power_w += coefficients.left_boundary_w_per_k[y]
-                            * (boundary_k - temperature);
+                        net_power_w += coefficients.left_boundary_w_per_k[y] * (boundary_k - temperature);
                     }
 
                     if x + 1 < width {
@@ -686,8 +675,7 @@ where
                         let conductance = coefficients.horizontal_faces_w_per_k[face];
                         net_power_w += conductance * (current[index + 1] - temperature);
                     } else if let Some(boundary_k) = boundaries.right.fixed_temperature() {
-                        net_power_w += coefficients.right_boundary_w_per_k[y]
-                            * (boundary_k - temperature);
+                        net_power_w += coefficients.right_boundary_w_per_k[y] * (boundary_k - temperature);
                     }
 
                     if y > 0 {
@@ -695,8 +683,7 @@ where
                         let conductance = coefficients.vertical_faces_w_per_k[face];
                         net_power_w += conductance * (current[index - width] - temperature);
                     } else if let Some(boundary_k) = boundaries.top.fixed_temperature() {
-                        net_power_w += coefficients.top_boundary_w_per_k[x]
-                            * (boundary_k - temperature);
+                        net_power_w += coefficients.top_boundary_w_per_k[x] * (boundary_k - temperature);
                     }
 
                     if y + 1 < height {
@@ -704,17 +691,18 @@ where
                         let conductance = coefficients.vertical_faces_w_per_k[face];
                         net_power_w += conductance * (current[index + width] - temperature);
                     } else if let Some(boundary_k) = boundaries.bottom.fixed_temperature() {
-                        net_power_w += coefficients.bottom_boundary_w_per_k[x]
-                            * (boundary_k - temperature);
+                        net_power_w += coefficients.bottom_boundary_w_per_k[x] * (boundary_k - temperature);
                     }
 
-                    *value = temperature
-                        + dt * net_power_w / coefficients.capacity_j_per_k[index];
+                    *value = temperature + dt * net_power_w / coefficients.capacity_j_per_k[index];
                 }
             });
         });
 
-        if next.iter().any(|temperature| !temperature.is_finite() || *temperature <= 0.0) {
+        if next
+            .iter()
+            .any(|temperature| !temperature.is_finite() || *temperature <= 0.0)
+        {
             return Err(ThermalError::NonPhysicalState(
                 "temperature became non-finite or reached absolute zero".to_string(),
             ));
@@ -731,17 +719,13 @@ where
     let mean_temperature_k = stable_mean(&current);
     let final_energy_j = total_energy(&coefficients.capacity_j_per_k, &current);
     let boundary_energy_j = boundary_energy.value();
-    let energy_balance_error_j =
-        final_energy_j - initial_energy_j - source_energy_j - boundary_energy_j;
+    let energy_balance_error_j = final_energy_j - initial_energy_j - source_energy_j - boundary_energy_j;
     let energy_scale_j = initial_energy_j
         .abs()
         .max(source_energy_j.abs())
         .max(boundary_energy_j.abs())
         .max(1.0);
-    if !final_energy_j.is_finite()
-        || !boundary_energy_j.is_finite()
-        || !energy_balance_error_j.is_finite()
-    {
+    if !final_energy_j.is_finite() || !boundary_energy_j.is_finite() || !energy_balance_error_j.is_finite() {
         return Err(ThermalError::NonPhysicalState(
             "energy diagnostics are outside the supported numeric range".to_string(),
         ));
@@ -829,11 +813,7 @@ fn total_energy(capacity_j_per_k: &[f64], field: &[f64]) -> f64 {
     energy.value()
 }
 
-fn boundary_power_w(
-    config: &ThermalConfig,
-    coefficients: &ThermalCoefficients,
-    field: &[f64],
-) -> f64 {
+fn boundary_power_w(config: &ThermalConfig, coefficients: &ThermalCoefficients, field: &[f64]) -> f64 {
     let mut power = KahanSum::default();
     let width = config.width;
     let height = config.height;
@@ -844,9 +824,9 @@ fn boundary_power_w(
         }
     }
     if let Some(boundary_k) = config.boundary_conditions.right.fixed_temperature() {
-        for y in 0..height {
+        for (y, coefficient) in coefficients.right_boundary_w_per_k.iter().enumerate() {
             let index = y * width + width - 1;
-            power.add(coefficients.right_boundary_w_per_k[y] * (boundary_k - field[index]));
+            power.add(coefficient * (boundary_k - field[index]));
         }
     }
     if let Some(boundary_k) = config.boundary_conditions.top.fixed_temperature() {
@@ -856,11 +836,9 @@ fn boundary_power_w(
     }
     if let Some(boundary_k) = config.boundary_conditions.bottom.fixed_temperature() {
         let row_start = (height - 1) * width;
-        for x in 0..width {
+        for (x, coefficient) in coefficients.bottom_boundary_w_per_k.iter().enumerate() {
             let index = row_start + x;
-            power.add(
-                coefficients.bottom_boundary_w_per_k[x] * (boundary_k - field[index]),
-            );
+            power.add(coefficient * (boundary_k - field[index]));
         }
     }
     power.value()
@@ -904,10 +882,7 @@ mod tests {
         let result = simulate(&config, &pool(2), |_| {}).unwrap();
         assert!(result.diagnostics.boundary_energy_j.abs() < 1.0e-12);
         assert!(result.diagnostics.energy_balance_relative_error < 1.0e-10);
-        assert!(
-            (result.diagnostics.final_energy_j - result.diagnostics.initial_energy_j).abs()
-                < 1.0e-7
-        );
+        assert!((result.diagnostics.final_energy_j - result.diagnostics.initial_energy_j).abs() < 1.0e-7);
     }
 
     #[test]
@@ -920,7 +895,12 @@ mod tests {
             ..small_config()
         };
         let result = simulate(&config, &pool(2), |_| {}).unwrap();
-        assert!(result.final_temperature_k.iter().all(|value| (*value - 300.0).abs() < 1.0e-10));
+        assert!(
+            result
+                .final_temperature_k
+                .iter()
+                .all(|value| (*value - 300.0).abs() < 1.0e-10)
+        );
     }
 
     #[test]
@@ -969,7 +949,10 @@ mod tests {
         let one = simulate(&config, &pool(1), |_| {}).unwrap();
         let four = simulate(&config, &pool(4), |_| {}).unwrap();
         assert_eq!(one.final_temperature_k, four.final_temperature_k);
-        assert_eq!(one.diagnostics.energy_balance_error_j, four.diagnostics.energy_balance_error_j);
+        assert_eq!(
+            one.diagnostics.energy_balance_error_j,
+            four.diagnostics.energy_balance_error_j
+        );
     }
 
     #[test]
@@ -1006,10 +989,12 @@ mod tests {
         let result = simulate(&config, &pool(2), |_| {}).unwrap();
         let left_mean = (0..config.height)
             .map(|y| result.final_temperature_k[y * config.width])
-            .sum::<f64>() / config.height as f64;
+            .sum::<f64>()
+            / config.height as f64;
         let right_mean = (0..config.height)
             .map(|y| result.final_temperature_k[y * config.width + config.width - 1])
-            .sum::<f64>() / config.height as f64;
+            .sum::<f64>()
+            / config.height as f64;
         assert!(left_mean > right_mean);
         assert!(result.diagnostics.energy_balance_relative_error < 1.0e-9);
     }
@@ -1034,7 +1019,6 @@ mod tests {
         assert!(config.validate().is_ok());
     }
 
-
     #[test]
     fn uniform_volumetric_source_matches_the_analytical_temperature_rise() {
         let source = 100_000.0;
@@ -1050,9 +1034,13 @@ mod tests {
         let result = simulate(&config, &pool(2), |_| {}).unwrap();
         let material = &config.materials[0];
         let expected = config.initial_temperature_k
-            + source * result.simulated_time_s
-                / (material.density_kg_m3 * material.specific_heat_j_kg_k);
-        assert!(result.final_temperature_k.iter().all(|value| (*value - expected).abs() < 1.0e-9));
+            + source * result.simulated_time_s / (material.density_kg_m3 * material.specific_heat_j_kg_k);
+        assert!(
+            result
+                .final_temperature_k
+                .iter()
+                .all(|value| (*value - expected).abs() < 1.0e-9)
+        );
         assert!(result.diagnostics.energy_balance_relative_error < 1.0e-10);
     }
 
