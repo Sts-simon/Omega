@@ -353,6 +353,17 @@ mod tests {
     }
 
     #[test]
+    fn submission_requires_all_scores_and_research_capabilities() {
+        let offer = generate_contract_board(1, 1).remove(0);
+        let capabilities = offer.requirements.required_capabilities.clone();
+        assert!(offer.evaluate_submission(100, 100, 100, &capabilities).accepted);
+        assert!(!offer.evaluate_submission(0, 100, 100, &capabilities).accepted);
+        let missing = offer.evaluate_submission(100, 100, 100, &[]);
+        assert!(!missing.accepted);
+        assert_eq!(missing.missing_capabilities, offer.requirements.required_capabilities);
+    }
+
+    #[test]
     fn invalid_scores_are_rejected() {
         let mut offer = generate_contract_board(3, 1).remove(0);
         offer.requirements.min_trial_score = 101;
