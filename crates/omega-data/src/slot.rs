@@ -434,7 +434,7 @@ mod tests {
         let dir = temp_dir("crash");
         let slot = SaveSlot::new(dir.join("s"));
         slot.commit("0.30.1", &[("campaign.json", b"v1".to_vec())]).unwrap();
-        write_atomic(&slot.root().join("campaign.json"), b"v2-partial").unwrap();
+        write_atomic(&slot.root().join("campaign.json"), b"v2").unwrap();
         assert!(matches!(
             slot.read_verified("campaign.json"),
             Err(SlotError::Corrupt { .. })
