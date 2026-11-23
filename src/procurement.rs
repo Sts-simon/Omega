@@ -703,6 +703,31 @@ mod tests {
     }
 
     #[test]
+    fn restoring_the_exact_program_revalidates_evidence_and_allows_delivery() {
+        let mut procurement = office();
+        procurement.accept(0, 3, 1, &caps(&[]));
+        let original_program = program();
+        procurement.record_trial(trial(&vehicle(), &original_program, 1));
+
+        let edited_program = Program::single(vec![omega_rules::Block::Wait { seconds: 5.0 }]);
+        assert_eq!(
+            procurement.evidence_status(&vehicle(), &edited_program),
+            EvidenceStatus::Stale
+        );
+        assert!(procurement.deliver(4, Some(7), &vehicle(), &edited_program).is_err());
+        assert_eq!(procurement.active().len(), 1);
+
+        assert_eq!(
+            procurement.evidence_status(&vehicle(), &original_program),
+            EvidenceStatus::Current
+        );
+        let delivery = procurement.deliver(4, Some(7), &vehicle(), &original_program).unwrap();
+        assert_eq!(delivery.reward, 9_000);
+        assert!(procurement.active().is_empty());
+        assert_eq!(procurement.completed().len(), 1);
+    }
+
+    #[test]
     fn editing_the_program_and_late_delivery_are_refused() {
         let mut procurement = office();
         procurement.accept(0, 3, 1, &caps(&[]));
