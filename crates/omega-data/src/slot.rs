@@ -415,7 +415,10 @@ mod tests {
         let slot = SaveSlot::new(dir.join("s"));
         slot.commit("0.30.1", &[("campaign.json", b"v1".to_vec())]).unwrap();
         write_atomic(&slot.root().join("campaign.json"), b"v2-partial").unwrap();
-        assert!(matches!(slot.read_verified("campaign.json"), Err(SlotError::Corrupt { .. })));
+        assert!(matches!(
+            slot.read_verified("campaign.json"),
+            Err(SlotError::Corrupt { .. })
+        ));
         assert_eq!(fs::read(slot.root().join("campaign.json.bak")).unwrap(), b"v1");
         let _ = fs::remove_dir_all(dir);
     }
