@@ -441,7 +441,7 @@ mod tests {
         let legacy = dir.join("saves");
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("campaign.json"), b"{\"credits\":1}").unwrap();
-        fs::write(legacy.join("assembly.json"), b"{\"parts\":[]}".to_vec()).unwrap();
+        fs::write(legacy.join("assembly.json"), b"{\"parts\":[]}").unwrap();
         let slot = SaveSlot::new(dir.join("slot_1"));
         let manifest = slot.import_legacy(&legacy, "0.30.1").unwrap();
         assert_eq!(manifest.files.len(), 2);
