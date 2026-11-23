@@ -165,7 +165,9 @@ impl SaveSlot {
         }
 
         let previous = self.read_manifest()?;
-        if previous.is_some() && let Some(problem) = self.verify_all()?.into_iter().next() {
+        if previous.is_some()
+            && let Some(problem) = self.verify_all()?.into_iter().next()
+        {
             return Err(problem);
         }
         let revision = match previous.as_ref() {
