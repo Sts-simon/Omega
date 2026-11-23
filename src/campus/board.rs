@@ -197,7 +197,7 @@ fn build_island(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, procu
         ),
         (
             "TRIALS",
-            "NEW",
+            "F5",
             "Fly the vehicle and its program: four plots, events, anomalies, seeded batches and A/B comparison.",
             CampusView::Trials,
             Color::srgb(0.90, 0.55, 0.35),

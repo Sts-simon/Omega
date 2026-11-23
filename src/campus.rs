@@ -29,17 +29,6 @@ pub enum FacilityKind {
     Programming,
 }
 
-impl FacilityKind {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Contracts => "CONTRACT OFFICE",
-            Self::Construction => "MISSILE WORKSHOP",
-            Self::Research => "RESEARCH CENTRE",
-            Self::Programming => "PROGRAM EDITOR",
-        }
-    }
-}
-
 #[derive(Component)]
 pub struct BuildingVisual {
     pub facility: FacilityKind,
@@ -190,14 +179,38 @@ pub fn persist_campaign(mut campus: ResMut<CampusState>) {
     }
 }
 
+fn view_for_shortcut(key: KeyCode) -> Option<CampusView> {
+    match key {
+        KeyCode::F1 => Some(CampusView::Contracts),
+        KeyCode::F2 => Some(CampusView::Missile),
+        KeyCode::F3 => Some(CampusView::Research),
+        KeyCode::F4 => Some(CampusView::Program),
+        KeyCode::F5 => Some(CampusView::Trials),
+        _ => None,
+    }
+}
+
+fn enter_view(campus: &mut CampusState, view: CampusView) {
+    campus.view = view;
+    campus.message = match view {
+        CampusView::Island => "Returned to the island",
+        CampusView::Contracts => "Opened the contract office",
+        CampusView::Missile => "Opened the missile workshop",
+        CampusView::Program => "Opened the missile program editor",
+        CampusView::Trials => "Opened the trial range",
+        CampusView::Research => "Opened the research centre",
+    }
+    .to_string();
+}
+
 fn enter_facility(campus: &mut CampusState, facility: FacilityKind) {
-    campus.view = match facility {
+    let view = match facility {
         FacilityKind::Contracts => CampusView::Contracts,
         FacilityKind::Construction => CampusView::Missile,
         FacilityKind::Research => CampusView::Research,
         FacilityKind::Programming => CampusView::Program,
     };
-    campus.message = format!("Entered {}", facility.label());
+    enter_view(campus, view);
 }
 
 /// Accept an offer from the missile contract office. Shared by the board and the number keys.
@@ -253,14 +266,11 @@ pub fn handle_input(
 
     match campus.view {
         CampusView::Island => {
-            for (key, facility) in [
-                (KeyCode::F1, FacilityKind::Contracts),
-                (KeyCode::F2, FacilityKind::Construction),
-                (KeyCode::F3, FacilityKind::Research),
-                (KeyCode::F4, FacilityKind::Programming),
-            ] {
-                if keys.just_pressed(key) {
-                    enter_facility(&mut campus, facility);
+            for key in [KeyCode::F1, KeyCode::F2, KeyCode::F3, KeyCode::F4, KeyCode::F5] {
+                if keys.just_pressed(key)
+                    && let Some(view) = view_for_shortcut(key)
+                {
+                    enter_view(&mut campus, view);
                     return;
                 }
             }
@@ -365,6 +375,16 @@ mod tests {
             day: 1,
             dirty: false,
         }
+    }
+
+    #[test]
+    fn every_main_view_has_a_matching_function_key() {
+        assert_eq!(view_for_shortcut(KeyCode::F1), Some(CampusView::Contracts));
+        assert_eq!(view_for_shortcut(KeyCode::F2), Some(CampusView::Missile));
+        assert_eq!(view_for_shortcut(KeyCode::F3), Some(CampusView::Research));
+        assert_eq!(view_for_shortcut(KeyCode::F4), Some(CampusView::Program));
+        assert_eq!(view_for_shortcut(KeyCode::F5), Some(CampusView::Trials));
+        assert_eq!(view_for_shortcut(KeyCode::F6), None);
     }
 
     #[test]
