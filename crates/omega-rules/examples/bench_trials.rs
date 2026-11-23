@@ -1,4 +1,4 @@
-use omega_rules::flight::{simulate, FlightConfig};
+use omega_rules::flight::{FlightConfig, simulate};
 use omega_rules::program::{Block, Program};
 use omega_rules::vehicle::{ComputerClass, Part, PartSpec, Stage, Vehicle};
 use std::hint::black_box;
@@ -36,7 +36,10 @@ fn main() {
     let program = Program::single(vec![Block::IgniteStage { stage: 0 }]);
 
     for seed in 0..WARMUP_RUNS {
-        let config = FlightConfig { seed, ..FlightConfig::default() };
+        let config = FlightConfig {
+            seed,
+            ..FlightConfig::default()
+        };
         black_box(simulate(&vehicle, &program, config).expect("valid benchmark input"));
     }
 
@@ -55,5 +58,8 @@ fn main() {
     println!("measured runs: {MEASURED_RUNS}");
     println!("elapsed: {:.3} s", elapsed.as_secs_f64());
     println!("average: {nanos_per_run} ns/run");
-    println!("average samples/run: {:.1}", total_samples as f64 / MEASURED_RUNS as f64);
+    println!(
+        "average samples/run: {:.1}",
+        total_samples as f64 / MEASURED_RUNS as f64
+    );
 }
