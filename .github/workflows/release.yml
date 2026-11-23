@@ -51,7 +51,7 @@ jobs:
           install -m 0644 README.md LICENSE "dist/$PACKAGE/"
           install -m 0644 docs/VISION_MISSILES.md "dist/$PACKAGE/"
           tar -C dist -czf "dist/$PACKAGE.tar.gz" "$PACKAGE"
-          sha256sum "dist/$PACKAGE.tar.gz" > "dist/$PACKAGE.tar.gz.sha256"
+          (cd dist && sha256sum "$PACKAGE.tar.gz" > "$PACKAGE.tar.gz.sha256")
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
