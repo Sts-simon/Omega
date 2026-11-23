@@ -1,3 +1,12 @@
+## Unreleased — Missile program editor (lot 1 of `docs/ROADMAP_OMEGA.md`)
+- **New `program_editor.rs` and PROGRAM tab (`F4`):** the onboard program is edited as parallel threads of the seven blocks of `omega-rules::program`. The palette is driven by the hardware actually fitted to the vehicle, so `hold speed` needs a pitot tube, `hold pressure` a barometer, `lock target` a radar and `separate stage` a second stage.
+- Live thread and memory meters against the flight computer class; the editor refuses a block when the computer memory or the parallel-thread limit is reached, and names the missing hardware otherwise.
+- Blocks can be appended to the selected thread, selected, tuned with `-` / `+` (wait, stage number, throttle, speed, pressure), moved up or down and removed. Validation runs on every edit and reports the thread and block at fault.
+- The program is persisted to `programs/missile.json` through the save slot on every change, reloaded at startup, and carries a content hash ready to bind trial evidence.
+- The 0.6 chamber sequencer remains available as the **SEQUENCER** tab, now explicitly labelled legacy in its header.
+- Also merged: abstract military contract rules from `feature/0.29.0-military-contracts` (`omega-rules::contracts`: mission and vehicle families, requirements, offer generation, phases, submission evaluation). Its capability test depended on a seeded difficulty roll; it now pins the capability instead.
+- Tests: application 129, `omega-data` 10, `omega-rules` 56, `omega-sim-core` 71; all pass. The editor is covered by 8 new unit tests. Not verified on screen.
+
 ## Unreleased — Project renamed to Omega
 - Renamed the Cargo package and binary from `aerolab` to `omega`, and the workspace crates from `aerolab-sim-core`, `aerolab-data` and `aerolab-rules` to `omega-sim-core`, `omega-data` and `omega-rules` (the last two directories moved to `crates/omega-data` and `crates/omega-rules`).
 - Renamed the worker-thread environment variable `AEROLAB_WORKER_THREADS` to `OMEGA_WORKER_THREADS`.

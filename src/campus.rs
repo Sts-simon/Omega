@@ -63,6 +63,8 @@ pub enum CampusView {
     Construction,
     /// Missile workshop (staged, resizable parts).
     Missile,
+    /// Onboard missile program editor.
+    Program,
     Research,
     Programming,
     Computation,
@@ -942,6 +944,7 @@ impl CampusState {
             CampusView::Contracts => "Opened the contract office".to_string(),
             CampusView::Construction => "Opened the legacy assembly bench".to_string(),
             CampusView::Missile => "Opened the missile workshop".to_string(),
+            CampusView::Program => "Opened the missile program editor".to_string(),
             CampusView::Research => "Opened the research centre".to_string(),
             CampusView::Programming => "Opened the programming studio".to_string(),
             CampusView::Computation => "Opened the computation laboratory".to_string(),
@@ -1325,7 +1328,11 @@ pub fn handle_input(
                 campus.submit_design(&design);
             }
         }
-        CampusView::Research | CampusView::Programming | CampusView::Computation | CampusView::Missile => {}
+        CampusView::Research
+        | CampusView::Programming
+        | CampusView::Computation
+        | CampusView::Missile
+        | CampusView::Program => {}
     }
 }
 
@@ -1538,7 +1545,7 @@ fn enter_facility(campus: &mut CampusState, facility: FacilityKind) {
         FacilityKind::Contracts => CampusView::Contracts,
         FacilityKind::Construction => CampusView::Missile,
         FacilityKind::Research => CampusView::Research,
-        FacilityKind::Programming => CampusView::Programming,
+        FacilityKind::Programming => CampusView::Program,
         FacilityKind::Computation => CampusView::Computation,
     };
     campus.message = format!("Entered {}", facility.label());
@@ -1769,13 +1776,13 @@ pub fn update_hud(
                 )
             }
         }
-        CampusView::Missile => String::new(),
+        CampusView::Missile | CampusView::Program => String::new(),
         CampusView::Research => format!(
             "OMEGA | RESEARCH CENTRE\n\nTECHNOLOGY DEPARTMENTS\n\nVEHICLE FAMILIES\nStructural concepts, configurations and design envelopes.\n\nMATERIALS\nDensity, stiffness, thermal resistance and durability.\n\nSCIENTIFIC SENSORS\nEnvironmental measurement, sampling and data quality.\n\nEMBEDDED COMPUTING\nProcessing capacity, memory and program complexity.\n\nMANUFACTURING\nProcesses, tolerances and production methods.\n\nResearch progression and persistent unlocks are planned for version 0.25.\n\n{}",
             campus.message
         ),
         CampusView::Programming => format!(
-            "OMEGA | PROGRAMMING STUDIO\n\nVISUAL SEQUENCE EDITOR\nBuild event-driven programs using start, delay, read-data, record, condition and repeat blocks.\n\nF6: open / close the visual editor\nThe sandboxed runtime executes abstract measurement and data-processing sequences only.\n\n{}",
+            "OMEGA | LEGACY SEQUENCER\n\nVISUAL SEQUENCE EDITOR (0.6 prototype)\nBuild event-driven programs using start, delay, read-data, record, condition and repeat blocks.\n\nF6: open / close the visual editor\nThe sandboxed runtime executes abstract measurement and data-processing sequences only.\nThe missile program editor is the PROGRAM tab.\n\n{}",
             campus.message
         ),
         CampusView::Computation => {

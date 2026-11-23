@@ -1,5 +1,9 @@
 # Omega — Research Island
 
+[![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-0.26.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.26.0)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
+
 **Version 0.26.0** — a Rust + Bevy engineering sandbox shaped like a fictional island research
 campus. You build a staged missile in a 3D workshop, unlock parts through a research tree that
 advances with a day clock, and queue scientific studies that run on background worker threads.
@@ -63,6 +67,22 @@ workspace folder are ignored.
 - The vehicle is saved to `designs/vehicle.json` on every change and reloaded at startup. Saved
   parts are validated on load; invalid parts are rejected.
 
+### Missile program editor (playable, 0.27 work)
+
+- The **PROGRAM** tab (`F4`) composes the onboard program as parallel threads of the seven blocks of
+  `omega-rules::program`. The palette enables only what the fitted hardware unlocks: pitot tube →
+  hold speed, barometer → hold pressure, radar → lock target, and a second stage → separate.
+- Live meters compare threads and blocks with the flight computer class (1/8, 4/16, 8/32). Every edit
+  is validated immediately and each issue names the thread and block at fault, or the missing
+  hardware.
+- Blocks are appended to the selected thread, selected, moved up or down, tuned with `-` / `+`
+  (wait, stage number, throttle, speed, pressure) and removed. `Lock target` has no value and must
+  close its thread.
+- The program is saved to `programs/missile.json` on every change, reloaded at startup, and shown
+  with a content hash ready to bind trial evidence. Blocks are refused when the computer memory or
+  the parallel-thread limit is reached.
+- The 0.6 chamber sequencer is now the **SEQUENCER** tab, explicitly labelled legacy.
+
 ### Legacy civil loop (playable, transitional)
 
 - Contract Office: five randomized civilian/scientific domains, one offer each, with unit
@@ -76,8 +96,8 @@ workspace folder are ignored.
   mouse picking, translate/rotate gizmos, numeric inspector, movement grid, parent-child metadata
   links, in-memory undo/redo, JSON persistence, design revisions, polygon sketch with vertex
   editing, and the instrument-profile editor.
-- Programming Studio: the 0.6 visual sequence editor (chamber demonstrator) remains the only
-  program editor. Computation Centre: thermal finite-volume study, civil truss study, mesh thermal
+- Legacy sequencer: the 0.6 visual sequence editor (chamber demonstrator) is kept as the
+  SEQUENCER tab. Computation Centre: thermal finite-volume study, civil truss study, mesh thermal
   studies from the assembly or the polygon sketch (optionally locally refined), field test, HTML/SVG
   report opening and cancellation.
 
@@ -93,10 +113,9 @@ workspace folder are ignored.
 
 ## Not implemented in 0.26.0
 
-- **Missile programming is not editable in the game.** The Programming Studio still runs the 0.6
-  chamber sequencer. There is no block palette driven by installed hardware, no thread view, no
-  computer limit meters, and the seven missile blocks are exercised only by tests in
-  `omega-rules::program`.
+- **Programs are not part of a contract yet.** The program editor exists, but no contract, trial or
+  dossier consumes a program: the missile program is not part of the evidence and there is still no
+  plan-delivery path.
 - **No trial screen.** `omega-rules::flight` (seeded integration with events, anomalies and a lock
   roll) is headless only: no graphs, anomaly display, seeds, batch trials or design comparison. The
   `analysis:monte_carlo` grant exists but nothing consumes it.
@@ -152,22 +171,22 @@ detected logical CPUs minus one, capped at 16; override with `OMEGA_WORKER_THREA
 ## Interface and controls
 
 The top bar switches views: **ISLAND**, **CONTRACTS**, **WORKSHOP** (missile workshop), **RESEARCH**,
-**PROGRAMMING**, **COMPUTE**, **LEGACY BENCH**. The right side of the bar shows the message lane and
+**PROGRAM** (missile program), **COMPUTE**, **SEQUENCER** (legacy 0.6 editor), **LEGACY BENCH**. The
+right side of the bar shows the message lane and
 `DAY n | credits | active projects | completed`. The island shows five facility cards; clicking a
 card opens it.
 
 | Input | Action |
 |---|---|
 | `F1` | Contract Office |
-| `F2` | Legacy assembly bench |
+| `F2` | Missile workshop |
 | `F3` | Research Centre |
-| `F4` | Programming Studio |
+| `F4` | Missile program editor |
 | `F5` | Computation Centre |
 | `Escape` | Return to the island (closes the profile editor or an open editor first) |
 
-`WORKSHOP` (missile) has no keyboard shortcut: use the navigation bar or the island card. The island
-card for the missile workshop prints an `F2` hint, but `F2` actually opens the legacy bench — a known
-UI inconsistency.
+The legacy assembly bench and the legacy sequencer have no keyboard shortcut: use the navigation bar
+(`LEGACY BENCH`, `SEQUENCER`) or the active-project card.
 
 ### Missile workshop
 
@@ -245,7 +264,8 @@ saves/slot_1/
   designs/polygon-sketch.json   legacy polygon sketch
   designs/revisions.json        legacy design revisions
   designs/vehicle.json          missile vehicle (0.26)
-  programs/lab_sequence.json    chamber sequence program
+  programs/missile.json         missile program (0.27)
+  programs/lab_sequence.json    chamber sequence program (legacy)
 ```
 
 Writes are atomic (temporary file, fsync, rename) and a damaged file is reported instead of loaded,
@@ -262,6 +282,7 @@ src/
   campus/board.rs      card boards: island, contracts, research, missile workshop, project
   campus/verification.rs  hash-bound evidence and dossier
   missile.rs           missile workshop session, parts, stages, 3D stack
+  program_editor.rs    missile program session, validation, persistence
   interface.rs         navigation bar, tool shelves, UiAction dispatch
   save.rs              SaveSlot access and 0.21 import
   ui_kit.rs            UI primitives (cards, chips, buttons, palette)

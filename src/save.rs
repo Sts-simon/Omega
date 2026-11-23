@@ -18,6 +18,7 @@ pub enum SaveFile {
     Assembly,
     PolygonSketch,
     Program,
+    MissileProgram,
     Revisions,
     Vehicle,
 }
@@ -29,6 +30,7 @@ impl SaveFile {
             Self::Assembly => "designs/assembly.json",
             Self::PolygonSketch => "designs/polygon-sketch.json",
             Self::Program => "programs/lab_sequence.json",
+            Self::MissileProgram => "programs/missile.json",
             Self::Revisions => "designs/revisions.json",
             Self::Vehicle => "designs/vehicle.json",
         }

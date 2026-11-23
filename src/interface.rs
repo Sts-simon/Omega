@@ -59,6 +59,7 @@ pub(crate) enum UiAction {
     RestoreRevision,
     ToggleHelp,
     Missile(crate::missile::MissileAction),
+    Program(crate::program_editor::ProgramAction),
     StartResearch(usize),
     NextDay,
 }
@@ -121,7 +122,8 @@ pub fn setup(mut commands: Commands) {
         add_nav_button(parent, "CONTRACTS", CampusView::Contracts);
         add_nav_button(parent, "WORKSHOP", CampusView::Missile);
         add_nav_button(parent, "RESEARCH", CampusView::Research);
-        add_nav_button(parent, "PROGRAMMING", CampusView::Programming);
+        add_nav_button(parent, "PROGRAM", CampusView::Program);
+        add_nav_button(parent, "SEQUENCER", CampusView::Programming);
         add_nav_button(parent, "COMPUTE", CampusView::Computation);
         add_nav_button(parent, "LEGACY BENCH", CampusView::Construction);
         // Status messages ("Opened the contract office", "Dossier rejected: ...") live in the bar.
@@ -496,6 +498,9 @@ pub fn handle_actions(
             UiAction::RefreshContracts => campus.ui_refresh_contracts(),
             UiAction::AcceptOffer(index) => campus.ui_accept_offer(index),
             UiAction::DeliverContract => campus.ui_deliver_selected(&design),
+            // Missile workshop and program actions are owned by `campus::handle_extra_actions`,
+            // which also has the research capabilities and the vehicle.
+            UiAction::Program(_) => {}
             UiAction::AddPanel => design.add_part(PartKind::Panel),
             UiAction::AddBeam => design.add_part(PartKind::Beam),
             UiAction::AddEnclosure => design.add_part(PartKind::Enclosure),

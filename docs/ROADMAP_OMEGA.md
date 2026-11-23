@@ -86,6 +86,12 @@ leverage lot, because the rules are already written and tested but unreachable.
 leaving the interface; an invalid program explains why; save and reload work; at least 8 tests cover
 the editing logic.
 
+**Status.** Done in the working tree: `program_editor.rs` behind the PROGRAM tab (`F4`), palette
+driven by the installed hardware, live thread and memory meters, per-block tuning and reordering,
+validation naming the thread and block, `programs/missile.json` persistence, content hash, and the
+0.6 sequencer demoted to a legacy SEQUENCER tab. Covered by 8 unit tests. Not yet verified on
+screen, and no contract or trial consumes a program yet (lot 3).
+
 ### Lot 2 — Trial screen (0.28)
 
 **Purpose.** Give the design a visible consequence. `omega-rules::flight` already produces complete

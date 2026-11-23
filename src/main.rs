@@ -3,6 +3,7 @@ mod design;
 mod interface;
 mod jobs;
 mod missile;
+mod program_editor;
 mod save;
 mod scene;
 mod sequence;
@@ -32,6 +33,7 @@ fn main() {
         .insert_resource(missile::MissileSession::new_default())
         .init_resource::<design::InspectorState>()
         .init_resource::<jobs::JobManager>()
+        .init_resource::<program_editor::MissileProgramSession>()
         .init_resource::<sequence::SequenceWorkspace>()
         .add_systems(
             Startup,
@@ -41,6 +43,7 @@ fn main() {
                 campus::setup_boards,
                 missile::setup_missile,
                 missile::load_missile,
+                program_editor::load_program,
                 design::setup_ui,
                 design::setup_inspector_ui,
                 design::initialize_editor,

@@ -6,6 +6,7 @@ use super::*;
 use crate::design::{InspectorState, RevisionLog, record_revision, restore_revision};
 use crate::interface::{UiAction, UiActionButton};
 use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
+use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable};
 use crate::ui_kit::{self, ButtonTone, NavStatus, UiState};
 use std::collections::HashMap;
 
@@ -16,6 +17,7 @@ pub(crate) enum BoardKind {
     Research,
     Project,
     Missile,
+    Program,
 }
 
 #[derive(Component)]
@@ -42,7 +44,7 @@ fn root_node(kind: BoardKind) -> Node {
                 bottom: Val::Px(18.0),
             };
         }
-        BoardKind::Contracts | BoardKind::Research | BoardKind::Missile => {
+        BoardKind::Contracts | BoardKind::Research | BoardKind::Missile | BoardKind::Program => {
             node.left = Val::Px(14.0);
             node.right = Val::Px(14.0);
             node.top = Val::Px(76.0);
@@ -67,6 +69,7 @@ pub(crate) fn setup_boards(mut commands: Commands) {
         BoardKind::Research,
         BoardKind::Project,
         BoardKind::Missile,
+        BoardKind::Program,
     ] {
         commands.spawn((root_node(kind), kind));
     }
@@ -231,10 +234,10 @@ fn build_island(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
             Color::srgb(0.62, 0.50, 0.90),
         ),
         (
-            "PROGRAMMING",
+            "MISSILE PROGRAM",
             "F4",
-            "Visual editor for abstract sequences. Hardware decides which blocks exist.",
-            CampusView::Programming,
+            "Compose the onboard program from the blocks the installed hardware unlocks.",
+            CampusView::Program,
             Color::srgb(0.35, 0.75, 0.55),
         ),
         (
@@ -1371,17 +1374,308 @@ fn build_project(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, desi
 // Systems
 // ----------------------------------------------------------------------------------------------
 
+// ----------------------------------------------------------------------------------------------
+// Missile program editor
+// ----------------------------------------------------------------------------------------------
+
+fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Vehicle, session: &MissileProgramSession) {
+    let issues = session.issues(vehicle);
+
+    // Left: block palette, gated by the hardware fitted to the vehicle.
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        width: Val::Px(252.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|left| {
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        left.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "MISSILE PROGRAM", 15.0, ui_kit::ACCENT);
+            ui_kit::label(panel, vehicle.name.clone(), 10.5, ui_kit::TEXT_DIM);
+            heading(panel, "ADD BLOCK");
+            let rows: [&[BlockKind]; 4] = [
+                &BlockKind::ALL[0..2],
+                &BlockKind::ALL[2..4],
+                &BlockKind::ALL[4..6],
+                &BlockKind::ALL[6..7],
+            ];
+            for row in rows {
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|r| {
+                        for kind in row {
+                            let tone = if kind.available(vehicle) {
+                                ButtonTone::Secondary
+                            } else {
+                                ButtonTone::Disabled
+                            };
+                            ui_kit::button_row_item(
+                                r,
+                                kind.label(),
+                                UiAction::Program(ProgramAction::Append(*kind)),
+                                tone,
+                            );
+                        }
+                    });
+            }
+            ui_kit::label(
+                panel,
+                "Greyed blocks need hardware this vehicle does not carry.",
+                9.5,
+                ui_kit::TEXT_DIM,
+            );
+            heading(panel, "PROGRAM");
+            ui_kit::button(
+                panel,
+                "CLEAR PROGRAM",
+                UiAction::Program(ProgramAction::Clear),
+                ButtonTone::Danger,
+                Val::Percent(100.0),
+            );
+        });
+    });
+
+    // Middle: threads and the selected block.
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_grow: 1.0,
+        flex_basis: Val::Px(0.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|middle| {
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        middle.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "THREADS", 12.0, ui_kit::ACCENT);
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (index, blocks) in session.program.threads.iter().enumerate() {
+                        let tone = if index == session.thread {
+                            ButtonTone::Primary
+                        } else {
+                            ButtonTone::Secondary
+                        };
+                        ui_kit::button_row_item(
+                            row,
+                            format!("T{} ({})", index + 1, blocks.len()),
+                            UiAction::Program(ProgramAction::SelectThread(index)),
+                            tone,
+                        );
+                    }
+                    ui_kit::button_row_item(
+                        row,
+                        "+ THREAD",
+                        UiAction::Program(ProgramAction::AddThread),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "- THREAD",
+                        UiAction::Program(ProgramAction::RemoveThread),
+                        ButtonTone::Danger,
+                    );
+                });
+            heading(panel, format!("THREAD {} BLOCKS", session.thread + 1));
+            let blocks = session
+                .program
+                .threads
+                .get(session.thread)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if blocks.is_empty() {
+                ui_kit::label(
+                    panel,
+                    "Empty thread. Add a block from the palette.",
+                    10.5,
+                    ui_kit::TEXT_DIM,
+                );
+            }
+            for (index, block) in blocks.iter().enumerate() {
+                let tone = if session.block == Some(index) {
+                    ButtonTone::Primary
+                } else {
+                    ButtonTone::Ghost
+                };
+                ui_kit::button(
+                    panel,
+                    format!("{}. {}", index + 1, block.label()),
+                    UiAction::Program(ProgramAction::SelectBlock(index)),
+                    tone,
+                    Val::Percent(100.0),
+                );
+            }
+        });
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        middle.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "SELECTED BLOCK", 12.0, ui_kit::ACCENT);
+            match session.selected_block() {
+                None => ui_kit::label(
+                    panel,
+                    "Select a block to tune, reorder or remove it.",
+                    10.5,
+                    ui_kit::TEXT_DIM,
+                ),
+                Some(block) => {
+                    ui_kit::label(panel, block.label(), 13.0, ui_kit::TEXT);
+                    if adjustable(block) {
+                        panel
+                            .spawn(Node {
+                                width: Val::Percent(100.0),
+                                column_gap: Val::Px(4.0),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                ui_kit::button_row_item(
+                                    row,
+                                    "-",
+                                    UiAction::Program(ProgramAction::Adjust(-1)),
+                                    ButtonTone::Secondary,
+                                );
+                                ui_kit::button_row_item(
+                                    row,
+                                    "+",
+                                    UiAction::Program(ProgramAction::Adjust(1)),
+                                    ButtonTone::Secondary,
+                                );
+                            });
+                    } else {
+                        ui_kit::label(
+                            panel,
+                            "This block closes the thread and has no value to tune.",
+                            10.0,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            ui_kit::button_row_item(
+                                row,
+                                "MOVE UP",
+                                UiAction::Program(ProgramAction::MoveUp),
+                                ButtonTone::Secondary,
+                            );
+                            ui_kit::button_row_item(
+                                row,
+                                "MOVE DOWN",
+                                UiAction::Program(ProgramAction::MoveDown),
+                                ButtonTone::Secondary,
+                            );
+                            ui_kit::button_row_item(
+                                row,
+                                "REMOVE",
+                                UiAction::Program(ProgramAction::RemoveSelected),
+                                ButtonTone::Danger,
+                            );
+                        });
+                }
+            }
+        });
+    });
+
+    // Right: computer limits and validation.
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        width: Val::Px(330.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|right| {
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        right.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "FLIGHT COMPUTER", 12.0, ui_kit::ACCENT);
+            match (vehicle.computer(), session.limits(vehicle)) {
+                (Some(class), Some((threads, blocks))) => {
+                    ui_kit::label(panel, format!("{class:?} computer"), 11.0, ui_kit::TEXT);
+                    let thread_tone = if session.threads_used() > threads {
+                        ui_kit::BAD
+                    } else {
+                        ui_kit::GOOD
+                    };
+                    let block_tone = if session.blocks_used() > blocks {
+                        ui_kit::BAD
+                    } else {
+                        ui_kit::GOOD
+                    };
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            ui_kit::chip(
+                                row,
+                                format!("{} / {threads} threads", session.threads_used()),
+                                thread_tone,
+                            );
+                            ui_kit::chip(row, format!("{} / {blocks} blocks", session.blocks_used()), block_tone);
+                        });
+                }
+                _ => ui_kit::label(
+                    panel,
+                    "No flight computer: add one in the missile workshop to program this vehicle.",
+                    10.5,
+                    ui_kit::WARN,
+                ),
+            }
+            heading(panel, "VALIDATION");
+            if issues.is_empty() {
+                panel
+                    .spawn(Node::default())
+                    .with_children(|c| ui_kit::chip(c, "PROGRAM VALID", ui_kit::GOOD));
+            } else {
+                for issue in issues.iter().take(6) {
+                    ui_kit::label(panel, format!("- {issue}"), 10.0, ui_kit::BAD);
+                }
+            }
+            if let Ok(hash) = session.content_hash() {
+                let short: String = hash.as_str().chars().take(16).collect();
+                ui_kit::label(panel, format!("Program hash {short}"), 9.5, ui_kit::TEXT_DIM);
+            }
+            ui_kit::label(
+                panel,
+                "Saved to programs/missile.json on every change.",
+                9.5,
+                ui_kit::TEXT_DIM,
+            );
+        });
+    });
+}
+
 fn visible(kind: BoardKind, campus: &CampusState, sketch_active: bool) -> bool {
     match kind {
         BoardKind::Island => campus.view == CampusView::Island,
         BoardKind::Contracts => campus.view == CampusView::Contracts,
         BoardKind::Research => campus.view == CampusView::Research,
         BoardKind::Missile => campus.view == CampusView::Missile,
+        BoardKind::Program => campus.view == CampusView::Program,
         BoardKind::Project => campus.view == CampusView::Construction && !campus.profile_editor_open && !sketch_active,
     }
 }
 
-fn signature(kind: BoardKind, campus: &CampusState, design: &str, missile: &MissileSession) -> String {
+fn signature(
+    kind: BoardKind,
+    campus: &CampusState,
+    design: &str,
+    missile: &MissileSession,
+    program: &MissileProgramSession,
+) -> String {
     let contracts = || {
         let active: Vec<String> = campus
             .accepted_contracts
@@ -1424,6 +1718,10 @@ fn signature(kind: BoardKind, campus: &CampusState, design: &str, missile: &Miss
             campus.credits,
             campus.research
         ),
+        BoardKind::Program => format!(
+            "{:?}|{:?}|{}|{:?}",
+            missile.vehicle, program.program, program.thread, program.block
+        ),
         BoardKind::Project => format!("{}|{:?}", contracts(), campus.instrument_profile),
     }
 }
@@ -1434,6 +1732,7 @@ pub(crate) fn sync_boards(
     design: Res<DesignSession>,
     sketch: Res<PolygonSketchSession>,
     missile: Res<MissileSession>,
+    program: Res<MissileProgramSession>,
     mut boards: Query<(Entity, &mut Node, &BoardKind)>,
     mut seen: Local<HashMap<BoardKind, String>>,
 ) {
@@ -1448,7 +1747,7 @@ pub(crate) fn sync_boards(
             seen.remove(kind);
             continue;
         }
-        let sig = signature(*kind, &campus, design_hash.as_str(), &missile);
+        let sig = signature(*kind, &campus, design_hash.as_str(), &missile, &program);
         if seen.get(kind) == Some(&sig) {
             continue;
         }
@@ -1457,12 +1756,14 @@ pub(crate) fn sync_boards(
         let kind = *kind;
         let campus_ref: &CampusState = &campus;
         let missile_ref: &MissileSession = &missile;
+        let program_ref: &MissileProgramSession = &program;
         let hash = design_hash.clone();
         commands.entity(entity).with_children(|root| match kind {
             BoardKind::Island => build_island(root, campus_ref),
             BoardKind::Contracts => build_contracts(root, campus_ref, &hash),
             BoardKind::Research => build_research(root, campus_ref),
             BoardKind::Missile => build_missile(root, campus_ref, missile_ref),
+            BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref),
             BoardKind::Project => build_project(root, campus_ref, &hash),
         });
     }
@@ -1531,6 +1832,7 @@ pub(crate) fn handle_extra_actions(
     mut session: ResMut<DesignSession>,
     mut log: ResMut<RevisionLog>,
     mut missile: ResMut<MissileSession>,
+    mut program: ResMut<MissileProgramSession>,
 ) {
     for (interaction, button) in &buttons {
         if *interaction != UiInteraction::Pressed {
@@ -1540,6 +1842,18 @@ pub(crate) fn handle_extra_actions(
             UiAction::RecordRevision => campus.message = record_revision(&mut log, &session),
             UiAction::RestoreRevision => campus.message = restore_revision(&log, &mut session),
             UiAction::ToggleHelp => ui.help_open = !ui.help_open,
+            UiAction::Program(action) => match program.apply(action, &missile.vehicle) {
+                Ok(message) => {
+                    if !message.is_empty() {
+                        campus.message = message;
+                    }
+                    if let Err(error) = program_editor::persist(&program) {
+                        warn!("Could not save the missile program: {error}");
+                        campus.message = format!("Could not save the missile program: {error}");
+                    }
+                }
+                Err(message) => campus.message = message,
+            },
             UiAction::Missile(action) => {
                 let owned = campus.owned_capabilities();
                 let message = friendly_capabilities(&missile.apply(action, &owned));
