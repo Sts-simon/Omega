@@ -267,7 +267,9 @@ pub fn handle_input(
     match campus.view {
         CampusView::Island => {
             for key in [KeyCode::F1, KeyCode::F2, KeyCode::F3, KeyCode::F4, KeyCode::F5] {
-                if keys.just_pressed(key) && let Some(view) = view_for_shortcut(key) {
+                if keys.just_pressed(key)
+                    && let Some(view) = view_for_shortcut(key)
+                {
                     enter_view(&mut campus, view);
                     return;
                 }
