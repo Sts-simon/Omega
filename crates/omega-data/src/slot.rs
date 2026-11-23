@@ -165,10 +165,8 @@ impl SaveSlot {
         }
 
         let previous = self.read_manifest()?;
-        if previous.is_some() {
-            if let Some(problem) = self.verify_all()?.into_iter().next() {
-                return Err(problem);
-            }
+        if previous.is_some() && let Some(problem) = self.verify_all()?.into_iter().next() {
+            return Err(problem);
         }
         let revision = match previous.as_ref() {
             Some(manifest) => manifest.revision.checked_add(1).ok_or(SlotError::RevisionOverflow)?,
