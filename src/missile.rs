@@ -1,11 +1,11 @@
-//! Missile workshop: a staged vehicle built from resizable parts (`aerolab-rules::vehicle`),
+//! Missile workshop: a staged vehicle built from resizable parts (`omega-rules::vehicle`),
 //! edited with buttons and shown in 3D. Parts are gated by research capabilities.
 //! Everything here is fictional and abstract; see `docs/VISION_MISSILES.md`.
 
 use crate::campus::{CampusState, CampusView};
 use crate::save::{self, SaveFile};
 use crate::scene::OrbitCameraRig;
-use aerolab_rules::{ComputerClass, Part, PartSpec, RadarClass, SensorKind, Stage, Vehicle};
+use omega_rules::{ComputerClass, Part, PartSpec, RadarClass, SensorKind, Stage, Vehicle};
 use bevy::prelude::*;
 use std::collections::BTreeSet;
 
@@ -556,13 +556,13 @@ mod tests {
     use super::*;
 
     fn everything_owned() -> BTreeSet<String> {
-        let tree = aerolab_rules::default_tree();
-        let state = aerolab_rules::ResearchState { completed: tree.iter().map(|n| n.id.clone()).collect(), active: None };
+        let tree = omega_rules::default_tree();
+        let state = omega_rules::ResearchState { completed: tree.iter().map(|n| n.id.clone()).collect(), active: None };
         state.owned_capabilities(&tree)
     }
 
     fn starting() -> BTreeSet<String> {
-        aerolab_rules::ResearchState::default().owned_capabilities(&aerolab_rules::default_tree())
+        omega_rules::ResearchState::default().owned_capabilities(&omega_rules::default_tree())
     }
 
     #[test]

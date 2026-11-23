@@ -1,3 +1,9 @@
+## Unreleased — Project renamed to Omega
+- Renamed the Cargo package and binary from `aerolab` to `omega`, and the workspace crates from `aerolab-sim-core`, `aerolab-data` and `aerolab-rules` to `omega-sim-core`, `omega-data` and `omega-rules` (the last two directories moved to `crates/omega-data` and `crates/omega-rules`).
+- Renamed the worker-thread environment variable `AEROLAB_WORKER_THREADS` to `OMEGA_WORKER_THREADS`.
+- Updated the window title, HUD banners, HTML report headers, thread names and documentation to Omega. The public repository is `Sts-simon/Omega`; entries below keep the former name.
+- No save-schema or behavioural change: the slot layout, `designs/vehicle.json` and existing campaigns load unchanged.
+
 ## 0.18.0 — Mouse-first navigation and contextual UI
 - Added a persistent top navigation bar for Island, Contracts, Workshop and Laboratory views.
 - Added scrollable contextual tool shelves for the Contract Office, Workshop and Computation Lab.

@@ -100,7 +100,7 @@ Acceptance criteria: a user can create, validate, save, close and reopen a small
 - [x] Job progress and completion reporting
 - [x] JSON result reports
 - [x] Job list UI with queued/running/completed/failed/cancelled states
-- [x] Environment-configurable worker thread budget (`AEROLAB_WORKER_THREADS`)
+- [x] Environment-configurable worker thread budget (`OMEGA_WORKER_THREADS`)
 - [x] Cooperative cancellation between solver iterations
 - [ ] Cooperative pause
 - [ ] Job priorities
@@ -212,13 +212,13 @@ Implemented a right-side component inspector for absolute numeric editing of pos
 
 
 ## Missile loop (see `docs/VISION_MISSILES.md`)
-- [x] Core logic for parts, stages, programs, flight test and research in `aerolab-rules` (tested, not visible in the game).
+- [x] Core logic for parts, stages, programs, flight test and research in `omega-rules` (tested, not visible in the game).
 - [x] 0.25 research board and clock; 0.26 missile workshop (parts, stages, resize, figures, locked parts).
 - [ ] 0.27 programming v2; 0.28 trials UI; 0.29 missile-family contracts and plan delivery; 0.30 balancing and tutorial.
 
 ## Plan 0.22 – 0.30 (earlier, civil-contract status)
 
-- [x] 0.22 (partial) `aerolab-data` and `aerolab-rules` crates with tests; geometry-derived balance requirement in contracts.
+- [x] 0.22 (partial) `omega-data` and `omega-rules` crates with tests; geometry-derived balance requirement in contracts.
 - [x] 0.22 `SaveSlot` used for campaign, assembly, sketch and program; 0.21 saves imported on first access.
 - [ ] 0.22 (remaining) Split `campus.rs`; Bevy `States`/plugins per facility; slot selection.
 - [x] 0.23 (partial) Evidence stored per contract, verification matrix in the HUD, delivery gated by the dossier.
@@ -226,7 +226,7 @@ Implemented a right-side component inspector for absolute numeric editing of pos
 - [x] 0.24 (partial) Design revisions, diff against the latest revision, live mass/balance budget.
 - [ ] 0.24 (remaining) Vehicle modules and axial stacking by family; side-by-side comparison of two revisions.
 - [ ] UI debt: overlapping workshop panels, Contract Office text taller than the window.
-- [x] 0.25 (logic only) Research tree rules, tests and a starting tree in `aerolab-rules`.
+- [x] 0.25 (logic only) Research tree rules, tests and a starting tree in `omega-rules`.
 - [ ] 0.25 (remaining) Game clock ("next day"), research board, campaign persistence, capability gating in the workshop, contracts and computation centre.
 - [ ] 0.26 Programming v2: signal/action registry, programs bound to design revisions.
 - [ ] 0.27 – 0.28 Trials: abstract scenarios, seeded runs, anomaly detection, comparison, analyses as verification methods.

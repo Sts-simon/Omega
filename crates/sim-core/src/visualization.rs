@@ -93,7 +93,7 @@ pub fn export_thermal_visualization(
     )?;
     let svg = thermal_svg(result);
     let html = report_html(
-        "AEROLAB | Thermal field",
+        "OMEGA | Thermal field",
         "Transient 2D finite-volume conduction",
         &format!(
             "{} · {} × {} cells · {:.3} simulated seconds",
@@ -183,7 +183,7 @@ pub fn export_mesh_thermal_visualization(
     )?;
     let svg = mesh_thermal_svg(result);
     let html = report_html(
-        "AEROLAB | Meshed thermal field",
+        "OMEGA | Meshed thermal field",
         "Transient 2D finite-element heat conduction on a triangular mesh",
         &format!(
             "{} · {} nodes · {} triangles · {:.3} simulated seconds",
@@ -354,7 +354,7 @@ pub fn export_truss_visualization(
     )?;
     let svg = truss_svg(result);
     let html = report_html(
-        "AEROLAB | Structural analysis",
+        "OMEGA | Structural analysis",
         "2D linear-elastic pin-jointed truss",
         &format!(
             "{} · {} nodes · {} members",
@@ -758,7 +758,7 @@ fn report_html(title: &str, heading: &str, subtitle: &str, svg: &str, metrics: &
         .node-label{{fill:#eff5fb;font-size:12px;font-weight:700}}.support{{fill:#607387;stroke:#c4d2df;stroke-width:1.5}}.support-ground{{stroke:#c4d2df;stroke-width:2}}
         .load-arrow{{stroke:#f5c451;stroke-width:3;marker-end:url(#arrow-head)}}.load-label{{fill:#f5c451;font-size:12px}}
         @media(max-width:650px){{body{{padding:12px}}dl{{grid-template-columns:1fr;gap:4px}}dd{{margin-bottom:8px}}}}
-        </style></head><body><main><header><div class=\"eyebrow\">AEROLAB · Scientific report</div><h1>{}</h1><div class=\"subtitle\">{}</div></header>
+        </style></head><body><main><header><div class=\"eyebrow\">OMEGA · Scientific report</div><h1>{}</h1><div class=\"subtitle\">{}</div></header>
         <section class=\"panel\">{}</section>{}<section class=\"panel foot\"><a class=\"download\" href=\"{}\" download>Download full-resolution CSV data</a><br><strong>Provenance</strong><br>Solver: {} v{}<br>Input fingerprint: {}<br>Generated from solver output. This visualization is a diagnostic aid, not a certification report.</section></main></body></html>",
         html_escape(title), html_escape(heading), html_escape(subtitle), svg, metrics,
         html_escape(data_filename), html_escape(solver), html_escape(solver_version), html_escape(fingerprint),
@@ -797,7 +797,7 @@ mod tests {
 
     fn temp_dir(label: &str) -> PathBuf {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("aerolab-viz-{label}-{nonce}"))
+        std::env::temp_dir().join(format!("omega-viz-{label}-{nonce}"))
     }
 
     #[test]

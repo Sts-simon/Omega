@@ -5,7 +5,7 @@ use super::{assembly_content_hash, assembly_metrics, Assembly, DesignSession, In
 use crate::campus::{CampusState, CampusView};
 use crate::save::{self, SaveFile};
 use crate::sequence::SequenceWorkspace;
-use aerolab_rules::{diff_parts, DesignDiff, PartGeometry};
+use omega_rules::{diff_parts, DesignDiff, PartGeometry};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -126,7 +126,7 @@ impl RevisionLog {
         let mut lines = vec!["DESIGN BUDGET".to_string()];
         match assembly_metrics(current) {
             Ok(m) => {
-                let mass = m.get("mass_kg").unwrap_or(aerolab_rules::Estimate { value: 0.0, uncertainty: 0.0 });
+                let mass = m.get("mass_kg").unwrap_or(omega_rules::Estimate { value: 0.0, uncertainty: 0.0 });
                 let length = m.get("length_m").map_or(0.0, |e| e.value);
                 lines.push(format!("Mass {:.2} kg (+/-{:.2}) | length {:.2} m", mass.value, mass.uncertainty, length));
                 if let Some(cg) = m.get("cg_offset_ratio") {

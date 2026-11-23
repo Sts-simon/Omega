@@ -1,4 +1,4 @@
-//! Shared, Bevy-free data layer for AEROLAB.
+//! Shared, Bevy-free data layer for Omega.
 //!
 //! * [`ContentHash`] — deterministic change-detection fingerprint of serializable data.
 //! * [`atomic`] — crash-safe file writing (temp file, fsync, rename).

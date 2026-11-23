@@ -1,7 +1,7 @@
 use crate::design::{assembly_content_hash, assembly_metrics, Assembly, DesignSession, PolygonSketchSession, build_assembly_mesh_thermal_config, build_polygon_sketch_thermal_config};
-use aerolab_data::ContentHash;
-use aerolab_rules::{evaluate_requirement, Comparator, DossierDecision, Estimate, Evidence, Requirement, RequirementStatus, VerificationMethod};
-use aerolab_sim_core::refine_tri_mesh_local;
+use omega_data::ContentHash;
+use omega_rules::{evaluate_requirement, Comparator, DossierDecision, Estimate, Evidence, Requirement, RequirementStatus, VerificationMethod};
+use omega_sim_core::refine_tri_mesh_local;
 use crate::jobs::{JobManager, JobState};
 use crate::sequence::SequenceWorkspace;
 use bevy::prelude::*;
@@ -466,7 +466,7 @@ struct CampaignSave {
     profile_revision: u64,
     selected_contract_id: Option<u32>,
     #[serde(default)]
-    research: aerolab_rules::ResearchState,
+    research: omega_rules::ResearchState,
     #[serde(default)]
     day: u32,
 }
@@ -486,7 +486,7 @@ pub struct CampusState {
     profile_revision: u64,
     selected_contract_id: Option<u32>,
     pub profile_editor_open: bool,
-    pub(crate) research: aerolab_rules::ResearchState,
+    pub(crate) research: omega_rules::ResearchState,
     pub(crate) day: u32,
     dirty: bool,
 }
@@ -546,7 +546,7 @@ impl Default for CampusState {
             profile_revision: 1,
             selected_contract_id: None,
             profile_editor_open: false,
-            research: aerolab_rules::ResearchState::default(),
+            research: omega_rules::ResearchState::default(),
             day: 1,
             dirty: true,
         }
@@ -831,7 +831,7 @@ impl CampusState {
     }
 
     pub(crate) fn ui_start_research(&mut self, index: usize) {
-        let tree = aerolab_rules::default_tree();
+        let tree = omega_rules::default_tree();
         let Some(tech) = tree.get(index) else { return };
         self.message = match self.research.start(&tree, &tech.id, self.credits) {
             Ok(cost) => {
@@ -846,7 +846,7 @@ impl CampusState {
     pub(crate) fn ui_next_day(&mut self) {
         self.day += 1;
         let finished = self.research.advance_days(1);
-        let tree = aerolab_rules::default_tree();
+        let tree = omega_rules::default_tree();
         self.message = match finished.first().and_then(|id| tree.iter().find(|t| &t.id == id)) {
             Some(tech) => format!("Day {}: research completed - {}", self.day, tech.label),
             None => format!("Day {}", self.day),
@@ -855,7 +855,7 @@ impl CampusState {
     }
 
     pub(crate) fn owned_capabilities(&self) -> std::collections::BTreeSet<String> {
-        self.research.owned_capabilities(&aerolab_rules::default_tree())
+        self.research.owned_capabilities(&omega_rules::default_tree())
     }
 
     pub(crate) fn ui_navigate(&mut self, view: CampusView) {
@@ -1053,7 +1053,7 @@ pub struct CampusHud;
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn((
-        Text::new("AEROLAB | ISLAND\nSelect a facility"),
+        Text::new("OMEGA | ISLAND\nSelect a facility"),
         TextFont {
             font_size: FontSize::Px(14.0),
             ..default()
@@ -1488,12 +1488,12 @@ pub fn update_hud(
 
     text.0 = match campus.view {
         CampusView::Island => format!(
-            "AEROLAB 0.26.0 | RESEARCH ISLAND\n\nFive dedicated facilities:\n\n[F1] CONTRACT OFFICE\nClient offers, project requirements, deadlines and payments.\n\n[F2] CONSTRUCTION WORKSHOP\n3D assembly editor and component library.\n\n[F3] RESEARCH CENTRE\nTechnology development and unlock progression.\n\n[F4] PROGRAMMING STUDIO\nVisual event-and-data sequence editor.\n\n[F5] COMPUTATION CENTRE\nScientific studies, simulations and reports.\n\nCredits: {} cr | Active contracts: {}/{} | Completed: {}\n\nRight drag: orbit | middle drag: pan | wheel: zoom\nClick a building or use the navigation bar",
+            "OMEGA 0.26.0 | RESEARCH ISLAND\n\nFive dedicated facilities:\n\n[F1] CONTRACT OFFICE\nClient offers, project requirements, deadlines and payments.\n\n[F2] CONSTRUCTION WORKSHOP\n3D assembly editor and component library.\n\n[F3] RESEARCH CENTRE\nTechnology development and unlock progression.\n\n[F4] PROGRAMMING STUDIO\nVisual event-and-data sequence editor.\n\n[F5] COMPUTATION CENTRE\nScientific studies, simulations and reports.\n\nCredits: {} cr | Active contracts: {}/{} | Completed: {}\n\nRight drag: orbit | middle drag: pan | wheel: zoom\nClick a building or use the navigation bar",
             campus.credits, campus.accepted_contracts.len(), MAX_ACTIVE_CONTRACTS, campus.completed_contracts.len()
         ),
         CampusView::Contracts => {
             let mut lines = vec![
-                "AEROLAB | CONTRACT OFFICE".to_string(),
+                "OMEGA | CONTRACT OFFICE".to_string(),
                 format!("Available funds: {} cr", campus.credits),
                 "Five randomized civilian/scientific domains; one offer per domain.".to_string(),
                 "Accept up to two projects. Payment follows design, analysis and field test.".to_string(),
@@ -1532,7 +1532,7 @@ pub fn update_hud(
         CampusView::Construction => {
             if campus.profile_editor_open {
                 format!(
-                    "AEROLAB | INSTRUMENT PROFILE\n\nF1/F2: power draw -/+ 2 W\nF3/F4: storage -/+ 16 GB\nF5/F7: uptime -/+ 1%\nF8/F9: data completeness -/+ 1%\nF10: cycle operating-temperature envelope\nF11 or Esc: close profile editor\n\nPower: {} W\nStorage: {} GB\nUptime target: {}%\nData completeness target: {}%\nOperating range: {}..{} C\n\n{}",
+                    "OMEGA | INSTRUMENT PROFILE\n\nF1/F2: power draw -/+ 2 W\nF3/F4: storage -/+ 16 GB\nF5/F7: uptime -/+ 1%\nF8/F9: data completeness -/+ 1%\nF10: cycle operating-temperature envelope\nF11 or Esc: close profile editor\n\nPower: {} W\nStorage: {} GB\nUptime target: {}%\nData completeness target: {}%\nOperating range: {}..{} C\n\n{}",
                     campus.instrument_profile.power_draw_w,
                     campus.instrument_profile.storage_gb,
                     campus.instrument_profile.uptime_percent,
@@ -1544,7 +1544,7 @@ pub fn update_hud(
             } else {
                 let selected = campus.selected_contract().map(|active| format_active_contract(active, true, current_design.as_ref())).unwrap_or_else(|| "No active contract selected. Accept one at the contract office.".to_string());
                 format!(
-                    "AEROLAB | ASSEMBLY WORKSHOP\n\nCURRENT PROJECT\n{}\n\nCtrl+Tab: switch active project\nCtrl+Enter: evaluate and submit current design\nF11: configure civilian instrument profile\nV: draw polygon surfaces (Enter closes, H adds holes, M changes material)\nCtrl+S: save assembly | Ctrl+L: load assembly\nCtrl+B: record revision | Ctrl+Backspace: restore latest revision\n\nInstrument profile: {} W, {} GB, uptime {}%, data {}%, {}..{} C\n\nA submitted design is invalidated if its assembly or profile changes.\n\n{}",
+                    "OMEGA | ASSEMBLY WORKSHOP\n\nCURRENT PROJECT\n{}\n\nCtrl+Tab: switch active project\nCtrl+Enter: evaluate and submit current design\nF11: configure civilian instrument profile\nV: draw polygon surfaces (Enter closes, H adds holes, M changes material)\nCtrl+S: save assembly | Ctrl+L: load assembly\nCtrl+B: record revision | Ctrl+Backspace: restore latest revision\n\nInstrument profile: {} W, {} GB, uptime {}%, data {}%, {}..{} C\n\nA submitted design is invalidated if its assembly or profile changes.\n\n{}",
                     selected,
                     campus.instrument_profile.power_draw_w,
                     campus.instrument_profile.storage_gb,
@@ -1558,17 +1558,17 @@ pub fn update_hud(
         }
         CampusView::Missile => String::new(),
         CampusView::Research => format!(
-            "AEROLAB | RESEARCH CENTRE\n\nTECHNOLOGY DEPARTMENTS\n\nVEHICLE FAMILIES\nStructural concepts, configurations and design envelopes.\n\nMATERIALS\nDensity, stiffness, thermal resistance and durability.\n\nSCIENTIFIC SENSORS\nEnvironmental measurement, sampling and data quality.\n\nEMBEDDED COMPUTING\nProcessing capacity, memory and program complexity.\n\nMANUFACTURING\nProcesses, tolerances and production methods.\n\nResearch progression and persistent unlocks are planned for version 0.25.\n\n{}",
+            "OMEGA | RESEARCH CENTRE\n\nTECHNOLOGY DEPARTMENTS\n\nVEHICLE FAMILIES\nStructural concepts, configurations and design envelopes.\n\nMATERIALS\nDensity, stiffness, thermal resistance and durability.\n\nSCIENTIFIC SENSORS\nEnvironmental measurement, sampling and data quality.\n\nEMBEDDED COMPUTING\nProcessing capacity, memory and program complexity.\n\nMANUFACTURING\nProcesses, tolerances and production methods.\n\nResearch progression and persistent unlocks are planned for version 0.25.\n\n{}",
             campus.message
         ),
         CampusView::Programming => format!(
-            "AEROLAB | PROGRAMMING STUDIO\n\nVISUAL SEQUENCE EDITOR\nBuild event-driven programs using start, delay, read-data, record, condition and repeat blocks.\n\nF6: open / close the visual editor\nThe sandboxed runtime executes abstract measurement and data-processing sequences only.\n\n{}",
+            "OMEGA | PROGRAMMING STUDIO\n\nVISUAL SEQUENCE EDITOR\nBuild event-driven programs using start, delay, read-data, record, condition and repeat blocks.\n\nF6: open / close the visual editor\nThe sandboxed runtime executes abstract measurement and data-processing sequences only.\n\n{}",
             campus.message
         ),
         CampusView::Computation => {
             let selected = campus.selected_contract().map(|active| format_active_contract(active, true, current_design.as_ref())).unwrap_or_else(|| "No active project selected. Generic material-conduction study is available.".to_string());
             format!(
-                "AEROLAB | COMPUTATION CENTRE\n\nCURRENT PROJECT\n{}\n\nR: generic rectangular thermal study\nG: generic civil truss study\nM: mesh workshop primitives | P: mesh drawn polygon regions and run thermal study\nO: open latest HTML visualization report\nT: perform 1,000-sample field test after analysis\nC: cancel newest active calculation\n\nAll studies run on background CPU workers. Mesh studies use workshop geometry or the saved multi-material polygon sketch, then export a triangular heat map, full CSV data and numerical diagnostics.\n\n{}",
+                "OMEGA | COMPUTATION CENTRE\n\nCURRENT PROJECT\n{}\n\nR: generic rectangular thermal study\nG: generic civil truss study\nM: mesh workshop primitives | P: mesh drawn polygon regions and run thermal study\nO: open latest HTML visualization report\nT: perform 1,000-sample field test after analysis\nC: cancel newest active calculation\n\nAll studies run on background CPU workers. Mesh studies use workshop geometry or the saved multi-material polygon sketch, then export a triangular heat map, full CSV data and numerical diagnostics.\n\n{}",
                 selected, campus.message
             )
         }
@@ -1623,7 +1623,7 @@ mod tests {
             profile_revision: 1,
             selected_contract_id: None,
             profile_editor_open: false,
-            research: aerolab_rules::ResearchState::default(),
+            research: omega_rules::ResearchState::default(),
             day: 1,
             dirty: false,
         }
@@ -1723,7 +1723,7 @@ mod tests {
             instrument_profile: InstrumentProfile::default(),
             profile_revision: 3,
             selected_contract_id: None,
-            research: aerolab_rules::ResearchState::default(),
+            research: omega_rules::ResearchState::default(),
             day: 1,
         };
         let bytes = serde_json::to_vec(&save).unwrap();

@@ -1,8 +1,8 @@
 [package]
-name = "aerolab-sim-core"
+name = "omega-sim-core"
 version = "0.20.0"
 edition = "2024"
-description = "Bevy-independent numerical simulation core for AEROLAB"
+description = "Bevy-independent numerical simulation core for Omega"
 license = "MIT"
 
 [dependencies]

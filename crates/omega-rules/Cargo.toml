@@ -1,11 +1,11 @@
 [package]
-name = "aerolab-rules"
+name = "omega-rules"
 version = "0.24.0"
 edition = "2024"
-description = "Bevy-independent gameplay rules for AEROLAB: requirements, verification, evidence and dossiers"
+description = "Bevy-independent gameplay rules for Omega: requirements, verification, evidence and dossiers"
 license = "MIT"
 
 [dependencies]
-aerolab-data = { path = "../aerolab-data" }
+omega-data = { path = "../omega-data" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

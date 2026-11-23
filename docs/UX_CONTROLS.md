@@ -1,4 +1,4 @@
-# AEROLAB 0.21.0 — UI and mouse controls
+# Omega 0.21.0 — UI and mouse controls
 
 ## Navigation
 

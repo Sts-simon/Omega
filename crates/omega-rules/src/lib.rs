@@ -1,4 +1,4 @@
-//! Bevy-independent gameplay rules for AEROLAB.
+//! Bevy-independent gameplay rules for Omega.
 //!
 //! The crate answers one question: *given a design, what has actually been proven about it,
 //! and does that satisfy a contract?* All quantities are abstract gameplay values.

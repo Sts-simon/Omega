@@ -1,4 +1,4 @@
-# AEROLAB — Research Island
+# Omega — Research Island
 
 **Version 0.26.0** — a Rust + Bevy engineering sandbox shaped like a fictional island research
 campus. You build a staged missile in a 3D workshop, unlock parts through a research tree that
@@ -23,8 +23,9 @@ sketch, the instrument profile, the chamber sequencer and the civil contract fam
 transitional tooling, kept while they are the only way to complete a contract, and removed once
 missile-family contracts, trials and plan delivery replace them.
 
-The project is intended to be published as a new GitHub repository. This workspace has no git
-metadata yet and `git` is not installed on the current machine.
+The project is published as the public repository <https://github.com/Sts-simon/Omega> on the
+`main` branch, under the MIT licence. `target/`, `saves/`, `results/` and the local `.freebuff/`
+workspace folder are ignored.
 
 ## What works in 0.26.0
 
@@ -82,12 +83,12 @@ metadata yet and `git` is not installed on the current machine.
 
 ### Scientific core
 
-- `aerolab-sim-core`, Bevy-free: transient 2D finite-volume heat conduction; 2D linear-elastic
+- `omega-sim-core`, Bevy-free: transient 2D finite-volume heat conduction; 2D linear-elastic
   pin-jointed truss; triangular meshing of coplanar rectangles and concave polygon regions with
   holes, conforming local refinement and quality metrics; transient triangular-finite-element heat
   conduction on those meshes; HTML/SVG + CSV report export.
-- `aerolab-data`, Bevy-free: content hashing, atomic writes and the versioned save slot.
-- `aerolab-rules`, Bevy-free: missile vehicle, program, flight test, research, requirements,
+- `omega-data`, Bevy-free: content hashing, atomic writes and the versioned save slot.
+- `omega-rules`, Bevy-free: missile vehicle, program, flight test, research, requirements,
   evidence, dossier, metrics and design diff.
 
 ## Not implemented in 0.26.0
@@ -95,8 +96,8 @@ metadata yet and `git` is not installed on the current machine.
 - **Missile programming is not editable in the game.** The Programming Studio still runs the 0.6
   chamber sequencer. There is no block palette driven by installed hardware, no thread view, no
   computer limit meters, and the seven missile blocks are exercised only by tests in
-  `aerolab-rules::program`.
-- **No trial screen.** `aerolab-rules::flight` (seeded integration with events, anomalies and a lock
+  `omega-rules::program`.
+- **No trial screen.** `omega-rules::flight` (seeded integration with events, anomalies and a lock
   roll) is headless only: no graphs, anomaly display, seeds, batch trials or design comparison. The
   `analysis:monte_carlo` grant exists but nothing consumes it.
 - **Contracts are still civil.** They do not use the missile vehicle, missile designs are not part
@@ -137,13 +138,16 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+The Cargo package and its binary are both named `omega`; the workspace crates are `omega-sim-core`,
+`omega-data` and `omega-rules`.
+
 The first build compiles Bevy and its dependencies and takes several minutes; dependency crates are
 built with `opt-level = 3` even in the dev profile. `saves/` and `results/` are created on demand and
 ignored by git, as is `target/`.
 
 Scientific studies run on a dedicated worker thread with a Rayon pool. Worker threads default to
-detected logical CPUs minus one, capped at 16; override with `AEROLAB_WORKER_THREADS`, for example
-`AEROLAB_WORKER_THREADS=16 cargo run --release`.
+detected logical CPUs minus one, capped at 16; override with `OMEGA_WORKER_THREADS`, for example
+`OMEGA_WORKER_THREADS=16 cargo run --release`.
 
 ## Interface and controls
 
@@ -231,7 +235,7 @@ interactive panel.
 
 ## Saves and reports
 
-All persistent files go through `src/save.rs` and `aerolab_data::SaveSlot`:
+All persistent files go through `src/save.rs` and `omega_data::SaveSlot`:
 
 ```text
 saves/slot_1/
@@ -268,8 +272,8 @@ src/
   sequence/            chamber sequencer: model, runtime, graph, expressions
 crates/
   sim-core/            Bevy-free solvers: thermal FV, truss, mesh, mesh thermal, reports
-  aerolab-data/        content hashes, atomic writes, versioned save slot
-  aerolab-rules/       vehicle, program, flight, research, requirements, dossier, metrics, diff
+  omega-data/        content hashes, atomic writes, versioned save slot
+  omega-rules/       vehicle, program, flight, research, requirements, dossier, metrics, diff
 docs/                  architecture, vision, roadmap, changelog, model notes, legacy UX docs
 examples/              sample assembly, chamber program, polygon sketch
 ```
@@ -288,16 +292,16 @@ planar polygon regions, not arbitrary solid CAD. Solver jobs report progress and
 cancellation, and every result carries model/solver metadata and its input configuration.
 
 The missile figures (mass, thrust, burn time, TWR, delta-v) come from abstract part coefficients in
-`aerolab-rules::vehicle`. The flight test integrates speed along a path with thrust, drag and, for a
+`omega-rules::vehicle`. The flight test integrates speed along a path with thrust, drag and, for a
 vertical launch, gravity; altitude only changes air density. There is no steering, trajectory
 optimisation, tracking or guidance law, and the lock is one seeded probability roll.
 
 ## Tests and quality
 
 The workspace contains unit tests in all four crates (application logic in `src/`, plus
-`sim-core`, `aerolab-data` and `aerolab-rules`), including headless solver checks, save-slot
+`sim-core`, `omega-data` and `omega-rules`), including headless solver checks, save-slot
 integrity, research/vehicle/program/flight rules, sketch validation and revision handling. Run them
-with `cargo test --workspace`; `cargo test -p aerolab-sim-core` runs the numerical crate alone.
+with `cargo test --workspace`; `cargo test -p omega-sim-core` runs the numerical crate alone.
 
 There is no CI configuration in the repository.
 

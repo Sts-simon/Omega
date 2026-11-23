@@ -1,4 +1,4 @@
-use aerolab_sim_core::{ThermalConfig, export_thermal_visualization, simulate};
+use omega_sim_core::{ThermalConfig, export_thermal_visualization, simulate};
 use rayon::ThreadPoolBuilder;
 use std::error::Error;
 use std::fs::{self, File, OpenOptions};
@@ -8,14 +8,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let detected = std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(2);
-    let threads = std::env::var("AEROLAB_WORKER_THREADS")
+    let threads = std::env::var("OMEGA_WORKER_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or_else(|| detected.saturating_sub(1).max(1))
         .clamp(1, 32);
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads)
-        .thread_name(|index| format!("aerolab-sim-{index}"))
+        .thread_name(|index| format!("omega-sim-{index}"))
         .build()?;
     let config_path = std::env::args_os().nth(1).map(PathBuf::from);
     let config = if let Some(path) = &config_path {
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ThermalConfig::default()
     };
 
-    println!("AEROLAB Scientific Core | 2D finite-volume heat conduction");
+    println!("OMEGA Scientific Core | 2D finite-volume heat conduction");
     if let Some(path) = &config_path {
         println!("Input deck: {}", path.display());
     } else {

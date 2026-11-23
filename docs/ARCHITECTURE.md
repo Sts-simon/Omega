@@ -23,7 +23,7 @@ The renderer must never wait for a long scientific computation. The Bevy app own
   a field-test gameplay stage and dossier-gated delivery/payout.
 
 ### Missile workshop (`missile.rs`)
-- Owns the staged-vehicle session (`aerolab_rules::vehicle::Vehicle`), the selected part, the active
+- Owns the staged-vehicle session (`omega_rules::vehicle::Vehicle`), the selected part, the active
   stage and the part id counter.
 - Applies button actions (add part, select, add/remove stage, adjust length/diameter/burn
   time/engine scale/module mass, remove part, presets, clear) with per-part clamps, a four-stage
@@ -135,12 +135,12 @@ The interactive simulation should use precomputed data only when the requested s
 
 ## Scientific crate boundary (0.11.0)
 
-The root application depends on `aerolab-sim-core` through a local path dependency. The numerical crate owns its material, boundary, grid/time-step validation, solver and result types. It has no Bevy types and can be tested independently with `cargo test -p aerolab-sim-core`. The `src/jobs/thermal.rs` module is now only a compatibility re-export so the job manager can continue to schedule numerical jobs without owning solver implementation.
+The root application depends on `omega-sim-core` through a local path dependency. The numerical crate owns its material, boundary, grid/time-step validation, solver and result types. It has no Bevy types and can be tested independently with `cargo test -p omega-sim-core`. The `src/jobs/thermal.rs` module is now only a compatibility re-export so the job manager can continue to schedule numerical jobs without owning solver implementation.
 
 
 ## Structural solver boundary (0.11.0)
 
-`aerolab-sim-core::mechanics` implements a standalone planar pin-jointed civil truss solver. It receives an explicit node/element/support/load input deck and does not read the Bevy assembly model. This separation is intentional: the current workshop components are coarse visual primitives and do not define a validated finite-element mesh or joint model. The solver writes its own JSON result through the `truss_study` example. The game UI and geometry coupling can be considered only after the numerical model and its reference tests are established.
+`omega-sim-core::mechanics` implements a standalone planar pin-jointed civil truss solver. It receives an explicit node/element/support/load input deck and does not read the Bevy assembly model. This separation is intentional: the current workshop components are coarse visual primitives and do not define a validated finite-element mesh or joint model. The solver writes its own JSON result through the `truss_study` example. The game UI and geometry coupling can be considered only after the numerical model and its reference tests are established.
 
 
 # Facility routing (0.26.0)
@@ -159,7 +159,7 @@ computation; the missile workshop is opened from the WORKSHOP tab). Escape retur
 except when an active modal editor consumes it. All views share campaign state and the same save
 slot; there are still no separate serialized Bevy worlds or interior 3D scenes.
 
-Research and development are gameplay layers only: `aerolab_rules` values are abstract and are not
+Research and development are gameplay layers only: `omega_rules` values are abstract and are not
 physical performance data.
 
 
@@ -167,10 +167,10 @@ physical performance data.
 
 Two Bevy-independent crates sit beside `sim-core`:
 
-- `aerolab-data`: content hashing, atomic file writes and the v2 save slot (`manifest.json`
+- `omega-data`: content hashing, atomic file writes and the v2 save slot (`manifest.json`
   committed last; per-file hashes verified on read; unsafe relative paths rejected). Legacy 0.21
   files can be imported without modifying the source directory.
-- `aerolab-rules`: two halves. The civil verification half provides requirements, evidence, the
+- `omega-rules`: two halves. The civil verification half provides requirements, evidence, the
   verification matrix, dossier generation and geometry-derived metrics; a requirement is only
   *Verified* when its whole uncertainty band satisfies the limit, and evidence becomes *Stale* when
   the design or program hash changes. The missile half provides `vehicle` (parts, stages, mass,
@@ -210,5 +210,5 @@ Research Centre ---> capabilities ---> Missile Workshop ---> vehicle revision
 The legacy assembly bench, instrument profile, polygon sketch, mesh thermal studies, chamber
 sequencer and civil contract families are transitional. They stay as long as the civil loop is the
 only complete contract path, and are removed once missile-family contracts, trials and plan
-delivery replace it. `sim-core`, `aerolab-data` and the verification half of `aerolab-rules` remain
+delivery replace it. `sim-core`, `omega-data` and the verification half of `omega-rules` remain
 reusable tooling; nothing in the target loop depends on Bevy except the views themselves.

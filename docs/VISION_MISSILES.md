@@ -1,4 +1,4 @@
-# AEROLAB — missile design loop (fictional, abstract)
+# Omega — missile design loop (fictional, abstract)
 
 ## The loop
 1. **Contract.** The player picks an offer for one missile family: ballistic, cruise, anti-ship, surface-to-air, air-to-air. Offers state limits on abstract metrics (path length, top speed, flight time, mass, lock probability, computer class).
@@ -33,13 +33,13 @@ Playable in the application (see `docs/CHANGELOG.md` and the README):
   one active project; **NEXT DAY** advances the clock (day counter in the navigation bar); credits
   are deducted at start; research state and day are saved in the campaign. Completed research grants
   capabilities and gates workshop parts.
-- **Missile workshop:** a staged, resizable vehicle built from the parts of `aerolab-rules::vehicle`
+- **Missile workshop:** a staged, resizable vehicle built from the parts of `omega-rules::vehicle`
   (up to four stages, one flight computer in the last stage), with live mass, carried mass, thrust,
   burn time, thrust-to-weight and delta-v per stage, the computer class and limits, the programming
   blocks the installed sensors unlock, missing research and design validation. The vehicle is saved
   to `designs/vehicle.json` on every change and reloaded at startup.
 
-Implemented and tested without any UI (`aerolab-rules`): `vehicle` (parts, stages, TWR, delta-v,
+Implemented and tested without any UI (`omega-rules`): `vehicle` (parts, stages, TWR, delta-v,
 computer limits, sensor-to-block mapping, research requirements), `program` (seven blocks, threads,
 validation against hardware and computer limits), `flight` (seeded abstract flight test with events,
 anomalies and a lock roll), `research` (tree aligned with the loop), plus `requirement`, `dossier`,

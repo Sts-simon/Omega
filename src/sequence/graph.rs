@@ -71,7 +71,7 @@ pub fn setup(mut commands: Commands, workspace: Res<SequenceWorkspace>) {
 
     commands.entity(panel).with_children(|parent| {
         parent.spawn((
-            Text::new("AEROLAB | VISUAL SEQUENCE GRAPH"),
+            Text::new("OMEGA | VISUAL SEQUENCE GRAPH"),
             TextFont { font_size: FontSize::Px(18.0), ..default() },
             TextColor(Color::srgb(0.44, 0.88, 0.98)),
             Node {
@@ -285,7 +285,7 @@ pub fn sync(
 
     if let Ok(mut header) = header_query.single_mut() {
         header.0 = format!(
-            "AEROLAB | VISUAL SEQUENCE GRAPH   [{}]   {} blocks",
+            "OMEGA | VISUAL SEQUENCE GRAPH   [{}]   {} blocks",
             workspace.runtime.status.label(),
             workspace.program.blocks.len()
         );

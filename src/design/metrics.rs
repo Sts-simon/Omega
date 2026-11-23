@@ -3,8 +3,8 @@
 //! Contracts evaluate the *actual geometry* through these metrics instead of free-form numbers.
 
 use super::model::Assembly;
-use aerolab_data::{hash_serializable, ContentHash};
-use aerolab_rules::{derive_metrics, DerivedMetrics, PartGeometry};
+use omega_data::{hash_serializable, ContentHash};
+use omega_rules::{derive_metrics, DerivedMetrics, PartGeometry};
 
 pub fn assembly_metrics(assembly: &Assembly) -> Result<DerivedMetrics, String> {
     let parts: Vec<PartGeometry> = assembly

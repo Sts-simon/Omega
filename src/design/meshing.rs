@@ -2,7 +2,7 @@
 //! triangular thermal mesh model. Only flat platforms and panels are meshed.
 
 use super::{Assembly, MaterialKind, PartKind};
-use aerolab_sim_core::{
+use omega_sim_core::{
     Material, MeshNode2D, MeshThermalConfig, MeshTriangle2D, PlanarPolygonRegion,
     PlanarRectangle, TriMesh2D, mesh_planar_polygon, mesh_planar_rectangles,
 };

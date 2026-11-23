@@ -1,4 +1,4 @@
-use aerolab_sim_core::{
+use omega_sim_core::{
     mesh_planar_rectangles, refine_tri_mesh_local, PlanarRectangle,
 };
 use std::fs;

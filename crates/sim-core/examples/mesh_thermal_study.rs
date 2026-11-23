@@ -1,4 +1,4 @@
-use aerolab_sim_core::{
+use omega_sim_core::{
     MeshThermalConfig, export_mesh_thermal_visualization, simulate_mesh_thermal,
 };
 use rayon::ThreadPoolBuilder;
@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         MeshThermalConfig::default()
     };
-    let threads = std::env::var("AEROLAB_WORKER_THREADS")
+    let threads = std::env::var("OMEGA_WORKER_THREADS")
         .ok().and_then(|value| value.parse::<usize>().ok()).unwrap_or_else(|| {
             std::thread::available_parallelism().map(usize::from).unwrap_or(1).saturating_sub(1).max(1)
         }).clamp(1, 16);

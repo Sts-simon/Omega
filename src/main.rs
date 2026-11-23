@@ -17,7 +17,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "AEROLAB 0.26.0 | Research Island".to_string(),
+                title: "OMEGA 0.26.0 | Research Island".to_string(),
                 resolution: (1600, 960).into(),
                 ..default()
             }),

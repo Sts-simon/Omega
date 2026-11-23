@@ -266,7 +266,7 @@ impl SequenceWorkspace {
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn((
-        Text::new("AEROLAB | Lab sequence editor\nLoading program..."),
+        Text::new("OMEGA | Lab sequence editor\nLoading program..."),
         TextFont {
             font_size: FontSize::Px(13.0),
             ..default()
@@ -452,7 +452,7 @@ pub fn update_hud(
         return;
     }
     let mut lines = vec![format!(
-        "AEROLAB 0.26.0 | LAB SEQUENCER   [{}]",
+        "OMEGA 0.26.0 | LAB SEQUENCER   [{}]",
         workspace.runtime.status.label()
     )];
     lines.push("F6 open graph | Space run/pause | N step | B breakpoint | F1 wait | F2 read | F3 temp condition".to_string());

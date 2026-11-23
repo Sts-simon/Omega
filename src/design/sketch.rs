@@ -2,7 +2,7 @@
 //! Sketches are persisted separately from the parametric part assembly and are
 //! passed to the scientific mesher as validated polygon regions.
 
-use aerolab_sim_core::{PlanarPolygonRegion, mesh_planar_polygon};
+use omega_sim_core::{PlanarPolygonRegion, mesh_planar_polygon};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use crate::campus::{CampusState, CampusView};

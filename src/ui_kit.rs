@@ -1,4 +1,4 @@
-//! Shared look and small widgets for the AEROLAB interface: palette, cards, status chips and
+//! Shared look and small widgets for the Omega interface: palette, cards, status chips and
 //! buttons whose colour depends on a tone and on hover/press state.
 
 use crate::interface::{UiAction, UiActionButton};

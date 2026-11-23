@@ -1,4 +1,4 @@
-use aerolab_sim_core::{
+use omega_sim_core::{
     Material, MeshThermalConfig, PlanarPolygonRegion, export_mesh_thermal_visualization,
     mesh_planar_polygon, simulate_mesh_thermal,
 };
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         steps: 300,
         volumetric_heat_source_w_m3: 10_000.0,
     };
-    let threads = std::env::var("AEROLAB_WORKER_THREADS")
+    let threads = std::env::var("OMEGA_WORKER_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or_else(|| {

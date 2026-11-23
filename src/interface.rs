@@ -103,7 +103,7 @@ pub fn setup(mut commands: Commands) {
 
     commands.entity(nav).with_children(|parent| {
         parent.spawn((
-            Text::new("AEROLAB"),
+            Text::new("OMEGA"),
             TextFont { font_size: FontSize::Px(19.0), ..default() },
             TextColor(Color::srgb(0.36, 0.84, 0.94)),
             Node { margin: UiRect { right: Val::Px(16.0), ..default() }, ..default() },

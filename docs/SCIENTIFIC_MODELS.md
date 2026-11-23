@@ -11,8 +11,8 @@ This is an educational **pin-jointed truss** model, not a general-purpose finite
 Run it independently of Bevy:
 
 ```bash
-cargo test -p aerolab-sim-core mechanics
-AEROLAB_WORKER_THREADS=16 cargo run --release -p aerolab-sim-core --example truss_study -- crates/sim-core/examples/civil-bridge-truss.json
+cargo test -p omega-sim-core mechanics
+OMEGA_WORKER_THREADS=16 cargo run --release -p omega-sim-core --example truss_study -- crates/sim-core/examples/civil-bridge-truss.json
 ```
 
 ## 0.10.0: transient solid heat conduction
@@ -27,7 +27,7 @@ See [SCIENTIFIC_ENGINE.md](SCIENTIFIC_ENGINE.md) for equations, assumptions, dia
 
 ## Contract-linked research (0.10.0)
 
-The computation-lab job now calls the independent `aerolab-sim-core` library through a thin compatibility module. A contract ID is still carried by the job manager for campaign progression. The solver run itself is a generic material thermal-screening task and must not be interpreted as a qualification of the complete assembly. The 1,000-sample field test remains a deterministic gameplay model, not a statistical reliability certification.
+The computation-lab job now calls the independent `omega-sim-core` library through a thin compatibility module. A contract ID is still carried by the job manager for campaign progression. The solver run itself is a generic material thermal-screening task and must not be interpreted as a qualification of the complete assembly. The 1,000-sample field test remains a deterministic gameplay model, not a statistical reliability certification.
 
 ## Sequence-editor chamber
 

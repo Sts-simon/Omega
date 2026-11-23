@@ -4,7 +4,7 @@
 //! writes are atomic, listed in a manifest committed last, and verified by hash when read.
 //! Saves from 0.21 (`saves/*.json`) are imported once, without being modified or deleted.
 
-use aerolab_data::{SaveSlot, SlotError};
+use omega_data::{SaveSlot, SlotError};
 use bevy::log::{info, warn};
 use std::path::Path;
 
@@ -74,7 +74,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("aerolab-save-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("omega-save-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

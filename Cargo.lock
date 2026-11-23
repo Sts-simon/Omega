@@ -100,47 +100,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "aerolab"
-version = "0.26.0"
-dependencies = [
- "aerolab-data",
- "aerolab-rules",
- "aerolab-sim-core",
- "bevy",
- "crossbeam-channel",
- "rayon",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "aerolab-data"
-version = "0.22.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "aerolab-rules"
-version = "0.24.0"
-dependencies = [
- "aerolab-data",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "aerolab-sim-core"
-version = "0.20.0"
-dependencies = [
- "earcutr",
- "rayon",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4334,6 +4293,47 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6951b4e8bf21c8193da321bcce9c9dd2e13c858fe078bf9054a288b419ae5d6e"
 dependencies = [
  "byteorder",
+]
+
+[[package]]
+name = "omega"
+version = "0.26.0"
+dependencies = [
+ "bevy",
+ "crossbeam-channel",
+ "omega-data",
+ "omega-rules",
+ "omega-sim-core",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "omega-data"
+version = "0.22.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "omega-rules"
+version = "0.24.0"
+dependencies = [
+ "omega-data",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "omega-sim-core"
+version = "0.20.0"
+dependencies = [
+ "earcutr",
+ "rayon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -123,7 +123,7 @@ pub(crate) struct GizmoPrimitiveVisual(GizmoPrimitive);
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn((
-        Text::new("AEROLAB | Assembly editor\nLoading editor state..."),
+        Text::new("OMEGA | Assembly editor\nLoading editor state..."),
         TextFont {
             font_size: FontSize::Px(15.0),
             ..default()

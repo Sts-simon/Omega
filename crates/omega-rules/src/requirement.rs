@@ -1,4 +1,4 @@
-use aerolab_data::ContentHash;
+use omega_data::ContentHash;
 use serde::{Deserialize, Serialize};
 
 /// How a requirement is proven. Cheap methods carry wider uncertainty.

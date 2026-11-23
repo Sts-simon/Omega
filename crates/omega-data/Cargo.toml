@@ -1,8 +1,8 @@
 [package]
-name = "aerolab-data"
+name = "omega-data"
 version = "0.22.0"
 edition = "2024"
-description = "Bevy-independent shared data model, content hashing and save-slot persistence for AEROLAB"
+description = "Bevy-independent shared data model, content hashing and save-slot persistence for Omega"
 license = "MIT"
 
 [dependencies]

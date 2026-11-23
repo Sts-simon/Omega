@@ -1,11 +1,11 @@
 //! Contract verification: contract limits become requirements, every check produces evidence
 //! bound to the hash of the design it was made for, and the delivery dossier is generated from
-//! that evidence (`aerolab-rules`). All uncertainties are abstract gameplay values except the
+//! that evidence (`omega-rules`). All uncertainties are abstract gameplay values except the
 //! field-test one, which is the standard error of the 1,000-sample measurement.
 
 use super::*;
-use aerolab_data::ContentHash;
-use aerolab_rules::{build_dossier, Dossier, DossierDecision, Requirement, VerificationMethod};
+use omega_data::ContentHash;
+use omega_rules::{build_dossier, Dossier, DossierDecision, Requirement, VerificationMethod};
 
 fn requirement(id: &str, label: &str, metric: &str, cmp: Comparator, limit: f64, methods: &[VerificationMethod]) -> Requirement {
     Requirement {

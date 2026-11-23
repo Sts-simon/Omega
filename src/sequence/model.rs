@@ -411,7 +411,7 @@ mod tests {
                 {"id": 2, "kind": {"type": "end"}}
             ]
         }"#;
-        let path = std::env::temp_dir().join(format!("aerolab-sequence-migration-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!("omega-sequence-migration-{}.json", std::process::id()));
         fs::write(&path, old).unwrap();
         let program = Program::load_from(&path).unwrap();
         let _ = fs::remove_file(&path);

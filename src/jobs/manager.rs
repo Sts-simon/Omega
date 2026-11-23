@@ -1,5 +1,5 @@
 use super::thermal::{self, ThermalConfig, ThermalError, ThermalResult};
-use aerolab_sim_core::{
+use omega_sim_core::{
     MeshThermalConfig, MeshThermalError, MeshThermalResult, TrussConfig, TrussError,
     TrussResult, export_mesh_thermal_visualization, export_thermal_visualization,
     export_truss_visualization, simulate_mesh_thermal_cancellable, solve_truss_cancellable,
@@ -101,18 +101,18 @@ impl Default for JobManager {
         // Leave one logical CPU available for Bevy/UI by default. The environment
         // variable lets users explicitly spend the full CPU budget on research.
         let default_budget = detected_threads.saturating_sub(1).max(1);
-        let worker_threads = std::env::var("AEROLAB_WORKER_THREADS")
+        let worker_threads = std::env::var("OMEGA_WORKER_THREADS")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(default_budget)
             .clamp(1, 16);
 
         std::thread::Builder::new()
-            .name("aerolab-research-worker".to_string())
+            .name("omega-research-worker".to_string())
             .spawn(move || {
                 let pool = ThreadPoolBuilder::new()
                     .num_threads(worker_threads)
-                    .thread_name(|index| format!("aerolab-cpu-{index}"))
+                    .thread_name(|index| format!("omega-cpu-{index}"))
                     .build()
                     .expect("Could not create Rayon thread pool");
 
@@ -550,7 +550,7 @@ pub struct ComputationHud;
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn((
-        Text::new("AEROLAB | Computation queue\nWaiting for jobs..."),
+        Text::new("OMEGA | Computation queue\nWaiting for jobs..."),
         TextFont {
             font_size: FontSize::Px(14.0),
             ..default()
@@ -589,7 +589,7 @@ pub fn update_hud(
         return;
     }
     let mut lines = vec![format!(
-        "AEROLAB 0.26.0 | COMPUTATION CENTRE\n{}\n\nCPU worker threads: {}\nR: thermal study | G: civil truss | M: workshop mesh | P: polygon mesh | Shift+M: local refinement | T: field test | C: cancel | O: latest report",
+        "OMEGA 0.26.0 | COMPUTATION CENTRE\n{}\n\nCPU worker threads: {}\nR: thermal study | G: civil truss | M: workshop mesh | P: polygon mesh | Shift+M: local refinement | T: field test | C: cancel | O: latest report",
         campus.ui_computation_summary(),
         jobs.worker_threads()
     )];

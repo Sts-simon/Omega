@@ -360,8 +360,8 @@ fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, de
 // Research
 // ----------------------------------------------------------------------------------------------
 
-fn department_color(dept: aerolab_rules::Department) -> Color {
-    use aerolab_rules::Department::*;
+fn department_color(dept: omega_rules::Department) -> Color {
+    use omega_rules::Department::*;
     match dept {
         VehicleFamilies => Color::srgb(0.36, 0.84, 0.94),
         Materials => Color::srgb(0.92, 0.62, 0.30),
@@ -372,7 +372,7 @@ fn department_color(dept: aerolab_rules::Department) -> Color {
 }
 
 fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
-    use aerolab_rules::{default_tree, Department, ResearchError};
+    use omega_rules::{default_tree, Department, ResearchError};
     let tree = default_tree();
     root.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: Val::Px(12.0), ..default() }).with_children(|col| {
         col.spawn(Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() }).with_children(|head| {
@@ -438,8 +438,8 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
 // Missile workshop
 // ----------------------------------------------------------------------------------------------
 
-fn spec_summary(spec: &aerolab_rules::PartSpec) -> String {
-    use aerolab_rules::PartSpec::*;
+fn spec_summary(spec: &omega_rules::PartSpec) -> String {
+    use omega_rules::PartSpec::*;
     match *spec {
         SolidMotor { length_m, diameter_m, burn_time_s } => format!("Solid motor {length_m:.1} m x {diameter_m:.2} m, {burn_time_s:.0} s"),
         FuelTank { length_m, diameter_m } => format!("Fuel tank {length_m:.1} m x {diameter_m:.2} m"),
@@ -810,9 +810,9 @@ pub(crate) fn update_nav_status(campus: Res<CampusState>, mut status: Query<&mut
 /// Replace internal capability ids in a message with the name of the technology that grants them.
 pub(crate) fn friendly_capabilities(message: &str) -> String {
     let mut text = message.to_string();
-    for tech in aerolab_rules::default_tree() {
+    for tech in omega_rules::default_tree() {
         for grant in &tech.grants {
-            if let aerolab_rules::Grant::Capability(capability) = grant {
+            if let omega_rules::Grant::Capability(capability) = grant {
                 text = text.replace(capability.as_str(), &format!("\"{}\" (Research Centre)", tech.label));
             }
         }

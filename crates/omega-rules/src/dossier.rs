@@ -1,5 +1,5 @@
 use crate::requirement::{evaluate_requirement, Evidence, Requirement, RequirementStatus};
-use aerolab_data::ContentHash;
+use omega_data::ContentHash;
 use serde::{Deserialize, Serialize};
 
 /// Minimum weighted score (0..1) for a dossier whose hard requirements are all verified.

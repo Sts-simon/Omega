@@ -1,4 +1,4 @@
-use aerolab_sim_core::{TrussConfig, export_truss_visualization, solve_truss};
+use omega_sim_core::{TrussConfig, export_truss_visualization, solve_truss};
 use rayon::ThreadPoolBuilder;
 use std::error::Error;
 use std::fs::{self, File, OpenOptions};
@@ -6,14 +6,14 @@ use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let detected = std::thread::available_parallelism().map(usize::from).unwrap_or(2);
-    let threads = std::env::var("AEROLAB_WORKER_THREADS")
+    let threads = std::env::var("OMEGA_WORKER_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or_else(|| detected.saturating_sub(1).max(1))
         .clamp(1, 32);
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads)
-        .thread_name(|index| format!("aerolab-truss-{index}"))
+        .thread_name(|index| format!("omega-truss-{index}"))
         .build()?;
     let config_path = std::env::args_os().nth(1).map(PathBuf::from);
     let config = if let Some(path) = &config_path {
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         TrussConfig::default()
     };
 
-    println!("AEROLAB Scientific Core | 2D civil truss statics");
+    println!("OMEGA Scientific Core | 2D civil truss statics");
     println!("Study: {}", config.name);
     println!("Nodes: {} | members: {} | worker threads: {}", config.nodes.len(), config.elements.len(), threads);
     let result = solve_truss(&config, &pool, |fraction| {

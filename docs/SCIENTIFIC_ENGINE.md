@@ -1,4 +1,4 @@
-# AEROLAB Scientific Engine 0.18.0
+# Omega Scientific Engine 0.18.0
 
 ## Purpose and scope
 
@@ -86,12 +86,12 @@ The independent crate contains tests for:
 Run them from the repository root:
 
 ```bash
-cargo test -p aerolab-sim-core
+cargo test -p omega-sim-core
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-AEROLAB_WORKER_THREADS=16 cargo run --release -p aerolab-sim-core --example thermal_study
-AEROLAB_WORKER_THREADS=16 cargo run --release -p aerolab-sim-core --example thermal_study -- crates/sim-core/examples/material-interface-study.json
+OMEGA_WORKER_THREADS=16 cargo run --release -p omega-sim-core --example thermal_study
+OMEGA_WORKER_THREADS=16 cargo run --release -p omega-sim-core --example thermal_study -- crates/sim-core/examples/material-interface-study.json
 ```
 
 ## Current limitations
@@ -117,7 +117,7 @@ After triangulation, every triangle is oriented counter-clockwise and checked fo
 
 The bundled `polygon_mesh_study` example reads `crates/sim-core/examples/perforated-panel-polygon.json` by default or accepts another `PlanarPolygonRegion` JSON file as its first argument. It runs the existing transient slab thermal FEM and exports JSON, HTML/SVG and CSV reports. The geometry is a civil/industrial demonstration, not an engineering qualification model.
 
-Current scope: the core `mesh_planar_polygon` primitive still triangulates one region per call, with one material and thickness per region. The AEROLAB 0.16 application adapter combines several such outputs and welds coincident complete shared edges. Curved boundaries, automatic mesh sizing, 3D solids and stronger CAD topology repair remain future work.
+Current scope: the core `mesh_planar_polygon` primitive still triangulates one region per call, with one material and thickness per region. The Omega 0.16 application adapter combines several such outputs and welds coincident complete shared edges. Curved boundaries, automatic mesh sizing, 3D solids and stronger CAD topology repair remain future work.
 
 ## 2D civil truss statics (0.11.0)
 
@@ -132,7 +132,7 @@ The bundled `civil-bridge-truss.json` is a small teaching example. The solver do
 
 ## Visualization exports (0.12.0)
 
-`aerolab-sim-core::visualization` writes reports without a Bevy dependency:
+`omega-sim-core::visualization` writes reports without a Bevy dependency:
 
 - `export_thermal_visualization` creates an SVG heatmap embedded in a responsive HTML report and a full-resolution CSV (`x_index`, `y_index`, cell-centre coordinates, temperature). The SVG uses block averaging and is capped at 144 × 144 display bins; the CSV retains the solver's full field.
 - `export_truss_visualization` creates an SVG with undeformed and deformed truss geometry, member tension/compression colors, supports, loads and node labels, plus a combined node/member CSV. The deformation is exaggerated only in the SVG; its scale factor is stated in the report. All CSV displacements and stresses are the solver's original SI values.

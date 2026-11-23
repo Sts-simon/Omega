@@ -1,4 +1,4 @@
-//! Numerical simulation library used by AEROLAB.
+//! Numerical simulation library used by Omega.
 //!
 //! This crate deliberately has no Bevy dependency. It contains validated physical
 //! quantities, result provenance and deterministic scientific solvers that can be
