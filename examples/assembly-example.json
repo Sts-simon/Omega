@@ -1,0 +1,83 @@
+{
+  "schema_version": 2,
+  "name": "Workshop test rig",
+  "parts": [
+    {
+      "id": "base-plate",
+      "label": "Base plate",
+      "kind": "platform",
+      "dimensions_m": [
+        2.0,
+        0.12,
+        1.4
+      ],
+      "position_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "material": "aluminum",
+      "rotation_rad": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "support-left",
+      "label": "Left support",
+      "kind": "beam",
+      "dimensions_m": [
+        0.12,
+        1.1,
+        0.12
+      ],
+      "position_m": [
+        -0.75,
+        0.6,
+        0.0
+      ],
+      "material": "steel",
+      "rotation_rad": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "sensor-case",
+      "label": "Instrument enclosure",
+      "kind": "enclosure",
+      "dimensions_m": [
+        0.45,
+        0.32,
+        0.3
+      ],
+      "position_m": [
+        0.0,
+        1.25,
+        0.0
+      ],
+      "material": "polymer",
+      "rotation_rad": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "link-0001",
+      "parent_part_id": "base-plate",
+      "child_part_id": "support-left",
+      "kind": "rigid"
+    },
+    {
+      "id": "link-0002",
+      "parent_part_id": "base-plate",
+      "child_part_id": "sensor-case",
+      "kind": "rigid"
+    }
+  ]
+}

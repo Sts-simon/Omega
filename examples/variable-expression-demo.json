@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "name": "Laboratory sample-count demonstration",
+  "blocks": [
+    { "id": 1, "kind": { "type": "start" }, "position": { "x": 20.0, "y": 104.0 }, "breakpoint": false },
+    { "id": 2, "kind": { "type": "set_variable", "name": "sample_count", "value": 0.0 }, "position": { "x": 278.0, "y": 104.0 }, "breakpoint": false },
+    { "id": 3, "kind": { "type": "add_variable", "name": "sample_count", "delta": 1.0 }, "position": { "x": 536.0, "y": 104.0 }, "breakpoint": false },
+    { "id": 4, "kind": { "type": "set_variable_expression", "name": "scaled_count", "expression": "(sample_count + 1) * 2" }, "position": { "x": 794.0, "y": 104.0 }, "breakpoint": false },
+    { "id": 5, "kind": { "type": "branch_variable", "name": "scaled_count", "comparison": "greater_or_equal", "threshold": 4.0, "target_block_id": 7 }, "position": { "x": 20.0, "y": 246.0 }, "breakpoint": false },
+    { "id": 6, "kind": { "type": "record", "message": "Threshold not reached" }, "position": { "x": 278.0, "y": 246.0 }, "breakpoint": true },
+    { "id": 7, "kind": { "type": "end" }, "position": { "x": 536.0, "y": 246.0 }, "breakpoint": false }
+  ]
+}

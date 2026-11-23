@@ -1,0 +1,498 @@
+{
+  "name": "Two-material planar plate interface study",
+  "mesh": {
+    "nodes": [
+      {
+        "position_m": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "position_m": [
+          0.05,
+          0.0
+        ]
+      },
+      {
+        "position_m": [
+          0.1,
+          0.0
+        ]
+      },
+      {
+        "position_m": [
+          0.15000000000000002,
+          0.0
+        ]
+      },
+      {
+        "position_m": [
+          0.2,
+          0.0
+        ]
+      },
+      {
+        "position_m": [
+          0.0,
+          0.05
+        ]
+      },
+      {
+        "position_m": [
+          0.05,
+          0.05
+        ]
+      },
+      {
+        "position_m": [
+          0.1,
+          0.05
+        ]
+      },
+      {
+        "position_m": [
+          0.15000000000000002,
+          0.05
+        ]
+      },
+      {
+        "position_m": [
+          0.2,
+          0.05
+        ]
+      },
+      {
+        "position_m": [
+          0.0,
+          0.1
+        ]
+      },
+      {
+        "position_m": [
+          0.05,
+          0.1
+        ]
+      },
+      {
+        "position_m": [
+          0.1,
+          0.1
+        ]
+      },
+      {
+        "position_m": [
+          0.15000000000000002,
+          0.1
+        ]
+      },
+      {
+        "position_m": [
+          0.2,
+          0.1
+        ]
+      },
+      {
+        "position_m": [
+          0.0,
+          0.15000000000000002
+        ]
+      },
+      {
+        "position_m": [
+          0.05,
+          0.15000000000000002
+        ]
+      },
+      {
+        "position_m": [
+          0.1,
+          0.15000000000000002
+        ]
+      },
+      {
+        "position_m": [
+          0.15000000000000002,
+          0.15000000000000002
+        ]
+      },
+      {
+        "position_m": [
+          0.2,
+          0.15000000000000002
+        ]
+      },
+      {
+        "position_m": [
+          0.0,
+          0.2
+        ]
+      },
+      {
+        "position_m": [
+          0.05,
+          0.2
+        ]
+      },
+      {
+        "position_m": [
+          0.1,
+          0.2
+        ]
+      },
+      {
+        "position_m": [
+          0.15000000000000002,
+          0.2
+        ]
+      },
+      {
+        "position_m": [
+          0.2,
+          0.2
+        ]
+      }
+    ],
+    "triangles": [
+      {
+        "node_ids": [
+          0,
+          1,
+          6
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          0,
+          6,
+          5
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          1,
+          2,
+          6
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          2,
+          7,
+          6
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          2,
+          3,
+          8
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          2,
+          8,
+          7
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          3,
+          4,
+          8
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          4,
+          9,
+          8
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          5,
+          6,
+          10
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          6,
+          11,
+          10
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          6,
+          7,
+          12
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          6,
+          12,
+          11
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          7,
+          8,
+          12
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          8,
+          13,
+          12
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          8,
+          9,
+          14
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          8,
+          14,
+          13
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          10,
+          11,
+          16
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          10,
+          16,
+          15
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          11,
+          12,
+          16
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          12,
+          17,
+          16
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          12,
+          13,
+          18
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          12,
+          18,
+          17
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          13,
+          14,
+          18
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          14,
+          19,
+          18
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          15,
+          16,
+          20
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          16,
+          21,
+          20
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          16,
+          17,
+          22
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          16,
+          22,
+          21
+        ],
+        "material_id": 0,
+        "thickness_m": 0.01,
+        "source_part_id": "aluminium-panel"
+      },
+      {
+        "node_ids": [
+          17,
+          18,
+          22
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          18,
+          23,
+          22
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          18,
+          19,
+          24
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      },
+      {
+        "node_ids": [
+          18,
+          24,
+          23
+        ],
+        "material_id": 1,
+        "thickness_m": 0.01,
+        "source_part_id": "steel-panel"
+      }
+    ]
+  },
+  "materials": [
+    {
+      "name": "Aluminium reference",
+      "conductivity_w_m_k": 205.0,
+      "density_kg_m3": 2700.0,
+      "specific_heat_j_kg_k": 900.0
+    },
+    {
+      "name": "Steel reference",
+      "conductivity_w_m_k": 45.0,
+      "density_kg_m3": 7850.0,
+      "specific_heat_j_kg_k": 470.0
+    }
+  ],
+  "initial_temperature_k": 293.15,
+  "fixed_boundary_temperature_k": 293.15,
+  "time_step_s": 0.02,
+  "steps": 500,
+  "volumetric_heat_source_w_m3": 50000.0
+}

@@ -1,0 +1,11 @@
+[package]
+name = "aerolab-rules"
+version = "0.24.0"
+edition = "2024"
+description = "Bevy-independent gameplay rules for AEROLAB: requirements, verification, evidence and dossiers"
+license = "MIT"
+
+[dependencies]
+aerolab-data = { path = "../aerolab-data" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "regions": [
+    {
+      "source_part_id": "sketch-region-001",
+      "outer_boundary_m": [
+        [-1.5, -1.0],
+        [0.0, -1.0],
+        [0.0, 1.0],
+        [-1.5, 1.0]
+      ],
+      "holes_m": [
+        [
+          [-1.2, -0.25],
+          [-0.8, -0.25],
+          [-0.8, 0.25],
+          [-1.2, 0.25]
+        ]
+      ],
+      "material_id": 0,
+      "thickness_m": 0.012
+    },
+    {
+      "source_part_id": "sketch-region-002",
+      "outer_boundary_m": [
+        [0.0, -1.0],
+        [1.5, -1.0],
+        [1.5, 1.0],
+        [0.0, 1.0]
+      ],
+      "holes_m": [],
+      "material_id": 1,
+      "thickness_m": 0.012
+    }
+  ]
+}

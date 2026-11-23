@@ -1,0 +1,12 @@
+[package]
+name = "aerolab-data"
+version = "0.22.0"
+edition = "2024"
+description = "Bevy-independent shared data model, content hashing and save-slot persistence for AEROLAB"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]

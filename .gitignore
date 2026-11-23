@@ -1,0 +1,6 @@
+/target
+/saves
+/results
+/.freebuff
+*.tmp
+.DS_Store

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "name": "Chamber thermal acceptance test",
+  "blocks": [
+    { "id": 1, "kind": { "type": "start" } },
+    { "id": 2, "kind": { "type": "set_heater_power", "fraction": 0.65 } },
+    { "id": 3, "kind": { "type": "wait", "duration_s": 2.0 } },
+    { "id": 4, "kind": { "type": "read_temperature", "sensor_id": "chamber_01" } },
+    {
+      "id": 5,
+      "kind": {
+        "type": "branch_temperature",
+        "comparison": "greater_or_equal",
+        "threshold_c": 24.0,
+        "target_block_id": 10
+      }
+    },
+    { "id": 6, "kind": { "type": "record", "message": "Target not reached; continuing the test" } },
+    { "id": 7, "kind": { "type": "wait", "duration_s": 2.0 } },
+    { "id": 8, "kind": { "type": "read_temperature", "sensor_id": "chamber_01" } },
+    {
+      "id": 9,
+      "kind": {
+        "type": "branch_temperature",
+        "comparison": "less_than",
+        "threshold_c": 24.0,
+        "target_block_id": 3
+      }
+    },
+    { "id": 10, "kind": { "type": "set_heater_power", "fraction": 0.0 } },
+    { "id": 11, "kind": { "type": "record", "message": "Thermal acceptance cycle completed" } },
+    { "id": 12, "kind": { "type": "end" } }
+  ]
+}

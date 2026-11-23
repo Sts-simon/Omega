@@ -1,0 +1,30 @@
+[package]
+name = "aerolab"
+version = "0.26.0"
+edition = "2024"
+description = "A modular engineering research sandbox with an interactive island campus"
+license = "MIT"
+
+[workspace]
+members = ["crates/sim-core", "crates/aerolab-data", "crates/aerolab-rules"]
+resolver = "3"
+
+[dependencies]
+aerolab-sim-core = { path = "crates/sim-core" }
+aerolab-data = { path = "crates/aerolab-data" }
+aerolab-rules = { path = "crates/aerolab-rules" }
+bevy = "=0.20.1"
+crossbeam-channel = "0.5"
+rayon = "1.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
