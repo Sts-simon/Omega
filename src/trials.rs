@@ -4,9 +4,14 @@
 //! The model is deterministic: the same vehicle, program and `FlightConfig` always give the same
 //! report. The screen shows that input hash so a run can be replayed and compared.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+
 use bevy::prelude::*;
 use omega_data::hash_serializable;
-use omega_rules::flight::{FlightConfig, FlightReport, LaunchMode, simulate};
+use omega_rules::flight::{FlightConfig, FlightReport, LaunchMode, lock_roll, simulate};
+use omega_rules::program::Block;
 use omega_rules::{Program, Vehicle};
 
 /// Capability that unlocks seeded batches and A/B comparisons.
@@ -48,25 +53,82 @@ pub(crate) struct BatchSummary {
 }
 
 impl BatchSummary {
-    fn from_reports(reports: &[FlightReport]) -> Self {
-        let runs = reports.len().max(1) as f64;
-        let count = |predicate: &dyn Fn(&FlightReport) -> bool| reports.iter().filter(|r| predicate(r)).count();
+    fn new() -> Self {
         Self {
-            runs: reports.len(),
-            no_liftoff: count(&|r| !r.lifted_off),
-            no_separation: count(&|r| !r.events.iter().any(|(_, label)| label.contains("separated"))),
-            anomalies: count(&|r| !r.anomalies.is_empty()),
-            lock_attempts: count(&|r| r.lock.is_some()),
-            lock_success: count(&|r| r.lock.is_some_and(|l| l.success)),
-            mean_max_speed_ms: reports.iter().map(|r| r.max_speed_ms).sum::<f64>() / runs,
-            mean_path_m: reports.iter().map(|r| r.path_length_m).sum::<f64>() / runs,
-            mean_flight_time_s: reports.iter().map(|r| r.flight_time_s).sum::<f64>() / runs,
+            runs: 0,
+            no_liftoff: 0,
+            no_separation: 0,
+            anomalies: 0,
+            lock_attempts: 0,
+            lock_success: 0,
+            mean_max_speed_ms: 0.0,
+            mean_path_m: 0.0,
+            mean_flight_time_s: 0.0,
         }
+    }
+
+    /// Folds one report into the running totals so a batch never keeps the reports alive.
+    fn accumulate(&mut self, report: &FlightReport) {
+        self.runs += 1;
+        let runs = self.runs as f64;
+        if !report.lifted_off {
+            self.no_liftoff += 1;
+        }
+        if !report.events.iter().any(|(_, label)| label.contains("separated")) {
+            self.no_separation += 1;
+        }
+        if !report.anomalies.is_empty() {
+            self.anomalies += 1;
+        }
+        if let Some(lock) = report.lock {
+            self.lock_attempts += 1;
+            if lock.success {
+                self.lock_success += 1;
+            }
+        }
+        self.mean_max_speed_ms += (report.max_speed_ms - self.mean_max_speed_ms) / runs;
+        self.mean_path_m += (report.path_length_m - self.mean_path_m) / runs;
+        self.mean_flight_time_s += (report.flight_time_s - self.mean_flight_time_s) / runs;
     }
 
     pub fn lock_rate(&self) -> Option<f64> {
         (self.lock_attempts > 0).then(|| self.lock_success as f64 / self.lock_attempts as f64)
     }
+}
+
+/// A seeded batch running on a worker thread; the frame only polls it.
+pub(crate) struct BatchJob {
+    pub total: usize,
+    done: Arc<AtomicUsize>,
+    outcome: Arc<Mutex<Option<Result<BatchSummary, String>>>>,
+}
+
+/// What the seeded target-lock roll gives for the current vehicle and seed.
+pub(crate) struct LockProbe {
+    pub roll: f64,
+    pub probability: f64,
+    pub max_speed_ms: f64,
+    pub success: bool,
+}
+
+/// `None` when there is no lock block to run or no radar to run it with.
+pub(crate) fn lock_probe(vehicle: &Vehicle, program: &Program, seed: u64) -> Option<LockProbe> {
+    let wants_lock = program
+        .threads
+        .iter()
+        .flatten()
+        .any(|block| matches!(block, Block::LockTarget));
+    if !wants_lock {
+        return None;
+    }
+    let radar = vehicle.best_radar(0)?;
+    let roll = lock_roll(seed);
+    Some(LockProbe {
+        roll,
+        probability: radar.base_lock_probability,
+        max_speed_ms: radar.max_lock_speed_ms,
+        success: roll < radar.base_lock_probability,
+    })
 }
 
 pub(crate) struct Baseline {
@@ -91,6 +153,8 @@ pub(crate) struct TrialSession {
     pub batch: Option<BatchSummary>,
     pub baseline: Option<Baseline>,
     pub comparison: Option<Comparison>,
+    /// Seed batch currently flying on a worker thread.
+    pub batch_job: Option<BatchJob>,
     /// Bumped on every change so the board knows it has to be rebuilt.
     pub revision: u64,
 }
@@ -104,8 +168,26 @@ impl Default for TrialSession {
             batch: None,
             baseline: None,
             comparison: None,
+            batch_job: None,
             revision: 0,
         }
+    }
+}
+
+impl TrialSession {
+    /// Takes the finished batch, if the worker has delivered one.
+    pub(crate) fn take_batch_outcome(&mut self) -> Option<Result<BatchSummary, String>> {
+        let outcome = self.batch_job.as_ref()?.outcome.lock().ok()?.take()?;
+        self.batch_job = None;
+        self.revision += 1;
+        Some(outcome)
+    }
+
+    /// Seeds flown and seeds requested by the running batch.
+    pub(crate) fn batch_progress(&self) -> Option<(usize, usize)> {
+        self.batch_job
+            .as_ref()
+            .map(|job| (job.done.load(Ordering::Relaxed), job.total))
     }
 }
 
@@ -142,21 +224,25 @@ pub(crate) fn input_hash(vehicle: &Vehicle, program: &Program, config: &FlightCo
     .unwrap_or_default()
 }
 
-fn simulate_batch(
+/// Flies `runs` seeds one after the other and keeps only the running totals.
+fn run_batch(
     vehicle: &Vehicle,
     program: &Program,
-    session: &TrialSession,
+    base: FlightConfig,
     runs: usize,
-) -> Result<Vec<FlightReport>, String> {
-    let mut reports = Vec::with_capacity(runs);
+    progress: &AtomicUsize,
+) -> Result<BatchSummary, String> {
+    let mut summary = BatchSummary::new();
     for step in 0..runs {
         let config = FlightConfig {
-            seed: session.seed.saturating_add(step as u64),
-            ..config(session)
+            seed: base.seed.saturating_add(step as u64),
+            ..base
         };
-        reports.push(simulate(vehicle, program, config).map_err(|issues| issues.join("; "))?);
+        let report = simulate(vehicle, program, config).map_err(|issues| issues.join("; "))?;
+        summary.accumulate(&report);
+        progress.store(step + 1, Ordering::Relaxed);
     }
-    Ok(reports)
+    Ok(summary)
 }
 
 fn gate(monte_carlo: bool) -> Result<(), String> {
@@ -181,7 +267,8 @@ pub(crate) fn run(session: &mut TrialSession, vehicle: &Vehicle, program: &Progr
     Ok("Trial done".to_string())
 }
 
-pub(crate) fn batch(
+/// Hands the batch to a worker thread: a thousand seeds never block a frame.
+pub(crate) fn start_batch(
     session: &mut TrialSession,
     vehicle: &Vehicle,
     program: &Program,
@@ -189,11 +276,29 @@ pub(crate) fn batch(
     monte_carlo: bool,
 ) -> Result<String, String> {
     gate(monte_carlo)?;
-    let reports = simulate_batch(vehicle, program, session, runs)?;
-    let summary = BatchSummary::from_reports(&reports);
-    session.batch = Some(summary);
+    if session.batch_job.is_some() {
+        return Err("Batch already running.".to_string());
+    }
+    let vehicle = vehicle.clone();
+    let program = program.clone();
+    let base = config(session);
+    let done = Arc::new(AtomicUsize::new(0));
+    let outcome = Arc::new(Mutex::new(None));
+    let worker_done = Arc::clone(&done);
+    let worker_outcome = Arc::clone(&outcome);
+    thread::spawn(move || {
+        let result = run_batch(&vehicle, &program, base, runs, &worker_done);
+        if let Ok(mut slot) = worker_outcome.lock() {
+            *slot = Some(result);
+        }
+    });
+    session.batch_job = Some(BatchJob {
+        total: runs,
+        done,
+        outcome,
+    });
     session.revision += 1;
-    Ok("Batch done".to_string())
+    Ok("Batch started".to_string())
 }
 
 pub(crate) fn snapshot(session: &mut TrialSession, vehicle: &Vehicle, program: &Program) -> Result<String, String> {
@@ -219,12 +324,14 @@ pub(crate) fn compare(
         .baseline
         .as_ref()
         .ok_or_else(|| "Snapshot A first".to_string())?;
-    let left = simulate_batch(&baseline.vehicle, &baseline.program, session, COMPARE_RUNS)?;
-    let right = simulate_batch(vehicle, program, session, COMPARE_RUNS)?;
+    let base = config(session);
+    let progress = AtomicUsize::new(0);
+    let left = run_batch(&baseline.vehicle, &baseline.program, base, COMPARE_RUNS, &progress)?;
+    let right = run_batch(vehicle, program, base, COMPARE_RUNS, &progress)?;
     let config = config(session);
     session.comparison = Some(Comparison {
-        baseline: BatchSummary::from_reports(&left),
-        current: BatchSummary::from_reports(&right),
+        baseline: left,
+        current: right,
         baseline_hash: baseline.hash.clone(),
         current_hash: input_hash(vehicle, program, &config),
     });
@@ -257,7 +364,7 @@ pub(crate) fn apply_action(
             })
         }
         TrialAction::Run => run(session, vehicle, program),
-        TrialAction::Batch(runs) => batch(session, vehicle, program, runs, monte_carlo),
+        TrialAction::Batch(runs) => start_batch(session, vehicle, program, runs, monte_carlo),
         TrialAction::Snapshot => snapshot(session, vehicle, program),
         TrialAction::Compare => compare(session, vehicle, program, monte_carlo),
     }
@@ -345,24 +452,55 @@ mod tests {
         assert_ne!(first, session.report.as_ref().unwrap().input_hash);
     }
 
+    fn wait_for_batch(session: &mut TrialSession) -> BatchSummary {
+        for _ in 0..1_000 {
+            if let Some(outcome) = session.take_batch_outcome() {
+                return outcome.unwrap();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the batch never reported back");
+    }
+
     #[test]
     fn batches_cover_every_seed_and_count_outcomes() {
-        let mut session = TrialSession::default();
-        let message = batch(&mut session, &rocket(), &two_stage(20.0), 10, true).unwrap();
-        let summary = session.batch.as_ref().unwrap();
+        let summary = run_batch(
+            &rocket(),
+            &two_stage(20.0),
+            config(&TrialSession::default()),
+            10,
+            &AtomicUsize::new(0),
+        )
+        .unwrap();
         assert_eq!(summary.runs, 10);
         assert_eq!(summary.no_liftoff, 0);
         assert_eq!(summary.no_separation, 0);
         assert!(summary.mean_path_m > 1_000.0, "{:?}", summary);
+    }
+
+    #[test]
+    fn a_batch_runs_off_the_frame_and_reports_back() {
+        let mut session = TrialSession::default();
+        let message = start_batch(&mut session, &rocket(), &two_stage(20.0), 60, true).unwrap();
         assert!(message.contains("Batch"), "{message}");
+        assert!(session.batch_job.is_some());
+        let error = start_batch(&mut session, &rocket(), &two_stage(20.0), 10, true).unwrap_err();
+        assert!(error.contains("Batch"), "{error}");
+        let summary = wait_for_batch(&mut session);
+        assert_eq!(summary.runs, 60);
+        assert!(session.batch_job.is_none());
+        assert_eq!(session.batch_progress(), None);
+        start_batch(&mut session, &rocket(), &two_stage(20.0), 10, true).unwrap();
+        assert!(session.batch_progress().is_some());
+        wait_for_batch(&mut session);
     }
 
     #[test]
     fn batches_are_refused_without_the_grant() {
         let mut session = TrialSession::default();
-        let error = batch(&mut session, &rocket(), &two_stage(20.0), 10, false).unwrap_err();
+        let error = start_batch(&mut session, &rocket(), &two_stage(20.0), 10, false).unwrap_err();
         assert!(error.contains("grant"), "{error}");
-        assert!(session.batch.is_none());
+        assert!(session.batch_job.is_none());
         assert_eq!(session.revision, 0);
     }
 
@@ -386,6 +524,33 @@ mod tests {
         snapshot(&mut session, &rocket(), &two_stage(20.0)).unwrap();
         let error = compare(&mut session, &rocket(), &two_stage(20.0), false).unwrap_err();
         assert!(error.contains("grant"), "{error}");
+    }
+
+    #[test]
+    fn the_seed_roll_is_visible_and_flips_the_lock() {
+        let mut vehicle = rocket();
+        vehicle.stages[1].parts.push(part(
+            "radar",
+            PartSpec::Sensor {
+                kind: omega_rules::SensorKind::Radar(omega_rules::RadarClass::Basic),
+            },
+        ));
+        let program = Program::single(vec![Block::IgniteStage { stage: 0 }, Block::LockTarget]);
+        let first = lock_probe(&vehicle, &program, 1).unwrap();
+        assert_eq!(first.roll, lock_roll(1));
+        assert_eq!(first.success, first.roll < first.probability);
+        let flipped = (2..200u64)
+            .map(|seed| lock_probe(&vehicle, &program, seed).unwrap())
+            .find(|probe| probe.success != first.success)
+            .expect("no seed in the first 200 flips the lock");
+        assert_ne!(flipped.success, first.success);
+    }
+
+    #[test]
+    fn the_seed_probe_needs_a_lock_block_and_a_radar() {
+        assert!(lock_probe(&rocket(), &two_stage(20.0), 1).is_none());
+        let lock_program = Program::single(vec![Block::LockTarget]);
+        assert!(lock_probe(&rocket(), &lock_program, 1).is_none());
     }
 
     #[test]

@@ -94,6 +94,8 @@ fn main() {
                     missile::sync_missile_visuals,
                     missile::focus_missile_camera,
                     campus::update_toast,
+                    campus::poll_trial_batch,
+                    campus::update_batch_progress,
                     campus::update_nav_status,
                 )
                     .chain(),

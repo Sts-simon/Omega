@@ -90,6 +90,12 @@ fn unit_random(seed: u64) -> f64 {
     (splitmix64(seed) >> 11) as f64 / (1u64 << 53) as f64
 }
 
+/// The roll a seeded target-lock attempt compares with the radar probability: the only thing the
+/// seed changes in a flight. Exposed so the trial screen can show what a seed does before a run.
+pub fn lock_roll(seed: u64) -> f64 {
+    unit_random(seed)
+}
+
 fn air_density(altitude_m: f64) -> f64 {
     1.225 * (-altitude_m / SCALE_HEIGHT_M).exp()
 }
@@ -264,7 +270,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                                 (0.0, None)
                             }
                         };
-                        let success = unit_random(config.seed) < probability;
+                        let success = lock_roll(config.seed) < probability;
                         events.push((
                             t,
                             format!("Lock target: {}", if success { "success" } else { "failed" }),

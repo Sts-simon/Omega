@@ -119,6 +119,12 @@ timeline render, an empty program reports "no stage was ever ignited", the batch
 without the grant, and igniting the second stage moves the A/B speed delta to +425 m/s on the same
 seeds. Vehicle/contract selection arrives with lot 3.
 
+Batches fly on a worker thread: a 1,000-seed batch over a 546 s flight blocked the frame for ~290 ms
+and left a 31 MB peak when it kept every report; it now runs off the frame with a live progress line
+and folds each report into running totals, so the peak stays flat. The seed's only effect in the
+flight model is the target-lock roll, which the setup panel now predicts (`ROLL 0.11` vs the radar's
+55 % reads `LOCK`), and a batch of 1,000 seeds reproduces that probability (549/1,000).
+
 ### Lot 3 — Missile contracts, evidence, plan delivery (0.29)
 
 **Purpose.** Close the loop. This is the lot that turns the demo into a game and makes the

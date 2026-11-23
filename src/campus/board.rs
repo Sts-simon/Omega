@@ -1761,6 +1761,7 @@ fn build_trials(
     session: &TrialSession,
 ) {
     let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
+    let busy = session.batch_job.is_some();
     let current_hash = trials::input_hash(vehicle, program, &trials::config(session));
 
     // Left: seed, run, batch and comparison controls.
@@ -1805,6 +1806,40 @@ fn build_trials(
                         );
                     }
                 });
+            match trials::lock_probe(vehicle, program, session.seed) {
+                Some(probe) => {
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            ui_kit::chip(row, format!("ROLL {:.2}", probe.roll), ui_kit::NEUTRAL);
+                            ui_kit::chip(
+                                row,
+                                if probe.success { "LOCK" } else { "NO LOCK" },
+                                if probe.success { ui_kit::GOOD } else { ui_kit::BAD },
+                            );
+                        });
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "Lock roll for this seed, under {:.0} m/s ({:.0}%).",
+                            probe.max_speed_ms,
+                            probe.probability * 100.0
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                }
+                None => ui_kit::label(
+                    panel,
+                    "The seed rolls the target lock; fit a radar and a LOCK TARGET block.",
+                    9.5,
+                    ui_kit::WARN,
+                ),
+            }
             ui_kit::button(
                 panel,
                 "RUN TRIAL",
@@ -1821,7 +1856,7 @@ fn build_trials(
                 })
                 .with_children(|row| {
                     for runs in trials::BATCH_SIZES {
-                        let tone = if monte_carlo {
+                        let tone = if monte_carlo && !busy {
                             ButtonTone::Secondary
                         } else {
                             ButtonTone::Disabled
@@ -1834,7 +1869,17 @@ fn build_trials(
                         );
                     }
                 });
-            if !monte_carlo {
+            if let Some((done, total)) = session.batch_progress() {
+                panel.spawn((
+                    Text::new(format!("Running {done} / {total} seeds...")),
+                    TextFont {
+                        font_size: FontSize::Px(10.0),
+                        ..default()
+                    },
+                    TextColor(ui_kit::ACCENT),
+                    BatchProgressText,
+                ));
+            } else if !monte_carlo {
                 ui_kit::label(panel, "Locked: Monte Carlo research needed.", 9.5, ui_kit::WARN);
             }
             heading(panel, "A / B");
@@ -2299,6 +2344,38 @@ pub(crate) fn sync_boards(
             BoardKind::Trials => build_trials(root, campus_ref, &missile_ref.vehicle, &program_ref.program, trials_ref),
             BoardKind::Project => build_project(root, campus_ref, &hash),
         });
+    }
+}
+
+/// Progress line of a running seed batch, written in place so the board is not rebuilt per seed.
+#[derive(Component)]
+pub(crate) struct BatchProgressText;
+
+pub(crate) fn poll_trial_batch(mut trials: ResMut<TrialSession>, mut campus: ResMut<CampusState>) {
+    if trials.batch_job.is_none() {
+        return;
+    }
+    if let Some(outcome) = trials.take_batch_outcome() {
+        match outcome {
+            Ok(summary) => {
+                trials.batch = Some(summary);
+                campus.message = "Batch done".to_string();
+            }
+            Err(message) => campus.message = friendly_capabilities(&message),
+        }
+    }
+}
+
+pub(crate) fn update_batch_progress(trials: Res<TrialSession>, mut text: Query<&mut Text, With<BatchProgressText>>) {
+    let Ok(mut text) = text.single_mut() else {
+        return;
+    };
+    let wanted = match trials.batch_progress() {
+        Some((done, total)) => format!("Running {done} / {total} seeds..."),
+        None => String::new(),
+    };
+    if text.0 != wanted {
+        text.0 = wanted;
     }
 }
 
