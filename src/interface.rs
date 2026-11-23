@@ -56,7 +56,11 @@ pub(crate) enum UiAction {
     CancelLatestJob,
     SelectContract(u32),
     RecordRevision,
+    RecordMissileRevision,
     RestoreRevision,
+    AcceptMissileOffer(usize),
+    DeliverMissile,
+    ToggleCivilContracts,
     ToggleHelp,
     Missile(crate::missile::MissileAction),
     Program(crate::program_editor::ProgramAction),
@@ -500,6 +504,10 @@ pub fn handle_actions(
             UiAction::RefreshContracts => campus.ui_refresh_contracts(),
             UiAction::AcceptOffer(index) => campus.ui_accept_offer(index),
             UiAction::DeliverContract => campus.ui_deliver_selected(&design),
+            UiAction::AcceptMissileOffer(_) | UiAction::DeliverMissile => {}
+            UiAction::ToggleCivilContracts => {
+                campus.civil_legacy_open = !campus.civil_legacy_open;
+            }
             // Missile workshop and program actions are owned by `campus::handle_extra_actions`,
             // which also has the research capabilities and the vehicle.
             UiAction::Program(_) => {}
@@ -592,7 +600,11 @@ pub fn handle_actions(
             // Handled by `campus::board::handle_extra_actions`.
             UiAction::StartResearch(index) => campus.ui_start_research(index),
             UiAction::NextDay => campus.ui_next_day(),
-            UiAction::RecordRevision | UiAction::RestoreRevision | UiAction::ToggleHelp | UiAction::Missile(_) => {}
+            UiAction::RecordRevision
+            | UiAction::RecordMissileRevision
+            | UiAction::RestoreRevision
+            | UiAction::ToggleHelp
+            | UiAction::Missile(_) => {}
         }
     }
 }

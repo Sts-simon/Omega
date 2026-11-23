@@ -47,17 +47,12 @@ anomalies and a lock roll), `research` (tree aligned with the loop), plus `requi
 
 Not implemented yet in the application:
 
-- No program editor for the missile blocks: the Programming Studio still hosts the 0.6 chamber
-  sequencer, and `program` is only exercised by tests. No block palette, thread view or computer
-  limit meters.
-- No trial screen: `flight` is headless only; no graphs, anomaly display, seeds, batch trials or
-  design comparison in the UI. The `analysis:monte_carlo` grant exists but nothing consumes it.
-- Contracts are still the civil ones and do not use the missile vehicle; missile designs are not yet
-  part of design revisions or verification evidence, and delivery of a plan does not exist.
-- Research does not gate contract families or the number of active projects yet: the
-  `family:*` capabilities and the `ExtraActiveProjects` grant are unused.
-- The legacy civil loop (assembly bench, instrument profile, field test, dossier) remains the only
-  complete contract path.
+- The missile program editor, trial screen, seeded batches and A/B comparison are playable, and the
+  CONTRACTS tab runs missile offers whose dossier is bound to the vehicle, program and trial hashes.
+- Research does not gate contract families or the number of active projects yet: the `family:*`
+  capabilities and the `ExtraActiveProjects` grant are unused (lot 4).
+- The legacy civil loop (assembly bench, instrument profile, field test, dossier) is still in the
+  repository, reachable only through the `CIVIL (LEGACY)` toggle, and is removed in lot 5.
 
 ## Roadmap
 - 0.25 Research: game clock, research board, persistence, capability checks. **Done.**

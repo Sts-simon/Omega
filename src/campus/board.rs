@@ -6,6 +6,7 @@ use super::*;
 use crate::design::{InspectorState, RevisionLog, record_revision, restore_revision};
 use crate::interface::{UiAction, UiActionButton};
 use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
+use crate::procurement::{self, EvidenceStatus, Procurement};
 use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable};
 use crate::trials::{self, TrialAction, TrialSession};
 use crate::ui_kit::{self, ButtonTone, NavStatus, UiState};
@@ -557,7 +558,438 @@ fn dossier_rows(parent: &mut ChildSpawnerCommands<'_>, active: &ActiveContract, 
         .with_children(|v| ui_kit::chip(v, text, color));
 }
 
-fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, design: &ContentHash) {
+fn contract_color(family: omega_rules::contracts::MissionFamily) -> Color {
+    use omega_rules::contracts::MissionFamily;
+    match family {
+        MissionFamily::AirToAir => ui_kit::PURPLE,
+        MissionFamily::AirToSurface => ui_kit::ACCENT,
+        MissionFamily::SurfaceToAir => ui_kit::GOOD,
+        MissionFamily::SurfaceToSurface => ui_kit::WARN,
+    }
+}
+
+fn requirement_text(requirement: &omega_rules::Requirement) -> String {
+    match requirement.metric.as_str() {
+        "path_length_m" => format!("{} >= {:.0} km", requirement.label, requirement.limit / 1_000.0),
+        "max_speed_ms" => format!("{} >= {:.0} m/s", requirement.label, requirement.limit),
+        "launch_mass_kg" => format!("{} <= {:.0} kg", requirement.label, requirement.limit),
+        _ => format!("{} required", requirement.label),
+    }
+}
+
+fn requirement_badge(status: &omega_rules::RequirementStatus) -> (&'static str, Color) {
+    match status {
+        omega_rules::RequirementStatus::Verified { .. } => ("OK", ui_kit::GOOD),
+        omega_rules::RequirementStatus::Marginal { .. } => ("THIN", ui_kit::WARN),
+        omega_rules::RequirementStatus::Failed { .. } => ("FAIL", ui_kit::BAD),
+        omega_rules::RequirementStatus::Stale => ("STALE", Color::srgb(0.50, 0.56, 0.64)),
+        omega_rules::RequirementStatus::Unverified => ("MISSING", ui_kit::NEUTRAL),
+        omega_rules::RequirementStatus::MethodNotAllowed => ("METHOD", ui_kit::PURPLE),
+    }
+}
+
+fn missile_offer_card(
+    parent: &mut ChildSpawnerCommands<'_>,
+    index: usize,
+    offer: &omega_rules::contracts::ContractOffer,
+    can_accept: bool,
+) {
+    let color = contract_color(offer.mission_family);
+    let (node, bg, border) = ui_kit::card_node(Val::Px(286.0), color);
+    parent
+        .spawn((node, bg, border, UiInteraction::None))
+        .with_children(|card| {
+            card.spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(4.0),
+                ..default()
+            })
+            .with_children(|top| {
+                ui_kit::chip(top, offer.mission_family.label(), color);
+                ui_kit::chip(top, offer.vehicle_family.label(), ui_kit::NEUTRAL);
+                difficulty_bar(top, offer.difficulty);
+            });
+            card.spawn(Node {
+                min_height: Val::Px(34.0),
+                ..default()
+            })
+            .with_children(|t| ui_kit::label(t, offer.title.clone(), 14.0, ui_kit::TEXT));
+            ui_kit::label(card, offer.client.clone(), 10.0, ui_kit::TEXT_DIM);
+            for requirement in offer.missile_requirements().iter().take(4) {
+                ui_kit::label(card, requirement_text(requirement), 10.0, ui_kit::TEXT);
+            }
+            card.spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect {
+                    top: Val::Px(4.0),
+                    ..default()
+                },
+                ..default()
+            })
+            .with_children(|bottom| {
+                bottom
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    })
+                    .with_children(|pay| {
+                        ui_kit::label(
+                            pay,
+                            format!("{} cr", ui_kit::thousands(offer.reward_credits)),
+                            15.0,
+                            ui_kit::GOOD,
+                        );
+                        ui_kit::label(pay, format!("{} days", offer.deadline_days), 9.5, ui_kit::TEXT_DIM);
+                    });
+                let tone = if can_accept {
+                    ButtonTone::Primary
+                } else {
+                    ButtonTone::Disabled
+                };
+                ui_kit::button(
+                    bottom,
+                    "ACCEPT",
+                    UiAction::AcceptMissileOffer(index),
+                    tone,
+                    Val::Px(96.0),
+                );
+            });
+        });
+}
+
+fn missile_active_card(
+    parent: &mut ChildSpawnerCommands<'_>,
+    active: &omega_rules::contracts::ContractOffer,
+    status: EvidenceStatus,
+    deadline_passed: bool,
+    score: Option<f64>,
+    ready: bool,
+) {
+    let color = contract_color(active.mission_family);
+    let (node, bg, border) = ui_kit::card_node(Val::Px(560.0), color);
+    parent
+        .spawn((node, bg, border, UiInteraction::None))
+        .with_children(|card| {
+            card.spawn(Node {
+                column_gap: Val::Px(6.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|top| {
+                let (label, tone) = match status {
+                    EvidenceStatus::NoContract => ("NO CONTRACT", ui_kit::NEUTRAL),
+                    EvidenceStatus::NoTrial => ("TRIAL REQUIRED", ui_kit::WARN),
+                    EvidenceStatus::Current => ("EVIDENCE CURRENT", ui_kit::GOOD),
+                    EvidenceStatus::Stale => ("STALE", ui_kit::BAD),
+                };
+                ui_kit::chip(top, label, tone);
+                ui_kit::chip(top, format!("#{:04}", active.id), ui_kit::NEUTRAL);
+                if deadline_passed {
+                    ui_kit::chip(top, "DEADLINE PASSED", ui_kit::BAD);
+                }
+            });
+            card.spawn(Node {
+                min_height: Val::Px(34.0),
+                ..default()
+            })
+            .with_children(|t| ui_kit::label(t, active.title.clone(), 15.0, ui_kit::TEXT));
+            ui_kit::label(card, active.client.clone(), 10.0, ui_kit::TEXT_DIM);
+            if let Some(score) = score {
+                ui_kit::label(
+                    card,
+                    format!(
+                        "Dossier score {:.0}% | target {}%",
+                        score * 100.0,
+                        active.requirements.min_trial_score
+                    ),
+                    10.0,
+                    if ready { ui_kit::GOOD } else { ui_kit::TEXT_DIM },
+                );
+            } else {
+                ui_kit::label(
+                    card,
+                    "No trial yet. Fly the vehicle and program in TRIALS to record evidence.",
+                    10.0,
+                    ui_kit::TEXT_DIM,
+                );
+            }
+            card.spawn(Node {
+                column_gap: Val::Px(6.0),
+                margin: UiRect {
+                    top: Val::Px(6.0),
+                    ..default()
+                },
+                ..default()
+            })
+            .with_children(|buttons| {
+                ui_kit::button_row_item(
+                    buttons,
+                    "GO TO TRIALS",
+                    UiAction::Navigate(CampusView::Trials),
+                    ButtonTone::Secondary,
+                );
+                ui_kit::button_row_item(
+                    buttons,
+                    "DELIVER",
+                    UiAction::DeliverMissile,
+                    if ready && !deadline_passed {
+                        ButtonTone::Primary
+                    } else {
+                        ButtonTone::Disabled
+                    },
+                );
+                ui_kit::button_row_item(
+                    buttons,
+                    "CIVIL (LEGACY)",
+                    UiAction::ToggleCivilContracts,
+                    ButtonTone::Ghost,
+                );
+            });
+        });
+}
+
+fn missile_dossier_panel(
+    panel: &mut ChildSpawnerCommands<'_>,
+    procurement: &Procurement,
+    vehicle: &omega_rules::Vehicle,
+    program: &omega_rules::Program,
+) {
+    let Some(active) = procurement.active() else {
+        ui_kit::label(
+            panel,
+            "No active contract. Accept an offer to open a dossier.",
+            10.0,
+            ui_kit::TEXT_DIM,
+        );
+        return;
+    };
+    ui_kit::label(panel, active.offer.title.clone(), 11.5, ui_kit::TEXT);
+    ui_kit::label(
+        panel,
+        format!("Accepted day {} | due day {}", active.accepted_day, active.due_day()),
+        9.5,
+        ui_kit::TEXT_DIM,
+    );
+    let Some(dossier) = procurement.dossier(vehicle, program) else {
+        return;
+    };
+    let requirements = active.offer.missile_requirements();
+    for (requirement, row) in requirements.iter().zip(&dossier.matrix) {
+        let (badge, color) = requirement_badge(&row.status);
+        panel
+            .spawn(Node {
+                width: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|line| {
+                line.spawn(Node {
+                    width: Val::Px(52.0),
+                    ..default()
+                })
+                .with_children(|cell| ui_kit::chip(cell, badge, color));
+                line.spawn(Node {
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    ..default()
+                })
+                .with_children(|text| ui_kit::label(text, requirement_text(requirement), 10.0, ui_kit::TEXT));
+            });
+    }
+    let ready = active.offer.accepts_dossier(&dossier);
+    panel
+        .spawn(Node {
+            margin: UiRect {
+                top: Val::Px(4.0),
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|row| {
+            ui_kit::chip(
+                row,
+                format!("score {:.0}%", dossier.score * 100.0),
+                if ready { ui_kit::GOOD } else { ui_kit::WARN },
+            );
+            ui_kit::chip(
+                row,
+                if ready { "DOSSIER READY" } else { "DOSSIER INCOMPLETE" },
+                if ready { ui_kit::GOOD } else { ui_kit::WARN },
+            );
+        });
+    if let omega_rules::DossierDecision::Rejected { reasons } = &dossier.decision {
+        for reason in reasons.iter().take(3) {
+            ui_kit::label(panel, format!("- {reason}"), 9.0, ui_kit::BAD);
+        }
+    }
+    let (vehicle_hash, program_hash) = procurement::hashes(vehicle, program);
+    ui_kit::label(
+        panel,
+        format!("vehicle {} | program {}", vehicle_hash.as_str(), program_hash.as_str()),
+        8.5,
+        ui_kit::TEXT_DIM,
+    );
+    if let Some(trial) = active.trials.last() {
+        ui_kit::label(
+            panel,
+            format!(
+                "latest trial {} seed {} | {} runs on file",
+                trial.vehicle.as_str(),
+                trial.seed,
+                active.trials.len()
+            ),
+            8.5,
+            ui_kit::TEXT_DIM,
+        );
+    }
+}
+
+fn build_missile_contracts(
+    root: &mut ChildSpawnerCommands<'_>,
+    campus: &CampusState,
+    procurement: &Procurement,
+    vehicle: &omega_rules::Vehicle,
+    program: &omega_rules::Program,
+) {
+    let status = procurement.evidence_status(vehicle, program);
+    let dossier = procurement.dossier(vehicle, program);
+    let ready = dossier.as_ref().is_some_and(|dossier| {
+        procurement
+            .active()
+            .is_some_and(|active| active.offer.accepts_dossier(dossier))
+    });
+    root.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_grow: 2.0,
+        flex_basis: Val::Px(0.0),
+        row_gap: Val::Px(10.0),
+        ..default()
+    })
+    .with_children(|left| {
+        left.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|head| {
+            head.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                ..default()
+            })
+            .with_children(|title| {
+                ui_kit::label(title, "MISSILE PROCUREMENT", 22.0, ui_kit::ACCENT);
+                ui_kit::label(
+                    title,
+                    "Accept a family contract, fly its trial, then deliver the hash-bound dossier. One active contract at a time.",
+                    10.5,
+                    ui_kit::TEXT_DIM,
+                );
+            });
+            ui_kit::chip(head, format!("{} cr", ui_kit::thousands(campus.credits)), ui_kit::GOOD);
+            ui_kit::chip(
+                head,
+                format!("{} delivered", procurement.completed().len()),
+                ui_kit::NEUTRAL,
+            );
+            ui_kit::button(
+                head,
+                "CIVIL (LEGACY)",
+                UiAction::ToggleCivilContracts,
+                ButtonTone::Ghost,
+                Val::Px(130.0),
+            );
+        });
+        heading(left, "OFFERS");
+        left.spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(10.0),
+            row_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|offers| {
+            if procurement.offers().is_empty() {
+                ui_kit::label(offers, "No offers on the board.", 12.0, ui_kit::TEXT_DIM);
+            }
+            for (index, offer) in procurement.offers().iter().enumerate() {
+                missile_offer_card(offers, index, offer, procurement.active().is_none());
+            }
+        });
+        heading(left, "ACTIVE CONTRACT");
+        match procurement.active() {
+            None => ui_kit::label(
+                left,
+                "None. Accept an offer above; the trials you fly afterwards become its evidence.",
+                11.0,
+                ui_kit::TEXT_DIM,
+            ),
+            Some(active) => missile_active_card(
+                left,
+                &active.offer,
+                status,
+                campus.day > active.due_day(),
+                dossier.as_ref().map(|dossier| dossier.score),
+                ready,
+            ),
+        }
+    });
+    root.spawn((
+        Node {
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            row_gap: Val::Px(7.0),
+            padding: UiRect::all(Val::Px(14.0)),
+            border_radius: BorderRadius::all(Val::Px(7.0)),
+            ..default()
+        },
+        BackgroundColor(ui_kit::PANEL),
+        UiInteraction::None,
+    ))
+    .with_children(|panel| {
+        ui_kit::label(panel, "DOSSIER", 16.0, ui_kit::ACCENT);
+        missile_dossier_panel(panel, procurement, vehicle, program);
+        heading(panel, "DELIVERED");
+        if procurement.completed().is_empty() {
+            ui_kit::label(panel, "None yet.", 10.0, ui_kit::TEXT_DIM);
+        } else {
+            for contract in procurement.completed().iter().rev().take(4) {
+                ui_kit::label(
+                    panel,
+                    format!(
+                        "#{} {} | +{} cr | {}%",
+                        contract.id,
+                        contract.title,
+                        ui_kit::thousands(contract.reward),
+                        contract.score_percent
+                    ),
+                    9.0,
+                    ui_kit::TEXT_DIM,
+                );
+            }
+        }
+    });
+}
+
+fn build_contracts(
+    root: &mut ChildSpawnerCommands<'_>,
+    campus: &CampusState,
+    procurement: &Procurement,
+    vehicle: &omega_rules::Vehicle,
+    program: &omega_rules::Program,
+    design: &ContentHash,
+) {
+    if campus.civil_legacy_open {
+        build_civil_contracts(root, campus, design);
+    } else {
+        build_missile_contracts(root, campus, procurement, vehicle, program);
+    }
+}
+
+fn build_civil_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, design: &ContentHash) {
     let can_accept = campus.accepted_contracts.len() < MAX_ACTIVE_CONTRACTS;
     root.spawn(Node {
         flex_direction: FlexDirection::Column,
@@ -594,6 +1026,13 @@ fn build_contracts(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, de
                 UiAction::RefreshContracts,
                 ButtonTone::Secondary,
                 Val::Px(140.0),
+            );
+            ui_kit::button(
+                head,
+                "MISSILE CONTRACTS",
+                UiAction::ToggleCivilContracts,
+                ButtonTone::Secondary,
+                Val::Px(150.0),
             );
         });
         heading(left, "OFFERS");
@@ -947,7 +1386,12 @@ fn panel_node(width: Val) -> (Node, BackgroundColor, UiInteraction) {
     )
 }
 
-fn build_missile(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, session: &MissileSession) {
+fn build_missile(
+    root: &mut ChildSpawnerCommands<'_>,
+    campus: &CampusState,
+    session: &MissileSession,
+    log: &RevisionLog,
+) {
     let owned = campus.owned_capabilities();
     let vehicle = &session.vehicle;
 
@@ -1070,6 +1514,15 @@ fn build_missile(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, sess
                         ButtonTone::Danger,
                     );
                 });
+            heading(panel, "REVISIONS");
+            ui_kit::label(panel, log.missile_hud_text(vehicle), 9.0, ui_kit::TEXT_DIM);
+            ui_kit::button(
+                panel,
+                "RECORD REVISION",
+                UiAction::RecordMissileRevision,
+                ButtonTone::Secondary,
+                Val::Percent(100.0),
+            );
         });
     });
 
@@ -1759,6 +2212,7 @@ fn build_trials(
     vehicle: &omega_rules::Vehicle,
     program: &omega_rules::Program,
     session: &TrialSession,
+    procurement: &Procurement,
 ) {
     let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
     let busy = session.batch_job.is_some();
@@ -1853,6 +2307,34 @@ fn build_trials(
                 9.5,
                 ui_kit::TEXT_DIM,
             );
+            heading(panel, "CONTRACT");
+            match procurement.active() {
+                None => ui_kit::label(
+                    panel,
+                    "Accept a contract to bind trials as evidence.",
+                    9.5,
+                    ui_kit::TEXT_DIM,
+                ),
+                Some(active) => {
+                    let status = procurement.evidence_status(vehicle, program);
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            ui_kit::chip(row, format!("#{:04}", active.offer.id), ui_kit::NEUTRAL);
+                            let tone = match status {
+                                EvidenceStatus::Current => ui_kit::GOOD,
+                                EvidenceStatus::Stale => ui_kit::BAD,
+                                _ => ui_kit::WARN,
+                            };
+                            ui_kit::chip(row, status.label(), tone);
+                        });
+                    ui_kit::label(panel, active.offer.title.clone(), 9.0, ui_kit::TEXT_DIM);
+                }
+            }
             ui_kit::button(
                 panel,
                 "RUN TRIAL",
@@ -2268,6 +2750,8 @@ fn signature(
     missile: &MissileSession,
     program: &MissileProgramSession,
     trials: &TrialSession,
+    procurement: &Procurement,
+    log: &RevisionLog,
 ) -> String {
     let contracts = || {
         let active: Vec<String> = campus
@@ -2302,27 +2786,34 @@ fn signature(
             campus.accepted_contracts.len(),
             campus.completed_contracts.len()
         ),
-        BoardKind::Contracts => contracts(),
+        BoardKind::Contracts => format!(
+            "{}|{}|{}",
+            contracts(),
+            procurement.signature(&missile.vehicle, &program.program),
+            campus.civil_legacy_open
+        ),
         BoardKind::Research => format!("{:?}|{}|{}", campus.research, campus.credits, campus.day),
         BoardKind::Missile => format!(
-            "{:?}|{:?}|{}|{:?}",
+            "{:?}|{:?}|{}|{:?}|{:?}",
             missile.vehicle,
             (missile.selected, missile.active_stage),
             campus.credits,
-            campus.research
+            campus.research,
+            log.head().map(|revision| revision.hash.clone())
         ),
         BoardKind::Program => format!(
             "{:?}|{:?}|{}|{:?}",
             missile.vehicle, program.program, program.thread, program.block
         ),
         BoardKind::Trials => format!(
-            "{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}",
             trials.revision,
             trials.seed,
             trials.air_launch,
             trials.report.is_some(),
             trials.batch.is_some(),
-            trials.comparison.is_some()
+            trials.comparison.is_some(),
+            procurement.signature(&missile.vehicle, &program.program)
         ),
         BoardKind::Project => format!("{}|{:?}", contracts(), campus.instrument_profile),
     }
@@ -2336,6 +2827,8 @@ pub(crate) fn sync_boards(
     missile: Res<MissileSession>,
     program: Res<MissileProgramSession>,
     trials: Res<TrialSession>,
+    procurement: Res<Procurement>,
+    log: Res<RevisionLog>,
     mut boards: Query<(Entity, &mut Node, &BoardKind)>,
     mut seen: Local<HashMap<BoardKind, String>>,
 ) {
@@ -2350,7 +2843,16 @@ pub(crate) fn sync_boards(
             seen.remove(kind);
             continue;
         }
-        let sig = signature(*kind, &campus, design_hash.as_str(), &missile, &program, &trials);
+        let sig = signature(
+            *kind,
+            &campus,
+            design_hash.as_str(),
+            &missile,
+            &program,
+            &trials,
+            &procurement,
+            &log,
+        );
         if seen.get(kind) == Some(&sig) {
             continue;
         }
@@ -2364,11 +2866,25 @@ pub(crate) fn sync_boards(
         let hash = design_hash.clone();
         commands.entity(entity).with_children(|root| match kind {
             BoardKind::Island => build_island(root, campus_ref),
-            BoardKind::Contracts => build_contracts(root, campus_ref, &hash),
+            BoardKind::Contracts => build_contracts(
+                root,
+                campus_ref,
+                &procurement,
+                &missile_ref.vehicle,
+                &program_ref.program,
+                &hash,
+            ),
             BoardKind::Research => build_research(root, campus_ref),
-            BoardKind::Missile => build_missile(root, campus_ref, missile_ref),
+            BoardKind::Missile => build_missile(root, campus_ref, missile_ref, &log),
             BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref),
-            BoardKind::Trials => build_trials(root, campus_ref, &missile_ref.vehicle, &program_ref.program, trials_ref),
+            BoardKind::Trials => build_trials(
+                root,
+                campus_ref,
+                &missile_ref.vehicle,
+                &program_ref.program,
+                trials_ref,
+                &procurement,
+            ),
             BoardKind::Project => build_project(root, campus_ref, &hash),
         });
     }
@@ -2471,6 +2987,7 @@ pub(crate) fn handle_extra_actions(
     mut missile: ResMut<MissileSession>,
     mut program: ResMut<MissileProgramSession>,
     mut trials: ResMut<TrialSession>,
+    mut procurement: ResMut<Procurement>,
 ) {
     for (interaction, button) in &buttons {
         if *interaction != UiInteraction::Pressed {
@@ -2478,6 +2995,22 @@ pub(crate) fn handle_extra_actions(
         }
         match button.0 {
             UiAction::RecordRevision => campus.message = record_revision(&mut log, &session),
+            UiAction::RecordMissileRevision => {
+                campus.message = match log.commit_vehicle(&missile.vehicle) {
+                    Ok(id) => match log
+                        .to_bytes()
+                        .and_then(|bytes| crate::save::write(crate::save::SaveFile::Revisions, &bytes))
+                    {
+                        Ok(()) => format!("Recorded missile revision {id}"),
+                        Err(error) => format!("Revision {id} recorded but not saved: {error}"),
+                    },
+                    Err(error) => format!("Revision not recorded: {error}"),
+                };
+            }
+            UiAction::AcceptMissileOffer(index) => accept_missile_offer(&mut campus, &mut procurement, index),
+            UiAction::DeliverMissile => {
+                deliver_missile_contract(&mut campus, &mut procurement, &missile.vehicle, &program.program)
+            }
             UiAction::RestoreRevision => campus.message = restore_revision(&log, &mut session),
             UiAction::ToggleHelp => ui.help_open = !ui.help_open,
             UiAction::Program(action) => match program.apply(action, &missile.vehicle) {

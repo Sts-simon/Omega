@@ -21,6 +21,7 @@ pub enum SaveFile {
     MissileProgram,
     Revisions,
     Vehicle,
+    Procurement,
 }
 
 impl SaveFile {
@@ -33,6 +34,7 @@ impl SaveFile {
             Self::MissileProgram => "programs/missile.json",
             Self::Revisions => "designs/revisions.json",
             Self::Vehicle => "designs/vehicle.json",
+            Self::Procurement => "contracts/missile.json",
         }
     }
 }

@@ -36,6 +36,9 @@ pub(crate) struct TrialRun {
     pub seed: u64,
     pub air_launch: bool,
     pub input_hash: String,
+    /// Canonical hashes of the exact vehicle and program that flew, for contract evidence.
+    pub vehicle_hash: String,
+    pub program_hash: String,
 }
 
 /// Outcome counts and means over a set of seeds.
@@ -161,6 +164,8 @@ pub(crate) struct TrialSession {
     pub batch_job: Option<BatchJob>,
     /// Bumped on every change so the board knows it has to be rebuilt.
     pub revision: u64,
+    /// Completed single runs, so an identical rerun still counts as new evidence.
+    pub runs: u64,
 }
 
 impl Default for TrialSession {
@@ -175,6 +180,7 @@ impl Default for TrialSession {
             comparison: None,
             batch_job: None,
             revision: 0,
+            runs: 0,
         }
     }
 }
@@ -276,12 +282,21 @@ pub(crate) fn run(session: &mut TrialSession, vehicle: &Vehicle, program: &Progr
     let config = config(session);
     let report = simulate(vehicle, program, config).map_err(|issues| issues.join("; "))?;
     let hash = input_hash(vehicle, program, &config);
+    let vehicle_hash = hash_serializable(vehicle)
+        .map(|hash| hash.as_str().to_string())
+        .unwrap_or_default();
+    let program_hash = hash_serializable(program)
+        .map(|hash| hash.as_str().to_string())
+        .unwrap_or_default();
     session.report = Some(TrialRun {
         report,
         seed: config.seed,
         air_launch: session.air_launch,
         input_hash: hash,
+        vehicle_hash,
+        program_hash,
     });
+    session.runs += 1;
     session.revision += 1;
     Ok("Trial done".to_string())
 }
@@ -459,6 +474,7 @@ mod tests {
         assert_eq!(report, second.report);
         assert_eq!(hash, second.input_hash);
         assert_eq!(hash.len(), 16);
+        assert_eq!(session.runs, 2, "an identical rerun is still a new run");
     }
 
     #[test]

@@ -6,10 +6,12 @@ use crate::campus::{CampusState, CampusView};
 use crate::save::{self, SaveFile};
 use crate::sequence::SequenceWorkspace;
 use bevy::prelude::*;
-use omega_rules::{DesignDiff, PartGeometry, diff_parts};
+use omega_data::hash_serializable;
+use omega_rules::{DesignDiff, PartGeometry, Vehicle, diff_parts};
 use serde::{Deserialize, Serialize};
 
-const REVISION_SCHEMA: u32 = 1;
+const REVISION_SCHEMA: u32 = 2;
+const LEGACY_SCHEMA: u32 = 1;
 const MAX_REVISIONS: usize = 100;
 const SHOWN_REVISIONS: usize = 4;
 
@@ -19,7 +21,12 @@ pub(crate) struct DesignRevision {
     pub parent: Option<u32>,
     pub label: String,
     pub hash: String,
-    pub assembly: Assembly,
+    /// Present for legacy-assembly revisions.
+    #[serde(default)]
+    pub assembly: Option<Assembly>,
+    /// Present for missile-design revisions (schema 2 onwards).
+    #[serde(default)]
+    pub vehicle: Option<Vehicle>,
 }
 
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -78,9 +85,15 @@ impl RevisionLog {
             parent: self.head,
             label: format!("Revision {id}"),
             hash,
-            assembly: assembly.clone(),
+            assembly: Some(assembly.clone()),
+            vehicle: None,
         });
         self.head = Some(id);
+        self.trim();
+        Ok(id)
+    }
+
+    fn trim(&mut self) {
         if self.revisions.len() > MAX_REVISIONS {
             let removed = self.revisions.remove(0);
             for revision in &mut self.revisions {
@@ -89,13 +102,67 @@ impl RevisionLog {
                 }
             }
         }
+    }
+
+    /// Record the current missile design, which joins the same revision log as the legacy
+    /// assembly. Refuses a design identical to the head.
+    pub fn commit_vehicle(&mut self, vehicle: &Vehicle) -> Result<u32, String> {
+        vehicle.validate().map_err(|issues| issues.join("; "))?;
+        let hash = hash_serializable(vehicle)?.as_str().to_string();
+        if self.head().is_some_and(|head| head.hash == hash) {
+            return Err("nothing changed since the last revision".to_string());
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        self.revisions.push(DesignRevision {
+            id,
+            parent: self.head,
+            label: format!("Missile revision {id}"),
+            hash,
+            assembly: None,
+            vehicle: Some(vehicle.clone()),
+        });
+        self.head = Some(id);
+        self.trim();
         Ok(id)
+    }
+
+    pub fn head_vehicle(&self) -> Option<&DesignRevision> {
+        self.head().filter(|revision| revision.vehicle.is_some())
     }
 
     /// Changes between the head revision and `current`, or `None` when there is no revision yet.
     pub fn diff_from_head(&self, current: &Assembly) -> Option<DesignDiff> {
         let head = self.head()?;
-        Some(diff_parts(&geometry(&head.assembly), &geometry(current)))
+        let assembly = head.assembly.as_ref()?;
+        Some(diff_parts(&geometry(assembly), &geometry(current)))
+    }
+
+    /// Missile revisions in reverse order, with their hashes.
+    pub fn vehicle_revisions(&self) -> impl Iterator<Item = &DesignRevision> {
+        self.revisions
+            .iter()
+            .rev()
+            .filter(|revision| revision.vehicle.is_some())
+    }
+
+    /// Workshop panel text: the revisions that hold a missile design.
+    pub fn missile_hud_text(&self, vehicle: &Vehicle) -> String {
+        let mut lines = vec!["DESIGN REVISIONS".to_string()];
+        match self.head_vehicle() {
+            Some(head) => {
+                lines.push(format!("Head {} | {}", head.hash, head.label));
+                lines.push(format!(
+                    "Since head: {}",
+                    crate::missile::vehicle_diff(&head.vehicle.clone().unwrap_or_default(), vehicle)
+                ));
+            }
+            None => lines.push("No missile revision recorded yet.".to_string()),
+        }
+        for revision in self.vehicle_revisions().take(3) {
+            lines.push(format!("rev {} | {}", revision.id, revision.hash));
+        }
+        lines.join("\n")
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
@@ -104,7 +171,7 @@ impl RevisionLog {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let log: Self = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-        if log.schema_version != REVISION_SCHEMA {
+        if log.schema_version != REVISION_SCHEMA && log.schema_version != LEGACY_SCHEMA {
             return Err(format!("unsupported revision log schema {}", log.schema_version));
         }
         if let Some(head) = log.head
@@ -155,14 +222,23 @@ impl RevisionLog {
         if self.revisions.is_empty() {
             lines.push("None yet. Ctrl+B records the current design.".to_string());
         } else {
-            for revision in self.revisions.iter().rev().take(SHOWN_REVISIONS) {
+            for revision in self
+                .revisions
+                .iter()
+                .rev()
+                .filter(|revision| revision.assembly.is_some())
+                .take(SHOWN_REVISIONS)
+            {
+                let Some(assembly) = &revision.assembly else {
+                    continue;
+                };
                 let marker = if Some(revision.id) == self.head { ">" } else { " " };
                 let parent = revision.parent.map_or(String::new(), |p| format!(" (from {p})"));
                 lines.push(format!(
                     "{marker} rev {}{} | {}",
                     revision.id,
                     parent,
-                    Self::metrics_text(&revision.assembly)
+                    Self::metrics_text(assembly)
                 ));
             }
             if let (Some(head), Some(diff)) = (self.head(), self.diff_from_head(current)) {
@@ -213,11 +289,14 @@ pub(crate) fn record_revision(log: &mut RevisionLog, session: &DesignSession) ->
 /// Replace the working design with the latest revision. Returns a status message.
 pub(crate) fn restore_revision(log: &RevisionLog, session: &mut DesignSession) -> String {
     match log.head() {
-        Some(head) => {
-            session.replace_assembly(head.assembly.clone());
-            info!("Restored design revision {}", head.id);
-            format!("Restored revision {}", head.id)
-        }
+        Some(head) => match &head.assembly {
+            Some(assembly) => {
+                session.replace_assembly(assembly.clone());
+                info!("Restored design revision {}", head.id);
+                format!("Restored revision {}", head.id)
+            }
+            None => "The latest revision is a missile design".to_string(),
+        },
         None => "No revision to restore yet".to_string(),
     }
 }
@@ -296,6 +375,48 @@ mod tests {
         let mut future = log;
         future.schema_version = 99;
         assert!(RevisionLog::from_bytes(&future.to_bytes().unwrap()).is_err());
+    }
+
+    #[test]
+    fn missile_revisions_share_the_log_and_schema_one_still_loads() {
+        use omega_rules::{ComputerClass, Part, PartSpec, Stage};
+        let mut log = RevisionLog::default();
+        log.commit(&Assembly::demo()).unwrap();
+        let vehicle = Vehicle {
+            name: "Revision rocket".into(),
+            stages: vec![Stage {
+                parts: vec![
+                    Part {
+                        id: "motor".into(),
+                        spec: PartSpec::SolidMotor {
+                            length_m: 2.0,
+                            diameter_m: 0.4,
+                            burn_time_s: 20.0,
+                        },
+                    },
+                    Part {
+                        id: "computer".into(),
+                        spec: PartSpec::Computer {
+                            class: ComputerClass::Basic,
+                        },
+                    },
+                ],
+            }],
+        };
+        let id = log.commit_vehicle(&vehicle).unwrap();
+        assert_eq!(log.head().unwrap().id, id);
+        assert!(log.head_vehicle().is_some());
+        assert!(log.commit_vehicle(&vehicle).is_err(), "unchanged vehicle");
+        let bytes = log.to_bytes().unwrap();
+        let loaded = RevisionLog::from_bytes(&bytes).unwrap();
+        assert_eq!(loaded, log);
+
+        let mut legacy = log.clone();
+        legacy.schema_version = LEGACY_SCHEMA;
+        for revision in &mut legacy.revisions {
+            revision.vehicle = None;
+        }
+        assert!(RevisionLog::from_bytes(&legacy.to_bytes().unwrap()).is_ok());
     }
 
     #[test]

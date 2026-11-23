@@ -525,6 +525,64 @@ impl MissileSession {
 // Layout and 3D visuals
 // ----------------------------------------------------------------------------------------------
 
+/// Human summary of what changed between two missile designs, by part id.
+pub(crate) fn vehicle_diff(before: &Vehicle, after: &Vehicle) -> String {
+    use std::collections::BTreeMap;
+    let index = |vehicle: &Vehicle| -> BTreeMap<String, (usize, PartSpec)> {
+        vehicle
+            .stages
+            .iter()
+            .enumerate()
+            .flat_map(|(stage, s)| s.parts.iter().map(move |p| (p.id.clone(), (stage, p.spec))))
+            .collect()
+    };
+    let old = index(before);
+    let new = index(after);
+    let mut added = 0;
+    let mut removed = 0;
+    let mut changed = 0;
+    let mut moved = 0;
+    for (id, (stage, spec)) in &new {
+        match old.get(id) {
+            None => added += 1,
+            Some((old_stage, old_spec)) => {
+                if old_spec != spec {
+                    changed += 1;
+                } else if old_stage != stage {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    removed += old.keys().filter(|id| !new.contains_key(*id)).count();
+    let mass = |vehicle: &Vehicle| -> f64 {
+        vehicle
+            .parts()
+            .map(|(_, p)| {
+                let stats = p.spec.stats();
+                stats.dry_mass_kg + stats.propellant_kg
+            })
+            .sum()
+    };
+    let delta = mass(after) - mass(before);
+    if added + removed + changed + moved == 0 && delta.abs() < 0.05 {
+        return "no changes".to_string();
+    }
+    let mut parts = Vec::new();
+    for (count, label) in [
+        (added, "added"),
+        (removed, "removed"),
+        (changed, "changed"),
+        (moved, "moved"),
+    ] {
+        if count > 0 {
+            parts.push(format!("{count} {label}"));
+        }
+    }
+    parts.push(format!("mass {delta:+.1} kg"));
+    parts.join(", ")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Shape {
     Body,
@@ -903,6 +961,23 @@ mod tests {
         session.apply(MissileAction::Clear, &owned);
         assert_eq!(session.vehicle.parts().count(), 0);
         assert!(session.vehicle.validate().is_err());
+    }
+
+    #[test]
+    fn vehicle_diff_reports_edits_and_mass() {
+        let session = MissileSession::new_default();
+        assert_eq!(vehicle_diff(&session.vehicle, &session.vehicle), "no changes");
+        let mut edited = session.vehicle.clone();
+        edited.stages[0].parts[0].spec = PartSpec::SolidMotor {
+            length_m: 3.0,
+            diameter_m: 0.4,
+            burn_time_s: 20.0,
+        };
+        let summary = vehicle_diff(&session.vehicle, &edited);
+        assert!(summary.contains("1 changed") && summary.contains("mass +"), "{summary}");
+        let mut removed = session.vehicle.clone();
+        removed.stages[1].parts.pop();
+        assert!(vehicle_diff(&session.vehicle, &removed).contains("1 removed"));
     }
 
     #[test]

@@ -152,6 +152,22 @@ tracking or targeting is involved.
 **Acceptance.** A complete loop is carried out without opening the legacy bench once; changing a
 part after a trial marks the dossier `STALE`; delivery is credited.
 
+**Status.** Done in the working tree: `src/procurement.rs` behind the CONTRACTS tab. The office
+offers four missile families and vehicle families; accepting one starts the evidence clock. Trials
+flown afterwards are recorded automatically, bound to the vehicle hash, the program hash and the
+seed. `ContractOffer::missile_requirements` turns family and difficulty into flight requirements
+(range, speed, mass, lift-off, separation and a hard lock for air-to-air/surface-to-air) and
+`ContractOffer::missile_dossier` evaluates them through `evaluate_requirement` / `build_dossier`.
+The dossier panel shows every row and the bound hashes; editing a part or the program marks all
+rows `STALE`, sets the score to 0 and disables delivery, and reverting restores it. Delivery pays
+the reward, increments the delivered counter and generates a new board; a passed deadline refuses
+delivery. Missile designs join `designs/revisions.json` (schema 2, legacy schema 1 still loads) with
+a head hash, a change summary and a record button in the workshop. Verified in game on a two-stage
+solid rocket against a ballistic offer: accept, fly, dossier 100 %, add a pitot → `STALE` and the
+button disabled, remove it → current again, deliver → +8,000 cr and one completed contract
+(22,500 → 30,500 cr). The civil office and bench are unchanged but reachable only through an
+explicit `CIVIL (LEGACY)` toggle, ready for lot 5.
+
 ### Lot 4 — Research that actually constrains
 
 **Purpose.** The research grants exist in the data but are consulted nowhere: progression is

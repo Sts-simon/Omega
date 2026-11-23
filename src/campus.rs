@@ -519,6 +519,8 @@ pub struct CampusState {
     pub profile_editor_open: bool,
     pub(crate) research: omega_rules::ResearchState,
     pub(crate) day: u32,
+    /// The civil contract office stays reachable until lot 5 removes it.
+    pub(crate) civil_legacy_open: bool,
     dirty: bool,
 }
 
@@ -560,6 +562,7 @@ impl Default for CampusState {
                 profile_editor_open: false,
                 research: save.research,
                 day: save.day.max(1),
+                civil_legacy_open: false,
                 dirty: interrupted_analysis,
             };
         }
@@ -583,6 +586,7 @@ impl Default for CampusState {
             profile_editor_open: false,
             research: omega_rules::ResearchState::default(),
             day: 1,
+            civil_legacy_open: false,
             dirty: true,
         }
     }
@@ -1206,6 +1210,9 @@ pub fn handle_input(
     design: Res<DesignSession>,
     sequence: Res<SequenceWorkspace>,
     sketch: Res<PolygonSketchSession>,
+    missile: Res<crate::missile::MissileSession>,
+    program: Res<crate::program_editor::MissileProgramSession>,
+    mut procurement: ResMut<crate::procurement::Procurement>,
     ui_buttons: Query<&UiInteraction>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
@@ -1285,6 +1292,24 @@ pub fn handle_input(
             }
         }
         CampusView::Contracts => {
+            if !campus.civil_legacy_open {
+                if keys.just_pressed(KeyCode::KeyV) {
+                    deliver_missile_contract(&mut campus, &mut procurement, &missile.vehicle, &program.program);
+                    return;
+                }
+                for (key, index) in [
+                    (KeyCode::Digit1, 0),
+                    (KeyCode::Digit2, 1),
+                    (KeyCode::Digit3, 2),
+                    (KeyCode::Digit4, 3),
+                ] {
+                    if keys.just_pressed(key) {
+                        accept_missile_offer(&mut campus, &mut procurement, index);
+                        return;
+                    }
+                }
+                return;
+            }
             if keys.just_pressed(KeyCode::KeyN) {
                 refresh_contract_board(&mut campus);
                 return;
@@ -1556,6 +1581,35 @@ fn enter_facility(campus: &mut CampusState, facility: FacilityKind) {
         FacilityKind::Computation => CampusView::Computation,
     };
     campus.message = format!("Entered {}", facility.label());
+}
+
+/// Accept an offer from the missile contract office. Shared by the board and the number keys.
+pub(crate) fn accept_missile_offer(
+    campus: &mut CampusState,
+    procurement: &mut crate::procurement::Procurement,
+    index: usize,
+) {
+    campus.message = procurement.accept(index, campus.day);
+}
+
+/// Deliver the active missile contract and credit the reward. Refused dossiers keep the contract.
+pub(crate) fn deliver_missile_contract(
+    campus: &mut CampusState,
+    procurement: &mut crate::procurement::Procurement,
+    vehicle: &omega_rules::Vehicle,
+    program: &omega_rules::Program,
+) {
+    match procurement.deliver(campus.day, vehicle, program) {
+        Ok(delivery) => {
+            campus.credits = campus.credits.saturating_add(delivery.reward);
+            campus.message = format!(
+                "Contract #{} delivered: +{} cr ({}% dossier)",
+                delivery.id, delivery.reward, delivery.score_percent
+            );
+            campus.mark_dirty();
+        }
+        Err(message) => campus.message = message,
+    }
 }
 
 fn refresh_contract_board(campus: &mut CampusState) {
@@ -1867,6 +1921,7 @@ mod tests {
             profile_editor_open: false,
             research: omega_rules::ResearchState::default(),
             day: 1,
+            civil_legacy_open: false,
             dirty: false,
         }
     }

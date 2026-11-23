@@ -8,8 +8,10 @@
 campus. You build a staged missile in a 3D workshop, unlock parts through a research tree that
 advances with a day clock, and queue scientific studies that run on background worker threads.
 
-The older civil contract loop (civilian instrument assembly, instrument profile, dossier, field
-test) is still present and is currently the only complete contract path.
+The missile loop is complete: accept a family contract, design the vehicle, write its program, fly
+the trial and deliver a hash-bound dossier for credits. The older civil contract loop (civilian
+instrument assembly, instrument profile, dossier, field test) is kept as legacy behind a
+**CIVIL (LEGACY)** toggle until lot 5 removes it.
 
 Everything in this project is fictional and abstract. Every mass, thrust, cost, duration and
 probability is a gameplay value, not physical or real-world performance data. The project
@@ -22,10 +24,10 @@ The finished game rests on **missile design alone**: contract → staged vehicle
 installed hardware → seeded trials → delivery of a plan (design, program and evidence; nothing is
 produced).
 
-Today only the design and research halves are playable. The legacy assembly bench, the polygon
-sketch, the instrument profile, the chamber sequencer and the civil contract families are
-transitional tooling, kept while they are the only way to complete a contract, and removed once
-missile-family contracts, trials and plan delivery replace them.
+Missile contracts, trials and plan delivery now exist, so the remaining transitional tooling — the
+legacy assembly bench, polygon sketch, instrument profile, chamber sequencer and civil contract
+families — is reachable only through explicitly labelled legacy views. Lot 5 removes it once a
+0.26 save still loads and the missile loop passes end to end.
 
 The project is published as the public repository <https://github.com/Sts-simon/Omega> on the
 `main` branch, under the MIT licence. `target/`, `saves/`, `results/` and the local `.freebuff/`
@@ -110,10 +112,30 @@ workspace folder are ignored.
 - The session (seed, reports, batch, snapshot) is in memory only; the vehicle and program it flies
   are the saved ones.
 
-### Legacy civil loop (playable, transitional)
+### Missile contracts (playable, 0.29 work)
 
-- Contract Office: five randomized civilian/scientific domains, one offer each, with unit
-  quantities, mass/power/temperature/uptime/data/storage limits, budgets, rewards and deadlines.
+- The **CONTRACTS** tab opens the missile procurement office: four offers, each naming a mission
+  family (air-to-air, air-to-surface, surface-to-air, surface-to-surface) and a vehicle family
+  (ballistic, cruise, short-range) with a difficulty. Accepting one closes the offer and starts the
+  evidence clock; one contract is active at a time.
+- The requirements are abstract flight figures, not typed-in paperwork: path length, top speed,
+  launch mass, lift-off and stage separation, plus a hard target lock on air-to-air and
+  surface-to-air offers. They are evaluated by the shared `omega-rules` requirement and dossier
+  machinery.
+- The dossier is built from the trials flown while the contract is active. Every proof carries the
+  vehicle hash, the program hash and the trial seed, and the panel shows the bound hashes. Edit a
+  part or a block after the trial and all rows turn `STALE`, the score drops to 0 and delivery is
+  disabled; reverting the edit restores the dossier.
+- Delivering an accepted dossier pays the reward, increments the delivered counter and generates a
+  fresh offer board. A passed deadline or an incomplete dossier keeps the contract.
+- Missile designs join the same revision log as the legacy assembly (`designs/revisions.json`,
+  schema 2). The workshop shows the head hash, the change summary since it and a `RECORD REVISION`
+  button.
+
+### Legacy civil loop (playable via `CIVIL (LEGACY)`, transitional)
+
+- Contract Office (legacy toggle): five randomized civilian/scientific domains, one offer each, with
+  unit quantities, mass/power/temperature/uptime/data/storage limits, budgets, rewards and deadlines.
   Up to two active projects.
 - Full phase path: accept → design → instrument profile → submit (design checks, geometry-derived
   centre-of-gravity balance limit) → background thermal analysis → deterministic 1,000-sample field
@@ -140,20 +162,14 @@ workspace folder are ignored.
 
 ## Not implemented in 0.26.0
 
-- **Programs are not part of a contract yet.** The program editor exists, but no contract, trial or
-  dossier consumes a program: the missile program is not part of the evidence and there is still no
-  plan-delivery path.
-- **No trial screen.** `omega-rules::flight` (seeded integration with events, anomalies and a lock
-  roll) is headless only: no graphs, anomaly display, seeds, batch trials or design comparison. The
-  `analysis:monte_carlo` grant exists but nothing consumes it.
-- **Contracts are still civil.** They do not use the missile vehicle, missile designs are not part
-  of design revisions or verification evidence, and there is no plan-delivery path for missile
-  contracts.
-- **Research does not gate contracts.** The `family:*` capabilities and the `ExtraActiveProjects`
-  grant are not checked anywhere; the active-project limit stays at two.
-- The legacy civil loop and the legacy bench are still required to finish a contract.
-- No scoring, reputation, live deadlines, production scheduling, staffing, inventory or island
-  expansion.
+- **Research does not gate contract families yet.** Every family is offered from the start; the
+  `family:*` capabilities and the `ExtraActiveProjects` grant are not checked anywhere.
+- **The civil loop is still in the repository.** It is reachable only through the explicitly
+  labelled legacy toggle and legacy views; lot 5 deletes it, the legacy bench, the sequencer and the
+  civil contract data.
+- Deadlines are a delivery gate but do not expire or fail a contract on their own, and the office
+  does not model reputation, penalties or multiple simultaneous contracts.
+- No production scheduling, staffing, inventory or island expansion.
 - No arbitrary 3D CAD meshing, bending/buckling/fatigue/dynamic structural mechanics, implicit time
   integration or certified engineering validation. Connection kinds remain graph metadata only.
 
@@ -230,10 +246,9 @@ project at a time.
 
 | Input | Action |
 |---|---|
-| `1`–`5` | Accept the corresponding offer |
-| `Tab` / `Shift+Tab` | Select the next / previous active project |
-| `V` | Deliver a project that passed its field test and dossier |
-| `N` | Refresh the offer board |
+| `1`–`4` | Accept the corresponding missile offer |
+| `V` | Deliver the active missile contract when its dossier is current and accepted |
+| `N`, `Tab`, `Shift+Tab`, `1`–`5` | Legacy civil office only (`CIVIL (LEGACY)`): refresh, select project, accept |
 
 ### Legacy assembly bench
 
@@ -286,10 +301,11 @@ All persistent files go through `src/save.rs` and `omega_data::SaveSlot`:
 ```text
 saves/slot_1/
   manifest.json                 committed last; read verifies every file hash
-  campaign.json                 credits, offers, projects, evidence, research, day, PRNG
+  campaign.json                 credits, civil offers/projects, research, day, PRNG
+  contracts/missile.json        missile offers, active contract, evidence, deliveries (0.29)
   designs/assembly.json         legacy assembly
   designs/polygon-sketch.json   legacy polygon sketch
-  designs/revisions.json        legacy design revisions
+  designs/revisions.json        design revisions, legacy assembly and missile (schema 2)
   designs/vehicle.json          missile vehicle (0.26)
   programs/missile.json         missile program (0.27)
   programs/lab_sequence.json    chamber sequence program (legacy)
@@ -305,10 +321,11 @@ exports are written to `results/`.
 ```text
 src/
   main.rs              Bevy app, orbit camera, ordered system chain
-  campus.rs            views, campaign, civil contracts, phases, research, day, save
-  campus/board.rs      card boards: island, contracts, research, missile workshop, project
-  campus/verification.rs  hash-bound evidence and dossier
-  missile.rs           missile workshop session, parts, stages, 3D stack
+  campus.rs            views, campaign, civil contracts (legacy), research, day, save
+  campus/board.rs      card boards: island, missile contracts, research, workshop, project
+  campus/verification.rs  legacy assembly evidence and dossier
+  procurement.rs       missile offers, trial evidence, dossier, delivery, persistence
+  missile.rs           missile workshop session, parts, stages, 3D stack, change summary
   program_editor.rs    missile program session, validation, persistence
   interface.rs         navigation bar, tool shelves, UiAction dispatch
   save.rs              SaveSlot access and 0.21 import
@@ -321,7 +338,8 @@ src/
 crates/
   sim-core/            Bevy-free solvers: thermal FV, truss, mesh, mesh thermal, reports
   omega-data/        content hashes, atomic writes, versioned save slot
-  omega-rules/       vehicle, program, flight, research, requirements, dossier, metrics, diff
+  omega-rules/       vehicle, program, flight, research, contracts, requirements, dossier,
+                     metrics, diff
 docs/                  architecture, vision, roadmap, changelog, model notes, legacy UX docs
 examples/              sample assembly, chamber program, polygon sketch
 ```

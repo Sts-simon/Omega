@@ -3,6 +3,7 @@ mod design;
 mod interface;
 mod jobs;
 mod missile;
+mod procurement;
 mod program_editor;
 mod save;
 mod scene;
@@ -36,6 +37,7 @@ fn main() {
         .init_resource::<jobs::JobManager>()
         .init_resource::<program_editor::MissileProgramSession>()
         .init_resource::<trials::TrialSession>()
+        .init_resource::<procurement::Procurement>()
         .init_resource::<sequence::SequenceWorkspace>()
         .add_systems(
             Startup,
@@ -65,6 +67,7 @@ fn main() {
                 (
                     interface::handle_actions,
                     campus::handle_extra_actions,
+                    procurement::record_trial_evidence,
                     design::handle_inspector_input,
                     design::handle_inspector_text_input,
                     campus::handle_input,
@@ -80,6 +83,7 @@ fn main() {
                     .chain(),
                 (
                     campus::persist_campaign,
+                    procurement::persist_procurement,
                     jobs::update_hud,
                     move_camera,
                     design::sync_part_visuals,
