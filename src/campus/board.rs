@@ -9,7 +9,7 @@ use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
 use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable};
 use crate::ui_kit::{self, ButtonTone, NavStatus, UiState};
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::ui::{ScrollPosition, UiGlobalTransform};
+use bevy::ui::ScrollPosition;
 use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1451,18 +1451,13 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
         flex_direction: FlexDirection::Column,
         flex_grow: 1.0,
         flex_basis: Val::Px(0.0),
-        min_height: Val::Px(0.0),
         row_gap: Val::Px(10.0),
         ..default()
     })
     .with_children(|middle| {
         let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
-        // The block list scrolls inside the panel and the selected-block panel keeps its own
-        // height, so a long program never pushes the editing controls off the screen.
-        node.flex_shrink = 1.0;
-        node.min_height = Val::Px(0.0);
-        // Cap the block list so the selected-block controls keep their place on screen even with a
-        // 32-block program; the list scrolls instead of pushing them out of the window.
+        // Cap the list panel so the selected-block controls stay on screen even with a 32-block
+        // program; the list scrolls instead of pushing them below the window.
         node.max_height = Val::Percent(70.0);
         node.overflow = Overflow::clip_y();
         middle.spawn((node, bg, interaction)).with_children(|panel| {
@@ -1697,28 +1692,25 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
 ///
 /// `bevy_ui` moves a node's children by `ScrollPosition` but nothing turns the wheel into an
 /// offset, so the list would stay stuck on its first blocks once a program outgrows the panel. The
-/// offset is mirrored in the session because the board is rebuilt after every edit.
+/// offset is mirrored in the session because the board is rebuilt after every edit, and the wheel
+/// always targets the list: it is the only scrollable thing in this view, whose orbit camera is off.
 pub(crate) fn scroll_program_list(
     wheel: Res<AccumulatedMouseScroll>,
-    window: Single<&Window, With<PrimaryWindow>>,
     mut session: ResMut<MissileProgramSession>,
-    mut lists: Query<(&mut ScrollPosition, &ComputedNode, &UiGlobalTransform), With<ProgramListScroll>>,
+    mut lists: Query<&mut ScrollPosition, With<ProgramListScroll>>,
 ) {
-    let Some(cursor) = window.cursor_position() else {
+    let Ok(mut position) = lists.single_mut() else {
         return;
     };
-    for (mut position, node, transform) in &mut lists {
-        if !node.contains_point(*transform, cursor) {
-            continue;
-        }
-        if wheel.delta.y != 0.0 {
-            let step = match wheel.unit {
-                MouseScrollUnit::Line => 34.0,
-                MouseScrollUnit::Pixel => 1.0,
-            } * wheel.delta.y;
-            position.y = (position.y - step).max(0.0);
-        }
-        // Rebuilding the board reads this back; the layout pass clamps the value to the content.
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    // Rebuilding the board reads this back; the layout pass clamps it to the content.
+    if session.scroll != position.y {
         session.scroll = position.y;
     }
 }
