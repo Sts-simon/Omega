@@ -185,6 +185,7 @@ card opens it.
 | `F2` | Missile workshop |
 | `F3` | Research Centre |
 | `F4` | Missile program editor |
+| `F5` | Trials |
 | `Escape` | Return to the island |
 
 ### Missile workshop
