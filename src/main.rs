@@ -115,17 +115,16 @@ fn move_camera(
 
     // KSP-style framing shortcuts: F focuses the selected part, Home frames the whole design.
     if campus.view == CampusView::Missile {
-        if keys.just_pressed(KeyCode::KeyF) {
-            if let Some(pose) = session
+        if keys.just_pressed(KeyCode::KeyF)
+            && let Some(pose) = session
                 .selected
                 .as_deref()
                 .and_then(|id| session.vehicle.poses().into_iter().find(|pose| pose.id == id))
-            {
-                rig.target = missile::ANCHOR
-                    + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
-                rig.distance = ((pose.radius_m as f32) * missile::VISUAL_SCALE * 4.0 + 8.0).clamp(12.0, 45.0);
-                changed = true;
-            }
+        {
+            rig.target = missile::ANCHOR
+                + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
+            rig.distance = ((pose.radius_m as f32) * missile::VISUAL_SCALE * 4.0 + 8.0).clamp(12.0, 45.0);
+            changed = true;
         }
         if keys.just_pressed(KeyCode::Home) {
             let poses = session.vehicle.poses();
