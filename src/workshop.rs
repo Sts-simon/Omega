@@ -48,6 +48,20 @@ pub(crate) struct WorkshopInput {
     pub drag_active: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TransformMode {
+    #[default]
+    Translate,
+    Rotate,
+}
+
+/// KSP-style transform gizmo state. A handle drag is committed as one undoable edit on release.
+#[derive(Resource, Default)]
+pub(crate) struct TransformGizmo {
+    pub mode: TransformMode,
+    pub drag: Option<(usize, Vec2, Vec2)>,
+}
+
 #[derive(Clone, Debug)]
 struct NodePoint {
     parent: String,
@@ -169,6 +183,7 @@ pub(crate) fn workshop_pointer(
     ui: Query<&UiInteraction>,
     mut drag: ResMut<DragState>,
     mut input: ResMut<WorkshopInput>,
+    mut transform_gizmo: ResMut<TransformGizmo>,
     mut gizmos: Gizmos,
 ) {
     input.wheel_used = false;
@@ -197,9 +212,40 @@ pub(crate) fn workshop_pointer(
         .map(|ray| (ray.origin, *ray.direction));
     let picked = ray.and_then(|(origin, direction)| picked_part(&session.vehicle, origin, direction));
 
+    // KSP-style tool selection. W = translate, R = rotate; X/Y/Z select an axis in the inspector
+    // workflow, while the coloured handles below can be dragged directly.
+    if keys.just_pressed(KeyCode::KeyW) {
+        transform_gizmo.mode = TransformMode::Translate;
+        transform_gizmo.drag = None;
+    }
+    if keys.just_pressed(KeyCode::KeyR) {
+        transform_gizmo.mode = TransformMode::Rotate;
+        transform_gizmo.drag = None;
+    }
+
     // --- start a drag ---
     if mouse.just_pressed(MouseButton::Left) {
-        if let Some((interaction, palette)) = palettes.iter().find(|(i, _)| **i == UiInteraction::Pressed) {
+        if !pointer_over_ui
+            && let Some(id) = session.selected.as_deref()
+            && let Some(pose) = session.vehicle.poses().into_iter().find(|pose| pose.id == id)
+        {
+            let center = world_of(missile::ANCHOR, pose.x_m, pose.y_m, pose.z_m);
+            let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+            let mut nearest: Option<(usize, Vec2, f32)> = None;
+            for (axis, direction) in axes.into_iter().enumerate() {
+                if let Ok(point) = camera.world_to_viewport(camera_transform, center + direction * 1.5) {
+                    let distance = cursor.distance(point);
+                    if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
+                        nearest = Some((axis, point, distance));
+                    }
+                }
+            }
+            if let Some((axis, handle, _)) = nearest {
+                transform_gizmo.drag = Some((axis, cursor, handle));
+            }
+        }
+        if transform_gizmo.drag.is_none()
+            && let Some((interaction, palette)) = palettes.iter().find(|(i, _)| **i == UiInteraction::Pressed) {
             let _ = interaction;
             drag.source = Some(DragSource::Palette(palette.0));
             drag.hover = None;
@@ -268,6 +314,31 @@ pub(crate) fn workshop_pointer(
 
     // --- finish a drag ---
     if mouse.just_released(MouseButton::Left)
+        && let Some((axis, start, handle)) = transform_gizmo.drag.take()
+    {
+        let delta = cursor - start;
+        let amount = if transform_gizmo.mode == TransformMode::Translate {
+            let screen_axis = (handle - start).normalize_or_zero();
+            let metres = delta.dot(screen_axis) * 0.02;
+            if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+                metres
+            } else {
+                (metres / 0.1).round() * 0.1
+            }
+        } else {
+            let degrees = delta.x * 0.5;
+            if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+                degrees
+            } else {
+                (degrees / 5.0).round() * 5.0
+            }
+        };
+        if amount.abs() > 0.001 {
+            campus.message = session.transform_selected(axis, amount, transform_gizmo.mode == TransformMode::Rotate);
+        }
+    }
+
+    if mouse.just_released(MouseButton::Left)
         && let Some(source) = drag.source.clone()
     {
         let mut message = None;
@@ -297,6 +368,40 @@ pub(crate) fn workshop_pointer(
         drag.pending = None;
     }
 
+    // Three coloured translation handles or rotation rings, centred on the selected part.
+    if drag.source.is_none()
+        && let Some(id) = session.selected.as_deref()
+        && let Some(pose) = session.vehicle.poses().into_iter().find(|pose| pose.id == id)
+        && session.vehicle.part(id).is_some_and(|part| part.attach.is_some())
+    {
+        let center = world_of(missile::ANCHOR, pose.x_m, pose.y_m, pose.z_m);
+        let axes = [
+            (Vec3::X, Color::srgb(0.95, 0.25, 0.25)),
+            (Vec3::Y, Color::srgb(0.30, 0.90, 0.40)),
+            (Vec3::Z, Color::srgb(0.25, 0.55, 1.0)),
+        ];
+        for (axis, color) in axes {
+            let end = center + axis * 1.5;
+            gizmos.line(center, end, color);
+            gizmos.sphere(Isometry3d::from_translation(end), 0.11, color);
+            if transform_gizmo.mode == TransformMode::Rotate {
+                let mut previous = None;
+                for step in 0..=48 {
+                    let angle = std::f32::consts::TAU * step as f32 / 48.0;
+                    let point = match axis {
+                        Vec3::X => center + Vec3::new(0.0, angle.cos(), angle.sin()) * 1.05,
+                        Vec3::Y => center + Vec3::new(angle.cos(), 0.0, angle.sin()) * 1.05,
+                        _ => center + Vec3::new(angle.cos(), angle.sin(), 0.0) * 1.05,
+                    };
+                    if let Some(from) = previous {
+                        gizmos.line(from, point, color);
+                    }
+                    previous = Some(point);
+                }
+            }
+        }
+    }
+
     // --- keyboard ---
     if keys.just_pressed(KeyCode::Escape) && (drag.source.is_some() || drag.pending.is_some()) {
         drag.source = None;
@@ -304,7 +409,7 @@ pub(crate) fn workshop_pointer(
         drag.pending = None;
         campus.message = "Drag cancelled".to_string();
     }
-    if drag.source.is_none() {
+    if drag.source.is_none() && transform_gizmo.drag.is_none() {
         if keys.just_pressed(KeyCode::KeyQ) {
             campus.message = session.rotate_selected(-1);
         }
@@ -357,7 +462,7 @@ pub(crate) fn workshop_pointer(
         }
         input.wheel_used = true;
     }
-    input.drag_active = drag.source.is_some() || drag.pending.is_some();
+    input.drag_active = drag.source.is_some() || drag.pending.is_some() || transform_gizmo.drag.is_some();
 
     // The palette, drag, wheel and keyboard paths edit the design directly while the inspector's
     // buttons go through `UiAction`, which saves on its own. Saving here too means a palette-only
