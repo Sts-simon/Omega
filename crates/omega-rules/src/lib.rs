@@ -5,6 +5,7 @@
 
 pub mod aero;
 pub mod assembly;
+pub mod compliance;
 pub mod contracts;
 pub mod diff;
 pub mod dossier;
@@ -16,7 +17,11 @@ pub mod research;
 pub mod vehicle;
 
 pub use aero::{AeroFigures, AeroSummary, SurfaceContribution};
-pub use assembly::{Attach, NodeId, PartPose, PlacedPart, VEHICLE_SCHEMA, Vehicle, VehicleWarning};
+pub use assembly::{
+    Attach, IssueSeverity, NodeId, PartPose, PlacedPart, TreeEntry, VEHICLE_SCHEMA, Vehicle, VehicleIssue,
+    VehicleWarning,
+};
+pub use compliance::{CheckStatus, ContractCheck, contract_preview};
 pub use contracts::{
     ContractEvaluation, ContractOffer, ContractPhase, ContractProgress, ContractRequirements, MissionFamily,
     VehicleFamily, generate_contract_board,
@@ -35,6 +40,6 @@ pub use research::{
     validate_tree,
 };
 pub use vehicle::{
-    AirfoilProfile, ComputerClass, ControlKind, FinLayout, Part, PartSpec, PartStats, RadarClass, SensorKind,
-    StabilizerRole, Stage, StageReport, WingPlanform,
+    AirfoilProfile, ComputerClass, ControlKind, FinLayout, Part, PartCategory, PartSpec, PartStats, RadarClass,
+    SensorKind, StabilizerRole, Stage, StageReport, WingPlanform,
 };

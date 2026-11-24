@@ -83,6 +83,39 @@ pub struct VehicleWarning {
     pub part: Option<String>,
 }
 
+/// Errors and warnings share one shape so the workshop can render one validation list and make
+/// every row a shortcut to the part at fault.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IssueSeverity {
+    Error,
+    Warning,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VehicleIssue {
+    pub severity: IssueSeverity,
+    pub message: String,
+    pub part: Option<String>,
+}
+
+impl VehicleIssue {
+    pub fn error(message: impl Into<String>, part: Option<String>) -> Self {
+        Self {
+            severity: IssueSeverity::Error,
+            message: message.into(),
+            part,
+        }
+    }
+
+    pub fn warning(message: impl Into<String>, part: Option<String>) -> Self {
+        Self {
+            severity: IssueSeverity::Warning,
+            message: message.into(),
+            part,
+        }
+    }
+}
+
 /// A design as a tree of parts. The root sits at the bottom of the stack.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Vehicle {
@@ -201,6 +234,18 @@ pub fn radial_slots(spec: &PartSpec) -> u8 {
     }
 }
 
+/// One row of the workshop's assembly tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TreeEntry {
+    pub id: String,
+    /// 0 for the root, 1 for a direct child, and so on: the indent the tree view draws.
+    pub depth: usize,
+    /// Derived stage index (0-based); a decoupler or a separation edge starts a new one.
+    pub stage: usize,
+    pub parent: Option<String>,
+    pub node: Option<NodeId>,
+}
+
 /// Position of a part in the assembled vehicle, in metres from the bottom of the root.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PartPose {
@@ -307,6 +352,43 @@ impl Vehicle {
 
     pub fn stage_of(&self, id: &str) -> Option<usize> {
         self.stage_depths().get(id).copied()
+    }
+
+    /// Rows of the workshop's assembly tree: depth-first from the single root, children in a
+    /// stable node/id order, with the derived stage and the node each part hangs from.
+    pub fn tree_entries(&self) -> Vec<TreeEntry> {
+        let mut entries = Vec::new();
+        let Some(root) = self.root() else {
+            return entries;
+        };
+        let depths = self.stage_depths();
+        let mut stack = vec![(root.id.clone(), 0usize)];
+        let mut seen = BTreeSet::new();
+        while let Some((id, depth)) = stack.pop() {
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let Some(part) = self.part(&id) else {
+                continue;
+            };
+            entries.push(TreeEntry {
+                id: id.clone(),
+                depth,
+                stage: depths.get(&id).copied().unwrap_or(0),
+                parent: part.attach.as_ref().map(|attach| attach.parent.clone()),
+                node: part.attach.as_ref().map(|attach| attach.node),
+            });
+            let mut children: Vec<&PlacedPart> = self.children(&id);
+            children.sort_by(|a, b| {
+                let node = |part: &PlacedPart| part.attach.as_ref().map(|attach| attach.node);
+                node(a).cmp(&node(b)).then_with(|| a.id.cmp(&b.id))
+            });
+            // Reversed, so the stack pops them in the sorted order above.
+            for child in children.into_iter().rev() {
+                stack.push((child.id.clone(), depth + 1));
+            }
+        }
+        entries
     }
 
     /// Parts in display order (stage, then bottom to top), with their derived stage.
@@ -478,42 +560,73 @@ impl Vehicle {
             .collect()
     }
 
+    /// Errors and warnings in one list, each naming the part to select to fix it. This is the only
+    /// compatibility source the workshop reads; it never builds a rule of its own.
+    pub fn issues(&self) -> Vec<VehicleIssue> {
+        let mut issues = self.error_issues();
+        issues.extend(self.warning_issues());
+        issues
+    }
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
-        let mut issues = Vec::new();
+        let issues: Vec<String> = self.error_issues().into_iter().map(|issue| issue.message).collect();
+        if issues.is_empty() { Ok(()) } else { Err(issues) }
+    }
+
+    fn error_issues(&self) -> Vec<VehicleIssue> {
+        let mut issues: Vec<VehicleIssue> = Vec::new();
         if self.parts.is_empty() {
-            issues.push("the vehicle has no parts".to_string());
-            return Err(issues);
+            issues.push(VehicleIssue::error("the vehicle has no parts", None));
+            return issues;
         }
         let roots: Vec<&PlacedPart> = self.parts.iter().filter(|p| p.attach.is_none()).collect();
         match roots.len() {
-            0 => issues.push("the vehicle has no root part (the assembly is not attached)".to_string()),
+            0 => issues.push(VehicleIssue::error(
+                "the vehicle has no root part (the assembly is not attached)",
+                None,
+            )),
             1 => {}
-            count => issues.push(format!("the vehicle has {count} root parts; exactly one is allowed")),
+            count => issues.push(VehicleIssue::error(
+                format!("the vehicle has {count} root parts; exactly one is allowed"),
+                None,
+            )),
         }
         let mut ids = BTreeSet::new();
         for part in &self.parts {
             if !ids.insert(part.id.as_str()) {
-                issues.push(format!("duplicate part id '{}'", part.id));
+                issues.push(VehicleIssue::error(
+                    format!("duplicate part id '{}'", part.id),
+                    Some(part.id.clone()),
+                ));
             }
         }
         let mut occupied: BTreeMap<(String, NodeId), String> = BTreeMap::new();
         for part in &self.parts {
             if let Some(attach) = &part.attach {
                 if self.part(&attach.parent).is_none() {
-                    issues.push(format!("{} is attached to unknown part {}", part.id, attach.parent));
+                    issues.push(VehicleIssue::error(
+                        format!("{} is attached to unknown part {}", part.id, attach.parent),
+                        Some(part.id.clone()),
+                    ));
                 }
                 let key = (attach.parent.clone(), attach.node);
                 if let Some(other) = occupied.insert(key, part.id.clone()) {
-                    issues.push(format!(
-                        "{} and {other} both use {} node {}",
-                        part.id,
-                        attach.parent,
-                        attach.node.label()
+                    issues.push(VehicleIssue::error(
+                        format!(
+                            "{} and {other} both use {} node {}",
+                            part.id,
+                            attach.parent,
+                            attach.node.label()
+                        ),
+                        Some(part.id.clone()),
                     ));
                 }
             }
             if let Err(error) = part.spec.validate() {
-                issues.push(format!("{}: {error}", part.id));
+                issues.push(VehicleIssue::error(
+                    format!("{}: {error}", part.id),
+                    Some(part.id.clone()),
+                ));
             }
         }
         // Cycles: walk up from every part.
@@ -522,7 +635,10 @@ impl Vehicle {
             let mut current = part.attach.as_ref().map(|a| a.parent.clone());
             while let Some(parent) = current {
                 if parent == part.id {
-                    issues.push(format!("{} is attached in a cycle", part.id));
+                    issues.push(VehicleIssue::error(
+                        format!("{} is attached in a cycle", part.id),
+                        Some(part.id.clone()),
+                    ));
                     break;
                 }
                 if !seen.insert(parent.clone()) {
@@ -537,8 +653,9 @@ impl Vehicle {
         let depths = self.stage_depths();
         let stage_count = self.stage_count();
         if stage_count > MAX_STAGES {
-            issues.push(format!(
-                "the vehicle has {stage_count} stages; at most {MAX_STAGES} are allowed"
+            issues.push(VehicleIssue::error(
+                format!("the vehicle has {stage_count} stages; at most {MAX_STAGES} are allowed"),
+                None,
             ));
         }
         let tanks: BTreeSet<usize> = self
@@ -551,10 +668,9 @@ impl Vehicle {
             if matches!(part.spec, PartSpec::LiquidEngine { .. } | PartSpec::AirBreathing { .. }) {
                 let stage = depths.get(&part.id).copied().unwrap_or(0);
                 if !tanks.contains(&stage) {
-                    issues.push(format!(
-                        "{} (stage {}): needs a fuel tank in the same stage",
-                        part.id,
-                        stage + 1
+                    issues.push(VehicleIssue::error(
+                        format!("{} (stage {}): needs a fuel tank in the same stage", part.id, stage + 1),
+                        Some(part.id.clone()),
                     ));
                 }
             }
@@ -565,51 +681,73 @@ impl Vehicle {
             .filter(|p| matches!(p.spec, PartSpec::Computer { .. }))
             .collect();
         match computers.as_slice() {
-            [] => issues.push("the vehicle needs a flight computer".to_string()),
+            [] => issues.push(VehicleIssue::error("the vehicle needs a flight computer", None)),
             [computer] => {
                 let stage = depths.get(&computer.id).copied().unwrap_or(0);
                 if stage + 1 != stage_count {
-                    issues.push(format!(
-                        "{} would be dropped with stage {}: put the computer in the last stage",
-                        computer.id,
-                        stage + 1
+                    issues.push(VehicleIssue::error(
+                        format!(
+                            "{} would be dropped with stage {}: put the computer in the last stage",
+                            computer.id,
+                            stage + 1
+                        ),
+                        Some(computer.id.clone()),
                     ));
                 }
             }
-            _ => issues.push("only one flight computer is allowed".to_string()),
+            _ => issues.push(VehicleIssue::error("only one flight computer is allowed", None)),
         }
         for part in &self.parts {
             if !part.spec.is_aero() {
                 continue;
             }
             if part.attach.as_ref().is_some_and(|attach| !attach.node.is_radial()) {
-                issues.push(format!("{}: aerodynamic surfaces mount on a radial node", part.id));
+                issues.push(VehicleIssue::error(
+                    format!("{}: aerodynamic surfaces mount on a radial node", part.id),
+                    Some(part.id.clone()),
+                ));
             }
             if self
                 .parts
                 .iter()
                 .any(|child| child.attach.as_ref().is_some_and(|a| a.parent == part.id))
             {
-                issues.push(format!("{} is a surface and cannot carry parts", part.id));
+                issues.push(VehicleIssue::error(
+                    format!("{} is a surface and cannot carry parts", part.id),
+                    Some(part.id.clone()),
+                ));
             }
             if let PartSpec::ControlSurface { kind, .. } = part.spec
                 && let Some(needed) = crate::aero::required_computer(kind)
                 && let Some(class) = self.computer()
                 && class.rank() < needed.rank()
             {
-                issues.push(format!(
-                    "{}: {} control surfaces need a {needed:?} flight computer",
-                    part.id,
-                    kind.label()
+                issues.push(VehicleIssue::error(
+                    format!(
+                        "{}: {} control surfaces need a {needed:?} flight computer",
+                        part.id,
+                        kind.label()
+                    ),
+                    Some(part.id.clone()),
                 ));
             }
         }
-        if issues.is_empty() { Ok(()) } else { Err(issues) }
+        issues
     }
 
-    /// Non-blocking design notes: a diameter step between a part and its mount. Kept separate from
-    /// `validate` so a future drag rule can use it without refusing the assembly now.
+    /// Non-blocking design notes: a diameter step between a part and its mount, plus the
+    /// aerodynamic notes. Kept separate from `validate` so they never refuse an assembly.
     pub fn warning_details(&self) -> Vec<VehicleWarning> {
+        self.warning_issues()
+            .into_iter()
+            .map(|issue| VehicleWarning {
+                message: issue.message,
+                part: issue.part,
+            })
+            .collect()
+    }
+
+    fn warning_issues(&self) -> Vec<VehicleIssue> {
         let mut warnings = Vec::new();
         for part in &self.parts {
             let Some(attach) = &part.attach else {
@@ -625,22 +763,19 @@ impl Vehicle {
             }
             let (parent_d, child_d) = (node_diameter(&parent.spec), node_diameter(&part.spec));
             if (parent_d - child_d).abs() > 0.051 {
-                warnings.push(VehicleWarning {
-                    message: format!(
+                warnings.push(VehicleIssue::warning(
+                    format!(
                         "{} ({child_d:.2} m) sits on {} ({parent_d:.2} m): diameter step",
                         part.id, attach.parent
                     ),
-                    part: Some(part.id.clone()),
-                });
+                    Some(part.id.clone()),
+                ));
             }
         }
         warnings.extend(
             crate::aero::warning_details(self)
                 .into_iter()
-                .map(|warning| VehicleWarning {
-                    message: warning.message,
-                    part: warning.part,
-                }),
+                .map(|warning| VehicleIssue::warning(warning.message, warning.part)),
         );
         warnings
     }
@@ -1095,6 +1230,83 @@ pub(crate) mod tests {
         });
         let issues = vehicle.validate().unwrap_err().join(" | ");
         assert!(issues.contains("fuel tank"), "{issues}");
+    }
+
+    #[test]
+    fn the_tree_view_walks_depth_first_with_nodes_and_stages() {
+        let vehicle = sounding_rocket();
+        let rows = vehicle.tree_entries();
+        assert_eq!(rows.len(), vehicle.parts.len(), "every part appears once");
+        let root = rows.first().unwrap();
+        assert_eq!(root.id, "booster");
+        assert_eq!(root.depth, 0);
+        assert_eq!(root.stage, 0);
+        assert_eq!(root.node, None);
+
+        let decoupler = rows.iter().find(|row| row.id == "dec1").unwrap();
+        assert_eq!(decoupler.depth, 1);
+        assert_eq!(decoupler.stage, 0, "a decoupler belongs to the stage below it");
+        assert_eq!(decoupler.node, Some(NodeId::Top));
+
+        let sustainer = rows.iter().find(|row| row.id == "sustainer").unwrap();
+        assert_eq!(sustainer.depth, 2);
+        assert_eq!(sustainer.stage, 1, "the decoupler starts the next stage");
+        assert_eq!(sustainer.parent.as_deref(), Some("dec1"));
+
+        let module = rows.iter().find(|row| row.id == "module").unwrap();
+        assert!(module.depth > sustainer.depth, "a payload sits further up the chain");
+        assert!(module.stage >= sustainer.stage);
+    }
+
+    #[test]
+    fn radial_parts_appear_under_their_parent_in_node_order() {
+        let mut vehicle = sounding_rocket();
+        for (index, id) in [(2u8, "fin-3"), (0u8, "fin-1"), (1u8, "fin-2")] {
+            vehicle.parts.push(PlacedPart {
+                id: id.into(),
+                spec: PartSpec::Decoupler,
+                attach: None,
+                symmetry: None,
+            });
+            vehicle.attach(id, "booster", NodeId::Radial(index), 0.0).unwrap();
+        }
+        let rows = vehicle.tree_entries();
+        let radial: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.id.starts_with("fin-"))
+            .map(|row| row.id.as_str())
+            .collect();
+        assert_eq!(radial, vec!["fin-1", "fin-2", "fin-3"]);
+        assert!(
+            rows.iter()
+                .filter(|row| row.id.starts_with("fin-"))
+                .all(|row| row.depth == 1)
+        );
+    }
+
+    #[test]
+    fn issues_are_structured_and_name_the_part_to_fix() {
+        let mut vehicle = sounding_rocket();
+        vehicle.attach("pc", "booster", NodeId::Bottom, 0.0).unwrap();
+        let issues = vehicle.issues();
+        let error = issues
+            .iter()
+            .find(|issue| issue.message.contains("last stage"))
+            .expect("the computer in the lower stage is an error");
+        assert_eq!(error.severity, IssueSeverity::Error);
+        assert_eq!(error.part.as_deref(), Some("pc"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.severity == IssueSeverity::Warning && issue.part.is_some()),
+            "warnings carry their part too"
+        );
+        let errors: Vec<String> = issues
+            .iter()
+            .filter(|issue| issue.severity == IssueSeverity::Error)
+            .map(|issue| issue.message.clone())
+            .collect();
+        assert_eq!(vehicle.validate().unwrap_err(), errors, "the error view is unchanged");
     }
 
     #[test]
