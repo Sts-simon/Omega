@@ -1399,6 +1399,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn rotating_a_parent_carries_child_positions_and_orientations() {
+        let mut vehicle = sounding_rocket();
+        let before = vehicle.poses();
+        let original = before.iter().find(|pose| pose.id == "sustainer").unwrap();
+        assert!(original.x_m.abs() < 1e-9);
+
+        let attach = vehicle.part_mut("dec1").unwrap().attach.as_mut().unwrap();
+        attach.rotation_z_deg = 90.0;
+        let after = vehicle.poses();
+        let rotated = after.iter().find(|pose| pose.id == "sustainer").unwrap();
+        assert!(rotated.x_m < -0.5, "child should orbit with its parent: {rotated:?}");
+        assert!(rotated.y_m.abs() < 1e-9, "a quarter-turn around Z moves the stack sideways");
+        assert!((rotated.rotation_z_deg - 90.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn three_axis_transforms_round_trip_in_schema_six() {
         let mut vehicle = sounding_rocket();
         let attach = vehicle.part_mut("pc").unwrap().attach.as_mut().unwrap();
