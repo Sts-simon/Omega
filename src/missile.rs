@@ -1673,10 +1673,11 @@ pub(crate) fn sync_missile_visuals(
                     let sweep_offset = (b.sweep_deg / 60.0) * b.height * 0.45 * t;
                     let span_offset = -b.span * 0.5 + segment_span * (index as f32 + 0.5);
                     let chord_offset = (b.height - chord) * 0.5 - sweep_offset;
+                    let offset = rotation * Vec3::new(span_offset, chord_offset, 0.0);
                     root.spawn((
                         Mesh3d(meshes.add(Cuboid::new(segment_span * 1.03, chord, 0.06))),
                         MeshMaterial3d(material.clone()),
-                        Transform::from_xyz(b.x + span_offset, mid + chord_offset, b.z)
+                        Transform::from_xyz(b.x + offset.x, mid + offset.y, b.z + offset.z)
                             .with_rotation(rotation),
                     ));
                 }
