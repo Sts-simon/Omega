@@ -79,6 +79,7 @@ The application stores its active campaign under `saves/slot_1/`. The manifest i
 | `designs/vehicle.json` | current staged vehicle |
 | `designs/revisions.json` | missile design revision history |
 | `programs/missile.json` | current abstract program |
+| `programs/library.json` | named programs, reusable across vehicles |
 | `contracts/missile.json` | offers, active/completed contracts and evidence |
 
 The exact schema version belongs to each data model and must be changed only with an explicit migration and tests.
@@ -163,6 +164,22 @@ surface mass, control surfaces with no fixed surface and an unstable CG/CA margi
 part it concerns so the workshop can select it. The workshop draws CG (yellow), CA (cyan), the
 acceptable band and the surface plates from the same figures, quotes the selected surface's
 contribution (`aero::breakdown`) and lists the surface fault risk of a fragile airframe.
+
+## Program editor (0.36.0)
+
+`crates/omega-rules/src/program.rs` owns the whole language: 15 blocks, eight categories, four
+flags, a mode register, eight diagnostic marks and the validation. `program_issues()` returns one
+`ProgramIssue` per problem with a severity, a thread and a block, so the editor can colour and point
+at the fault; `validate_program()` is the error-only string view the flight and the trials keep
+using. Connection rules live there too: `Lock target` must close its chain and a stage cannot be
+ignited after it was separated.
+
+`Vehicle::available_blocks()` maps the fitted hardware to the block kinds, and the palette groups
+`BlockKind::ALL` by `BlockCategory::ALL`, so the editor has no rule of its own. The flight executes
+input and condition blocks as gates with a timeout; `FlightConfig::trace` records a `BlockTrace` per
+executed block into `FlightReport::trace`, which is the debugger's only input. The named library is
+`ProgramLibrary` (12 entries, unique names); `src/program_editor.rs` writes it to
+`programs/library.json` through the same save slot as the working program.
 
 ## Onboard electronics (0.35.0)
 

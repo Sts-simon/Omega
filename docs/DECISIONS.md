@@ -3,6 +3,24 @@
 Short records for the choices made while rebuilding the missile workshop. Each one names the
 simplest option that keeps the game playable and testable; revisit only with a measured reason.
 
+## 2026-11-24 — A program is chains plus shared state, not a node canvas
+
+The editor keeps the thread model and draws the connections between consecutive blocks instead of
+introducing a free 2D node canvas. Conditions and modes are gates on the current block, with a
+timeout, and four flags plus one mode register are the only shared state. Why: the flight already
+executes parallel threads, the chain is what a missile program actually is, and a canvas would add
+node placement, port hit-testing and a branch/merge language without teaching a new decision. The
+connection rules stay real: a terminal block has no successor and an ignition cannot follow the
+separation of its stage.
+
+## 2026-11-24 — The debugger reuses the seeded flight
+
+`FlightConfig::trace` records a `BlockTrace` per executed block, and the editor shows that report
+instead of running a separate interpreter. A second interpreter would drift from the flight the
+trial actually uses, and a trace is cheap: it is off for batch runs and cleared on every edit so the
+panel cannot show a stale timeline. The saved library is a separate file
+(`programs/library.json`, 12 entries) so the current program keeps its own file and its hash.
+
 ## 2026-11-24 — Mission electronics share one shape; only they draw power
 
 Every electronic device answers the same `AvionicsSpec` questions, including the legacy computers

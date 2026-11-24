@@ -1,10 +1,10 @@
 # Omega — Missile Design
 
 [![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.35.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.35.0)
+[![Version](https://img.shields.io/badge/version-0.36.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.36.0)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-**Version 0.35.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
+**Version 0.36.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
 military-themed contracts, assembles an abstract staged vehicle, edits its onboard program, runs
 reproducible simulated trials and delivers a dossier. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
 research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
@@ -110,17 +110,30 @@ workspace folder are ignored.
 
 ### Missile program editor
 
-- The **PROGRAM** tab (`F4`) composes the onboard program as parallel threads of the seven blocks of
-  `omega-rules::program`. The palette enables only what the fitted hardware unlocks: pitot tube →
-  hold speed, barometer → hold pressure, radar → lock target, and a second stage → separate.
+- The **PROGRAM** tab (`F4`) composes the onboard program as parallel threads of 15 generic blocks
+  in the eight categories of `omega-rules::program`: inputs (wait for a speed or a pressure),
+  conditions (wait for a flag), logic (toggle a flag), states (set a flag), timers, outputs
+  (ignite, separate, throttle, hold speed or pressure, lock target), modes (set and wait for a
+  mode) and diagnostics (leave a numbered mark). The palette enables only what the fitted hardware
+  unlocks: pitot tube → speed blocks, barometer → pressure blocks, radar → lock target, and a second
+  stage → separate.
+- **Connections are explicit.** Each thread is a chain, drawn as a line between consecutive blocks.
+  A selected block is the insertion point, so a block added from the library splices into the chain,
+  and `DUPLICATE` copies the selected block after itself. The rules reject an invalid connection:
+  nothing can follow `Lock target`, and a stage cannot be ignited after it was separated.
 - Live meters compare threads and blocks with the flight computer class (1/8, 4/16, 8/32). Every edit
-  is validated immediately and each issue names the thread and block at fault, or the missing
-  hardware.
-- Blocks are appended to the selected thread, selected, moved up or down, tuned with `-` / `+`
-  (wait, stage number, throttle, speed, pressure) and removed. `Lock target` has no value and must
-  close its thread.
-- The program is saved to `programs/missile.json` on every change and reloaded at startup; its
-  content hash is shown so a trial can be bound to it.
+  is validated immediately: errors block the trial and warnings (a condition nobody sets, an empty
+  thread, a 0 s wait, thin memory) are listed separately; each issue names its thread and block.
+- Blocks are selected, moved up or down, tuned with `-` / `+` (time, stage, throttle, speed,
+  pressure, flag, mode, mark), flipped (`FLIP VALUE`), duplicated, inserted and removed.
+- **The debugger** runs the current program once with a block trace (`RUN TRACE`) and shows the
+  executed blocks with their times, the timeout count, the flight summary and its anomalies. Any
+  edit clears the trace so the panel cannot show a stale run.
+- **Reusable library.** `SAVE COPY` stores the current program under a free name in
+  `programs/library.json`; any saved program can be loaded on any vehicle (the rules then report the
+  hardware it misses) or deleted.
+- The working program is saved to `programs/missile.json` on every change and reloaded at startup;
+  its content hash is shown so a trial can be bound to it.
 
 ### Trials
 
@@ -300,6 +313,7 @@ saves/slot_1/
   designs/revisions.json        missile design revisions (schema 3)
   designs/vehicle.json          missile vehicle (schema 5; schema 3-4 graphs and 1-2 lists migrate)
   programs/missile.json         missile program
+  programs/library.json         named programs, reusable on another vehicle
 ```
 
 Writes are atomic (temporary file, fsync, rename) and a damaged file is reported instead of loaded,
