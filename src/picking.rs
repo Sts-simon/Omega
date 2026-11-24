@@ -163,7 +163,21 @@ mod tests {
         let direction = Vec3::new(1.0, 0.0, 0.0);
         assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).is_none());
         let origin = Vec3::new(-2.0, 0.5, 0.0);
-        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0).is_some());
+        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).is_some());
+    }
+
+    #[test]
+    fn a_cylinder_can_be_picked_after_a_quarter_turn() {
+        let rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let hit = ray_cylinder(
+            Vec3::new(-5.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::ZERO,
+            0.5,
+            1.0,
+            rotation,
+        );
+        assert!(hit.is_some(), "the cylinder axis is now aligned with X");
     }
 
     #[test]
