@@ -1213,6 +1213,46 @@ impl MissileSession {
         format!("{id}: rotation {:.0}°", attach.angle_deg)
     }
 
+    /// Apply one KSP-style gizmo step to the selected mounted part.
+    /// Axis: 0 = X, 1 = Y, 2 = Z. Translation is in metres; rotation is in degrees.
+    pub fn transform_selected(&mut self, axis: usize, amount: f64, rotate: bool) -> String {
+        self.wheel_gesture = None;
+        let Some(id) = self.selected.clone() else {
+            return "Select a part first".to_string();
+        };
+        let Some(part) = self.vehicle.part(&id) else {
+            return "That part is no longer there".to_string();
+        };
+        if part.attach.is_none() {
+            return "The root part cannot be transformed independently".to_string();
+        }
+        if axis > 2 {
+            return "Unknown transform axis".to_string();
+        }
+        self.push_undo();
+        let attach = self.vehicle.part_mut(&id).and_then(|part| part.attach.as_mut());
+        let Some(attach) = attach else {
+            return "That part is no longer there".to_string();
+        };
+        if rotate {
+            let value = match axis {
+                0 => &mut attach.rotation_x_deg,
+                1 => &mut attach.rotation_y_deg,
+                _ => &mut attach.rotation_z_deg,
+            };
+            *value = (*value + amount).rem_euclid(360.0);
+            format!("{id}: rotation {} {:.0}°", ["X", "Y", "Z"][axis], *value)
+        } else {
+            let value = match axis {
+                0 => &mut attach.offset_x_m,
+                1 => &mut attach.offset_y_m,
+                _ => &mut attach.offset_z_m,
+            };
+            *value += amount;
+            format!("{id}: translation {} {:+.2} m", ["X", "Y", "Z"][axis], *value)
+        }
+    }
+
     /// Move an existing part (with its subtree) to another node.
     pub fn move_part(&mut self, id: &str, parent: &str, node: omega_rules::NodeId, angle: f64) -> String {
         self.wheel_gesture = None;
@@ -1383,6 +1423,9 @@ pub(crate) struct PartBox {
     pub span: f32,
     /// Clockwise mount angle in degrees, used to orient the plate.
     pub angle: f32,
+    pub rotation_x_deg: f32,
+    pub rotation_y_deg: f32,
+    pub rotation_z_deg: f32,
     pub shape: Shape,
     pub color: [f32; 3],
 }
@@ -1462,6 +1505,9 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
                     0.0
                 },
                 angle: angle as f32,
+                rotation_x_deg: pose.rotation_x_deg as f32,
+                rotation_y_deg: pose.rotation_y_deg as f32,
+                rotation_z_deg: pose.rotation_z_deg as f32,
                 shape,
                 color,
             })
@@ -1546,7 +1592,7 @@ pub(crate) fn sync_missile_visuals(
                 ..default()
             });
             let mid = b.y_bottom + b.height / 2.0;
-            let (mesh, rotation) = match b.shape {
+            let (mesh, _shape_rotation) = match b.shape {
                 Shape::Nozzle => (meshes.add(Cone::new(b.radius, b.height)), Quat::IDENTITY),
                 Shape::Body | Shape::Sensor | Shape::Disc => {
                     (meshes.add(Cylinder::new(b.radius, b.height)), Quat::IDENTITY)
@@ -1559,7 +1605,12 @@ pub(crate) fn sync_missile_visuals(
             root.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_xyz(b.x, mid, b.z).with_rotation(rotation),
+                Transform::from_xyz(b.x, mid, b.z).with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    b.rotation_x_deg.to_radians(),
+                    (b.rotation_y_deg - b.angle).to_radians(),
+                    b.rotation_z_deg.to_radians(),
+                )),
             ));
         }
         if !boxes.is_empty() {
