@@ -48,12 +48,45 @@ pub(crate) struct WorkshopInput {
     pub drag_active: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TransformMode {
+    #[default]
+    Translate,
+    Rotate,
+}
+
+/// KSP-style transform gizmo state. A handle drag is committed as one undoable edit on release.
+#[derive(Resource, Default)]
+pub(crate) struct TransformGizmo {
+    pub mode: TransformMode,
+    pub drag: Option<(usize, Vec2, Vec2)>,
+    pub before: Option<Vehicle>,
+}
+
 #[derive(Clone, Debug)]
 struct NodePoint {
     parent: String,
     node: NodeId,
     angle: f64,
     world: Vec3,
+}
+
+fn gizmo_amount(cursor: Vec2, start: Vec2, screen_axis: Vec2, mode: TransformMode, fine: bool) -> f64 {
+    if mode == TransformMode::Translate {
+        let metres = (cursor - start).dot(screen_axis.normalize_or_zero()) as f64 * 0.02;
+        if fine { metres } else { (metres / 0.1).round() * 0.1 }
+    } else {
+        let start_angle = (start.y - screen_axis.y).atan2(start.x - screen_axis.x);
+        let current_angle = (cursor.y - screen_axis.y).atan2(cursor.x - screen_axis.x);
+        let mut radians = current_angle - start_angle;
+        if radians > std::f32::consts::PI {
+            radians -= std::f32::consts::TAU;
+        } else if radians < -std::f32::consts::PI {
+            radians += std::f32::consts::TAU;
+        }
+        let degrees = radians.to_degrees() as f64;
+        if fine { degrees } else { (degrees / 5.0).round() * 5.0 }
+    }
 }
 
 fn world_of(anchor: Vec3, x: f64, y: f64, z: f64) -> Vec3 {
@@ -80,13 +113,19 @@ fn free_nodes(vehicle: &Vehicle, anchor: Vec3) -> Vec<NodePoint> {
             continue; // a surface is a leaf: it offers no attachment node
         }
         let center = world_of(anchor, pose.x_m, pose.y_m, pose.z_m);
+        let orientation = Quat::from_euler(
+            EulerRot::XYZ,
+            (pose.rotation_x_deg as f32).to_radians(),
+            (pose.rotation_y_deg as f32).to_radians(),
+            (pose.rotation_z_deg as f32).to_radians(),
+        );
         let half = pose.height_m as f32 * missile::VISUAL_SCALE * 0.5;
         if is_free(&pose.id, NodeId::Top) {
             nodes.push(NodePoint {
                 parent: pose.id.clone(),
                 node: NodeId::Top,
                 angle: 0.0,
-                world: center + Vec3::Y * half,
+                world: center + orientation * Vec3::Y * half,
             });
         }
         if is_free(&pose.id, NodeId::Bottom) {
@@ -94,19 +133,19 @@ fn free_nodes(vehicle: &Vehicle, anchor: Vec3) -> Vec<NodePoint> {
                 parent: pose.id.clone(),
                 node: NodeId::Bottom,
                 angle: 0.0,
-                world: center - Vec3::Y * half,
+                world: center - orientation * Vec3::Y * half,
             });
         }
         for index in 0..radial_slots(&part.spec) {
             let node = NodeId::Radial(index);
             if is_free(&pose.id, node) {
                 let angle = f64::from(index) * 90.0;
-                let direction = Vec3::new(angle.to_radians().cos() as f32, 0.0, angle.to_radians().sin() as f32);
+                let local_direction = Vec3::new(angle.to_radians().cos() as f32, 0.0, angle.to_radians().sin() as f32);
                 nodes.push(NodePoint {
                     parent: pose.id.clone(),
                     node,
                     angle,
-                    world: center + direction * pose.radius_m as f32 * missile::VISUAL_SCALE,
+                    world: center + orientation * local_direction * pose.radius_m as f32 * missile::VISUAL_SCALE,
                 });
             }
         }
@@ -125,6 +164,12 @@ fn picked_part(vehicle: &Vehicle, origin: Vec3, direction: Vec3) -> Option<Strin
             let center = world_of(anchor, pose.x_m, pose.y_m, pose.z_m);
             let scale = missile::VISUAL_SCALE;
             let part = vehicle.part(&pose.id);
+            let orientation = Quat::from_euler(
+                EulerRot::XYZ,
+                (pose.rotation_x_deg as f32).to_radians(),
+                (pose.rotation_y_deg as f32).to_radians(),
+                (pose.rotation_z_deg as f32).to_radians(),
+            );
             if part.is_some_and(|part| part.spec.is_aero()) {
                 let angle = part
                     .and_then(|part| part.attach.as_ref())
@@ -139,13 +184,14 @@ fn picked_part(vehicle: &Vehicle, origin: Vec3, direction: Vec3) -> Option<Strin
                         (pose.height_m as f32) * scale * 0.5,
                         SURFACE_HALF_THICKNESS_M * scale,
                     ),
-                    yaw: (angle as f32).to_radians(),
+                    rotation: orientation * Quat::from_rotation_y((angle as f32).to_radians()),
                 }
             } else {
                 PickShape::Cylinder {
                     center,
                     radius: (pose.radius_m as f32).max(0.12) * scale,
                     half_height: (pose.height_m as f32) * scale * 0.5,
+                    rotation: orientation,
                 }
             }
         })
@@ -169,6 +215,7 @@ pub(crate) fn workshop_pointer(
     ui: Query<&UiInteraction>,
     mut drag: ResMut<DragState>,
     mut input: ResMut<WorkshopInput>,
+    mut transform_gizmo: ResMut<TransformGizmo>,
     mut gizmos: Gizmos,
 ) {
     input.wheel_used = false;
@@ -197,20 +244,111 @@ pub(crate) fn workshop_pointer(
         .map(|ray| (ray.origin, *ray.direction));
     let picked = ray.and_then(|(origin, direction)| picked_part(&session.vehicle, origin, direction));
 
+    // Read logical keys so W/R work on AZERTY as printed, not only at QWERTY scan positions.
+    let mut translate_tool_pressed = false;
+    let mut rotate_tool_pressed = false;
+    let mut undo_pressed = false;
+    let mut redo_pressed = false;
+    for event in typed.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        let control = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        if let Key::Character(character) = &event.logical_key {
+            match (control, character.to_lowercase().as_str()) {
+                (false, "w") => translate_tool_pressed = true,
+                (false, "r") => rotate_tool_pressed = true,
+                (true, "z") => undo_pressed = true,
+                (true, "y") => redo_pressed = true,
+                _ => {}
+            }
+        }
+    }
+
+    // KSP-style tool selection. W = translate, R = rotate; the coloured handles select X/Y/Z directly.
+    if translate_tool_pressed || rotate_tool_pressed {
+        if let Some(before) = transform_gizmo.before.take() {
+            session.vehicle = before;
+        }
+        transform_gizmo.drag = None;
+        transform_gizmo.mode = if rotate_tool_pressed {
+            campus.message = "Rotation : faites glisser un anneau. Axes locaux de la pièce sélectionnée.".to_string();
+            TransformMode::Rotate
+        } else {
+            campus.message = "Déplacement : faites glisser une flèche. Maj : réglage fin.".to_string();
+            TransformMode::Translate
+        };
+    }
+
     // --- start a drag ---
     if mouse.just_pressed(MouseButton::Left) {
-        if let Some((interaction, palette)) = palettes.iter().find(|(i, _)| **i == UiInteraction::Pressed) {
-            let _ = interaction;
-            drag.source = Some(DragSource::Palette(palette.0));
-            drag.hover = None;
-        } else if !pointer_over_ui && let Some(id) = picked.clone() {
-            session.apply(missile::MissileAction::Select { id: id.clone() }, &owned);
-            drag.pending = session
-                .vehicle
-                .part(&id)
-                .is_some_and(|part| part.attach.is_some())
-                .then_some((cursor, DragSource::Part(id)));
-            drag.hover = None;
+        if !pointer_over_ui
+            && let Some(id) = session.selected.as_deref()
+            && let Some(pose) = session.vehicle.poses().into_iter().find(|pose| pose.id == id)
+        {
+            let center = world_of(missile::ANCHOR, pose.x_m, pose.y_m, pose.z_m);
+            let orientation = Quat::from_euler(
+                EulerRot::XYZ,
+                (pose.rotation_x_deg as f32).to_radians(),
+                (pose.rotation_y_deg as f32).to_radians(),
+                (pose.rotation_z_deg as f32).to_radians(),
+            );
+            // KSP-style local space: the handles follow the selected part's orientation.
+            let axes = [orientation * Vec3::X, orientation * Vec3::Y, orientation * Vec3::Z];
+            let center_screen = camera.world_to_viewport(camera_transform, center).ok();
+            let mut nearest: Option<(usize, Vec2, f32)> = None;
+            for (axis, direction) in axes.into_iter().enumerate() {
+                if transform_gizmo.mode == TransformMode::Translate {
+                    if let (Some(origin), Ok(point)) = (
+                        center_screen,
+                        camera.world_to_viewport(camera_transform, center + direction * 1.5),
+                    ) {
+                        let distance = cursor.distance(point);
+                        if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
+                            nearest = Some((axis, point - origin, distance));
+                        }
+                    }
+                } else {
+                    for step in 0..48 {
+                        let angle = std::f32::consts::TAU * step as f32 / 48.0;
+                        let local_ring = match axis {
+                            0 => Vec3::new(0.0, angle.cos(), angle.sin()),
+                            1 => Vec3::new(angle.cos(), 0.0, angle.sin()),
+                            _ => Vec3::new(angle.cos(), angle.sin(), 0.0),
+                        };
+                        let ring_point = center + orientation * local_ring * 1.05;
+                        if let Ok(point) = camera.world_to_viewport(camera_transform, ring_point) {
+                            let distance = cursor.distance(point);
+                            if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
+                                nearest = Some((axis, center_screen.unwrap_or(cursor), distance));
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some((axis, screen_axis, _)) = nearest {
+                let drag_reference = if transform_gizmo.mode == TransformMode::Translate {
+                    screen_axis.normalize_or_zero()
+                } else {
+                    screen_axis
+                };
+                transform_gizmo.drag = Some((axis, cursor, drag_reference));
+                transform_gizmo.before = Some(session.vehicle.clone());
+            }
+        }
+        if transform_gizmo.drag.is_none() {
+            if let Some((_, palette)) = palettes.iter().find(|(i, _)| **i == UiInteraction::Pressed) {
+                drag.source = Some(DragSource::Palette(palette.0));
+                drag.hover = None;
+            } else if !pointer_over_ui && let Some(id) = picked.clone() {
+                session.apply(missile::MissileAction::Select { id: id.clone() }, &owned);
+                drag.pending = session
+                    .vehicle
+                    .part(&id)
+                    .is_some_and(|part| part.attach.is_some())
+                    .then_some((cursor, DragSource::Part(id)));
+                drag.hover = None;
+            }
         }
     }
     if mouse.pressed(MouseButton::Left) {
@@ -266,7 +404,37 @@ pub(crate) fn workshop_pointer(
         let _ = source;
     }
 
-    // --- finish a drag ---
+    // Live preview while dragging, then one history entry on release.
+    if mouse.pressed(MouseButton::Left)
+        && let Some((axis, start, screen_axis)) = transform_gizmo.drag
+        && let Some(before) = transform_gizmo.before.as_ref()
+    {
+        let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let amount = gizmo_amount(cursor, start, screen_axis, transform_gizmo.mode, fine);
+        session.preview_transform(before, axis, amount, transform_gizmo.mode == TransformMode::Rotate);
+    }
+    if mouse.just_released(MouseButton::Left)
+        && let Some((axis, start, screen_axis)) = transform_gizmo.drag.take()
+    {
+        let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let amount = gizmo_amount(cursor, start, screen_axis, transform_gizmo.mode, fine);
+        if let Some(before) = transform_gizmo.before.take() {
+            session.preview_transform(&before, axis, amount, transform_gizmo.mode == TransformMode::Rotate);
+            session.commit_transform(before);
+        }
+        if amount.abs() > 0.001 {
+            campus.message = format!(
+                "{} {} {amount:+.2}",
+                if transform_gizmo.mode == TransformMode::Rotate {
+                    "Rotation"
+                } else {
+                    "Déplacement"
+                },
+                ["X", "Y", "Z"][axis]
+            );
+        }
+    }
+
     if mouse.just_released(MouseButton::Left)
         && let Some(source) = drag.source.clone()
     {
@@ -297,36 +465,79 @@ pub(crate) fn workshop_pointer(
         drag.pending = None;
     }
 
+    // Three coloured translation handles or rotation rings, centred on the selected part.
+    if drag.source.is_none()
+        && let Some(id) = session.selected.as_deref()
+        && let Some(pose) = session.vehicle.poses().into_iter().find(|pose| pose.id == id)
+        && session.vehicle.part(id).is_some_and(|part| part.attach.is_some())
+    {
+        let center = world_of(missile::ANCHOR, pose.x_m, pose.y_m, pose.z_m);
+        let orientation = Quat::from_euler(
+            EulerRot::XYZ,
+            (pose.rotation_x_deg as f32).to_radians(),
+            (pose.rotation_y_deg as f32).to_radians(),
+            (pose.rotation_z_deg as f32).to_radians(),
+        );
+        let axes = [
+            (orientation * Vec3::X, Color::srgb(0.95, 0.25, 0.25)),
+            (orientation * Vec3::Y, Color::srgb(0.30, 0.90, 0.40)),
+            (orientation * Vec3::Z, Color::srgb(0.25, 0.55, 1.0)),
+        ];
+        for (axis_index, (axis, color)) in axes.into_iter().enumerate() {
+            if transform_gizmo.mode == TransformMode::Translate {
+                let end = center + axis * 1.5;
+                gizmos.line(center, end, color);
+                gizmos.sphere(Isometry3d::from_translation(end), 0.11, color);
+            } else {
+                let mut previous = None;
+                for step in 0..=48 {
+                    let angle = std::f32::consts::TAU * step as f32 / 48.0;
+                    let local_ring = match axis_index {
+                        0 => Vec3::new(0.0, angle.cos(), angle.sin()),
+                        1 => Vec3::new(angle.cos(), 0.0, angle.sin()),
+                        _ => Vec3::new(angle.cos(), angle.sin(), 0.0),
+                    };
+                    let point = center + orientation * local_ring * 1.05;
+                    if let Some(from) = previous {
+                        gizmos.line(from, point, color);
+                    }
+                    previous = Some(point);
+                }
+            }
+        }
+    }
+
     // --- keyboard ---
-    if keys.just_pressed(KeyCode::Escape) && (drag.source.is_some() || drag.pending.is_some()) {
+    if keys.just_pressed(KeyCode::Escape)
+        && (drag.source.is_some() || drag.pending.is_some() || transform_gizmo.drag.is_some())
+    {
         drag.source = None;
         drag.hover = None;
         drag.pending = None;
+        transform_gizmo.drag = None;
+        if let Some(before) = transform_gizmo.before.take() {
+            session.vehicle = before;
+        }
         campus.message = "Drag cancelled".to_string();
     }
-    if drag.source.is_none() {
+    if drag.source.is_none() && transform_gizmo.drag.is_none() {
+        if keys.just_pressed(KeyCode::KeyQ) {
+            campus.message = session.rotate_selected(-1);
+        }
+        if keys.just_pressed(KeyCode::KeyE) {
+            campus.message = session.rotate_selected(1);
+        }
         if keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) {
             campus.message = session.delete_selected();
         }
         if keys.just_pressed(KeyCode::KeyX) {
             campus.message = session.cycle_symmetry();
         }
-        // Logical keys, not physical ones: on an AZERTY keyboard Ctrl+Z is the KeyW scan code.
-        for event in typed.read() {
-            if event.state != ButtonState::Pressed {
-                continue;
-            }
-            let control = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-            if !control {
-                continue;
-            }
-            if let Key::Character(text) = &event.logical_key {
-                match text.to_lowercase().as_str() {
-                    "z" => campus.message = session.undo(),
-                    "y" => campus.message = session.redo(),
-                    _ => {}
-                }
-            }
+        if undo_pressed {
+            campus.message = session.undo();
+        }
+        if redo_pressed {
+            campus.message = session.redo();
         }
     }
 
@@ -351,7 +562,7 @@ pub(crate) fn workshop_pointer(
         }
         input.wheel_used = true;
     }
-    input.drag_active = drag.source.is_some() || drag.pending.is_some();
+    input.drag_active = drag.source.is_some() || drag.pending.is_some() || transform_gizmo.drag.is_some();
 
     // The palette, drag, wheel and keyboard paths edit the design directly while the inspector's
     // buttons go through `UiAction`, which saves on its own. Saving here too means a palette-only
@@ -360,6 +571,34 @@ pub(crate) fn workshop_pointer(
         && let Err(error) = missile::persist_missile(&session)
     {
         warn!("Could not save the vehicle: {error}");
+    }
+}
+
+/// Show free attachment points on the selected body even when no drag is active.
+/// This makes valid mounting locations discoverable instead of hiding them until a drag starts.
+pub(crate) fn draw_attachment_markers(session: Res<MissileSession>, campus: Res<CampusState>, mut gizmos: Gizmos) {
+    if campus.view != CampusView::Missile {
+        return;
+    }
+    let Some(selected) = session.selected.as_deref() else {
+        return;
+    };
+    let Some(part) = session.vehicle.part(selected) else {
+        return;
+    };
+    if part.spec.is_aero() {
+        return;
+    }
+    for node in free_nodes(&session.vehicle, missile::ANCHOR)
+        .into_iter()
+        .filter(|node| node.parent == selected)
+    {
+        let color = match node.node {
+            NodeId::Top => Color::srgb(0.35, 0.90, 0.62),
+            NodeId::Bottom => Color::srgb(0.95, 0.70, 0.30),
+            NodeId::Radial(_) => Color::srgb(0.36, 0.84, 0.94),
+        };
+        gizmos.sphere(Isometry3d::from_translation(node.world), 0.13, color);
     }
 }
 

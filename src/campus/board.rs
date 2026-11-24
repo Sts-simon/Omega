@@ -906,6 +906,49 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, scr
 // Missile workshop
 // ----------------------------------------------------------------------------------------------
 
+fn part_title(spec: &omega_rules::PartSpec) -> &'static str {
+    use omega_rules::{ComputerClass, PartSpec, RadarClass, SensorKind};
+    match spec {
+        PartSpec::SolidMotor { .. } => "Moteur solide",
+        PartSpec::FuelTank { .. } => "Réservoir",
+        PartSpec::LiquidEngine { .. } => "Moteur liquide",
+        PartSpec::AirBreathing { .. } => "Propulseur à air",
+        PartSpec::Sensor {
+            kind: SensorKind::Pitot,
+        } => "Sonde de pression",
+        PartSpec::Sensor {
+            kind: SensorKind::Barometer,
+        } => "Baromètre",
+        PartSpec::Sensor {
+            kind: SensorKind::Radar(RadarClass::Basic),
+        } => "Radar simple",
+        PartSpec::Sensor {
+            kind: SensorKind::Radar(RadarClass::Active),
+        } => "Radar actif",
+        PartSpec::Computer {
+            class: ComputerClass::Basic,
+        } => "Ordinateur de bord basique",
+        PartSpec::Computer {
+            class: ComputerClass::Standard,
+        } => "Ordinateur de bord standard",
+        PartSpec::Computer {
+            class: ComputerClass::Advanced,
+        } => "Ordinateur de bord avancé",
+        PartSpec::Decoupler => "Séparateur",
+        PartSpec::MissionModule { .. } => "Module de mission",
+        PartSpec::Wing { .. } => "Aile",
+        PartSpec::FinSet { .. } => "Jeu d'ailettes",
+        PartSpec::ControlSurface { .. } => "Surface de commande",
+        PartSpec::Avionics { module } => match module {
+            omega_rules::AvionicsModule::ControlAugment => "Module de commande",
+            omega_rules::AvionicsModule::InertialNav => "Plateforme inertielle",
+            omega_rules::AvionicsModule::Datalink => "Liaison de données",
+            omega_rules::AvionicsModule::PowerCell => "Cellule d'alimentation",
+            omega_rules::AvionicsModule::Diagnostics => "Module de diagnostic",
+        },
+    }
+}
+
 fn spec_summary(spec: &omega_rules::PartSpec) -> String {
     use omega_rules::PartSpec::*;
     match *spec {
@@ -1067,6 +1110,29 @@ fn build_missile(
                     );
                     ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
                 });
+            heading(panel, "CATÉGORIES DE PIÈCES");
+            let category_buttons = [
+                (None, "TOUT"),
+                (Some(omega_rules::PartCategory::Propulsion), "PROPULSION"),
+                (Some(omega_rules::PartCategory::Airframe), "STRUCTURE"),
+                (Some(omega_rules::PartCategory::Aerodynamics), "AÉRODYNAMIQUE"),
+                (Some(omega_rules::PartCategory::Sensors), "CAPTEURS"),
+                (Some(omega_rules::PartCategory::Avionics), "AVIONIQUE"),
+            ];
+            for row_items in category_buttons.chunks(3) {
+                panel.spawn(Node { width: Val::Percent(100.0), column_gap: Val::Px(4.0), ..default() })
+                    .with_children(|row| {
+                        for (category, label) in row_items {
+                            let selected = session.palette_category == *category;
+                            ui_kit::button_row_item(
+                                row,
+                                *label,
+                                UiAction::Missile(MissileAction::SetPaletteCategory(*category)),
+                                if selected { ButtonTone::Primary } else { ButtonTone::Ghost },
+                            );
+                        }
+                    });
+            }
             // The palette is grouped by the rules' own part categories, so a new part family
             // appears in the right section without editing this board.
             for category in omega_rules::PartCategory::ALL {
@@ -1074,11 +1140,12 @@ fn build_missile(
                     .iter()
                     .copied()
                     .filter(|template| template.spec().category() == category)
+                    .filter(|_| session.palette_category.is_none_or(|selected| selected == category))
                     .collect();
                 if templates.is_empty() {
                     continue;
                 }
-                heading(panel, category.label());
+                if session.palette_category.is_none() { heading(panel, category.label()); }
                 for row in templates.chunks(3) {
                     panel
                         .spawn(Node {
@@ -1096,7 +1163,7 @@ fn build_missile(
             }
             ui_kit::label(
                 panel,
-                "Drag a part onto a glowing node. Wings, fins and control surfaces need a free radial mount (X cycles symmetry). Delete removes, Ctrl+Z undoes.",
+                "Glissez une pièce vers un point d'attache lumineux. W : déplacer ; R : faire pivoter. Saisissez un axe coloré ou un anneau pour manipuler X, Y ou Z ; Maj affine le réglage. F centre la pièce ; Début cadre le véhicule. Flèches : déplacer la caméra ; X : symétrie ; Suppr : supprimer ; Ctrl+Z / Ctrl+Y : annuler / rétablir.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
@@ -1126,7 +1193,7 @@ fn build_missile(
                         ButtonTone::Ghost,
                     );
                 });
-            heading(panel, "REVISIONS");
+            heading(panel, "VERSIONS");
             ui_kit::label(panel, log.missile_hud_text(vehicle), 9.0, ui_kit::TEXT_DIM);
             ui_kit::button(
                 panel,
@@ -1149,7 +1216,7 @@ fn build_missile(
     .with_children(|middle| {
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         middle.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "AERODYNAMICS", 12.0, ui_kit::ACCENT);
+            ui_kit::label(panel, "AÉRODYNAMIQUE", 12.0, ui_kit::ACCENT);
             let aero = vehicle.aero();
             // The snapshot control sits right under the title: it stays inside the panel's first
             // rows whatever height the column gives it, unlike a control at the end of the card.
@@ -1291,7 +1358,7 @@ fn build_missile(
         });
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         middle.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "CONTRACT CHECK", 12.0, ui_kit::ACCENT);
+            ui_kit::label(panel, "CONFORMITÉ AU CONTRAT", 12.0, ui_kit::ACCENT);
             match procurement.selected() {
                 None => ui_kit::label(
                     panel,
@@ -1346,7 +1413,7 @@ fn build_missile(
         });
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         middle.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "STAGE FIGURES", 12.0, ui_kit::ACCENT);
+            ui_kit::label(panel, "BILAN DES ÉTAGES", 12.0, ui_kit::ACCENT);
             let reports = vehicle.stage_reports();
             panel
                 .spawn(Node {
@@ -1522,7 +1589,7 @@ fn build_missile(
                 .with_children(|panel| {
                     for entry in vehicle.tree_entries() {
                         let indent = "   ".repeat(entry.depth);
-                        let node = entry.node.map_or("root".to_string(), |node| node.label());
+                        let node = entry.node.map_or("racine".to_string(), |node| ui_kit::fr(node.label()));
                         let tone = if session.selected.as_deref() == Some(entry.id.as_str()) {
                             ButtonTone::Primary
                         } else {
@@ -1530,7 +1597,14 @@ fn build_missile(
                         };
                         ui_kit::button(
                             panel,
-                            format!("{indent}{}  [{node}]  S{}", entry.id, entry.stage + 1),
+                            format!(
+                                "{indent}{}  [{node}]  Étage {}",
+                                vehicle
+                                    .part(&entry.id)
+                                    .map(|part| part_title(&part.spec).to_string())
+                                    .unwrap_or_else(|| entry.id.clone()),
+                                entry.stage + 1
+                            ),
                             UiAction::Missile(MissileAction::Select { id: entry.id.clone() }),
                             tone,
                             Val::Percent(100.0),
@@ -1547,13 +1621,22 @@ fn build_missile(
                 Some(part) => {
                     ui_kit::label(
                         panel,
-                        format!("{}  -  {}", part.id, spec_summary(&part.spec)),
+                        format!("{}  ·  {}", part_title(&part.spec), spec_summary(&part.spec)),
                         11.0,
                         ui_kit::TEXT,
                     );
                     let (height, radius) = omega_rules::assembly::dimensions(&part.spec);
                     let place = part.attach.as_ref().map_or("root part".to_string(), |attach| {
-                        format!("on {} via {}", attach.parent, attach.node.label())
+                        if part.spec.is_aero() {
+                            format!(
+                                "on {} via {} | {:.0}°",
+                                attach.parent,
+                                attach.node.label(),
+                                attach.angle_deg
+                            )
+                        } else {
+                            format!("on {} via {}", attach.parent, attach.node.label())
+                        }
                     });
                     ui_kit::label(
                         panel,
@@ -1568,6 +1651,26 @@ fn build_missile(
                         9.5,
                         ui_kit::TEXT_DIM,
                     );
+                    if let Some(attach) = part.attach.as_ref() {
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "Move: X {:+.2} | Y {:+.2} | Z {:+.2} m",
+                                attach.offset_x_m, attach.offset_y_m, attach.offset_z_m
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "Rotate: X {:.0}° | Y {:.0}° | Z {:.0}°",
+                                attach.rotation_x_deg, attach.rotation_y_deg, attach.rotation_z_deg
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
                     let needed: Vec<&str> = std::iter::once(part.spec.required_capability())
                         .chain(part.spec.extra_capabilities())
                         .collect();

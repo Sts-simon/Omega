@@ -1,8 +1,8 @@
 [package]
 name = "omega"
-version = "0.36.0"
+version = "0.37.0"
 edition = "2024"
-description = "A fictional missile-design game built with Rust and Bevy"
+description = "Jeu fictif de conception de véhicules militaires avec Rust et Bevy"
 license = "MIT"
 
 [workspace]

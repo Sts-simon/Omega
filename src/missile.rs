@@ -7,8 +7,8 @@ use crate::save::{self, SaveFile};
 use crate::scene::OrbitCameraRig;
 use bevy::prelude::*;
 use omega_rules::{
-    AirfoilProfile, AvionicsModule, ComputerClass, ControlKind, FinLayout, Part, PartSpec, RadarClass, SensorKind,
-    StabilizerRole, Stage, Vehicle, WingPlanform,
+    AirfoilProfile, AvionicsModule, ComputerClass, ControlKind, FinLayout, Part, PartCategory, PartSpec, RadarClass,
+    SensorKind, StabilizerRole, Stage, Vehicle, WingPlanform,
 };
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -658,6 +658,7 @@ pub(crate) enum MissileAction {
     Preset(u8),
     Clear,
     CycleSymmetry,
+    SetPaletteCategory(Option<PartCategory>),
     Undo,
     Redo,
 }
@@ -668,6 +669,7 @@ pub(crate) struct MissileSession {
     pub selected: Option<String>,
     /// Radial copies placed by the next drop: 1 (off), 2, 3 or 4.
     pub symmetry: u8,
+    pub palette_category: Option<PartCategory>,
     next_id: u32,
     undo: Vec<Vehicle>,
     redo: Vec<Vehicle>,
@@ -683,6 +685,7 @@ impl Default for MissileSession {
             vehicle: Vehicle::default(),
             selected: None,
             symmetry: 1,
+            palette_category: None,
             next_id: 0,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -909,6 +912,10 @@ impl MissileSession {
                 "Started an empty vehicle: drag a part from the palette".to_string()
             }
             MissileAction::CycleSymmetry => self.cycle_symmetry(),
+            MissileAction::SetPaletteCategory(category) => {
+                self.palette_category = category;
+                String::new()
+            }
             MissileAction::Undo => self.undo(),
             MissileAction::Redo => self.redo(),
         }
@@ -1179,6 +1186,92 @@ impl MissileSession {
         }
     }
 
+    /// Rotate a mounted aerodynamic surface around its attachment axis.
+    /// The angle is a presentation/assembly choice and remains an abstract gameplay parameter.
+    pub fn rotate_selected(&mut self, direction: i8) -> String {
+        self.wheel_gesture = None;
+        let Some(id) = self.selected.clone() else {
+            return "Select an aerodynamic surface first".to_string();
+        };
+        let Some(part) = self.vehicle.part(&id) else {
+            return "That part is no longer there".to_string();
+        };
+        if !part.spec.is_aero() {
+            return "Only aerodynamic surfaces can be rotated here".to_string();
+        }
+        if part.attach.is_none() {
+            return "This surface has no attachment axis".to_string();
+        }
+        self.push_undo();
+        let Some(part) = self.vehicle.part_mut(&id) else {
+            return "That part is no longer there".to_string();
+        };
+        let Some(attach) = part.attach.as_mut() else {
+            return "This surface has no attachment axis".to_string();
+        };
+        attach.angle_deg = (attach.angle_deg + f64::from(direction) * 15.0).rem_euclid(360.0);
+        format!("{id}: rotation {:.0}°", attach.angle_deg)
+    }
+
+    /// Preview a KSP gizmo transform from the drag's original design, without adding undo entries.
+    pub fn preview_transform(&mut self, before: &Vehicle, axis: usize, amount: f64, rotate: bool) -> String {
+        self.wheel_gesture = None;
+        self.vehicle = before.clone();
+        let Some(id) = self.selected.clone() else {
+            return "Select a part first".to_string();
+        };
+        let Some(part) = self.vehicle.part(&id) else {
+            return "That part is no longer there".to_string();
+        };
+        if part.attach.is_none() {
+            return "The root part cannot be transformed independently".to_string();
+        }
+        if axis > 2 {
+            return "Unknown transform axis".to_string();
+        }
+        let attach = self.vehicle.part_mut(&id).and_then(|part| part.attach.as_mut());
+        let Some(attach) = attach else {
+            return "That part is no longer there".to_string();
+        };
+        if rotate {
+            let value = match axis {
+                0 => &mut attach.rotation_x_deg,
+                1 => &mut attach.rotation_y_deg,
+                _ => &mut attach.rotation_z_deg,
+            };
+            *value = (*value + amount).rem_euclid(360.0);
+            format!("{id}: rotation {} {:.0}°", ["X", "Y", "Z"][axis], *value)
+        } else {
+            let value = match axis {
+                0 => &mut attach.offset_x_m,
+                1 => &mut attach.offset_y_m,
+                _ => &mut attach.offset_z_m,
+            };
+            *value += amount;
+            format!("{id}: translation {} {:+.2} m", ["X", "Y", "Z"][axis], *value)
+        }
+    }
+
+    /// Commit a gizmo preview as one undoable edit when the mouse is released.
+    pub fn commit_transform(&mut self, before: Vehicle) {
+        if self.vehicle != before {
+            self.undo.push(before);
+            if self.undo.len() > 50 {
+                self.undo.remove(0);
+            }
+            self.redo.clear();
+        }
+    }
+
+    /// Apply a discrete transform as one undoable action.
+    #[cfg(test)]
+    pub fn transform_selected(&mut self, axis: usize, amount: f64, rotate: bool) -> String {
+        let before = self.vehicle.clone();
+        let message = self.preview_transform(&before, axis, amount, rotate);
+        self.commit_transform(before);
+        message
+    }
+
     /// Move an existing part (with its subtree) to another node.
     pub fn move_part(&mut self, id: &str, parent: &str, node: omega_rules::NodeId, angle: f64) -> String {
         self.wheel_gesture = None;
@@ -1349,6 +1442,9 @@ pub(crate) struct PartBox {
     pub span: f32,
     /// Clockwise mount angle in degrees, used to orient the plate.
     pub angle: f32,
+    pub rotation_x_deg: f32,
+    pub rotation_y_deg: f32,
+    pub rotation_z_deg: f32,
     pub shape: Shape,
     pub color: [f32; 3],
 }
@@ -1428,6 +1524,9 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
                     0.0
                 },
                 angle: angle as f32,
+                rotation_x_deg: pose.rotation_x_deg as f32,
+                rotation_y_deg: pose.rotation_y_deg as f32,
+                rotation_z_deg: pose.rotation_z_deg as f32,
                 shape,
                 color,
             })
@@ -1512,7 +1611,7 @@ pub(crate) fn sync_missile_visuals(
                 ..default()
             });
             let mid = b.y_bottom + b.height / 2.0;
-            let (mesh, rotation) = match b.shape {
+            let (mesh, _shape_rotation) = match b.shape {
                 Shape::Nozzle => (meshes.add(Cone::new(b.radius, b.height)), Quat::IDENTITY),
                 Shape::Body | Shape::Sensor | Shape::Disc => {
                     (meshes.add(Cylinder::new(b.radius, b.height)), Quat::IDENTITY)
@@ -1525,7 +1624,12 @@ pub(crate) fn sync_missile_visuals(
             root.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_xyz(b.x, mid, b.z).with_rotation(rotation),
+                Transform::from_xyz(b.x, mid, b.z).with_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    b.rotation_x_deg.to_radians(),
+                    (b.rotation_y_deg - b.angle).to_radians(),
+                    b.rotation_z_deg.to_radians(),
+                )),
             ));
         }
         if !boxes.is_empty() {
@@ -1901,13 +2005,13 @@ mod tests {
     }
 
     #[test]
-    fn legacy_files_load_and_save_as_schema_five() {
+    fn legacy_files_load_and_save_as_schema_six() {
         let legacy = br#"{"name":"Old","stages":[{"parts":[{"id":"m","spec":{"part":"solid_motor","length_m":2.0,"diameter_m":0.4,"burn_time_s":20.0}},{"id":"pc","spec":{"part":"computer","class":"basic"}}]}]}"#;
         let session = MissileSession::from_bytes(legacy).unwrap();
         assert_eq!(session.vehicle.stage_count(), 1);
         assert_eq!(session.vehicle.aero().surface_count, 0);
         let saved = String::from_utf8(session.to_bytes().unwrap()).unwrap();
-        assert!(saved.contains("\"schema_version\": 5"), "{saved}");
+        assert!(saved.contains("\"schema_version\": 6"), "{saved}");
         let again = MissileSession::from_bytes(saved.as_bytes()).unwrap();
         assert_eq!(again.vehicle, session.vehicle);
     }
@@ -1991,6 +2095,85 @@ mod tests {
         assert_eq!(attach.parent, motor);
         assert!(attach.node.is_radial());
         assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+    }
+
+    #[test]
+    fn ksp_transform_gizmo_edits_all_axes_and_undoes() {
+        let mut session = MissileSession::new_default();
+        select(&mut session, "module-6");
+        let before = session
+            .vehicle
+            .poses()
+            .into_iter()
+            .find(|pose| pose.id == "module-6")
+            .unwrap();
+        assert!(session.transform_selected(0, 0.5, false).contains("X"));
+        assert!(session.transform_selected(1, 0.25, false).contains("Y"));
+        assert!(session.transform_selected(2, -0.75, false).contains("Z"));
+        assert!(session.transform_selected(0, 15.0, true).contains("X"));
+        assert!(session.transform_selected(1, 25.0, true).contains("Y"));
+        assert!(session.transform_selected(2, 35.0, true).contains("Z"));
+        let part = session.vehicle.part("module-6").unwrap();
+        let attach = part.attach.as_ref().unwrap();
+        assert_eq!(
+            (attach.offset_x_m, attach.offset_y_m, attach.offset_z_m),
+            (0.5, 0.25, -0.75)
+        );
+        assert_eq!(
+            (attach.rotation_x_deg, attach.rotation_y_deg, attach.rotation_z_deg),
+            (15.0, 25.0, 35.0)
+        );
+        let after = session
+            .vehicle
+            .poses()
+            .into_iter()
+            .find(|pose| pose.id == "module-6")
+            .unwrap();
+        assert!((after.x_m - before.x_m - 0.5).abs() < 1e-9);
+        assert!((after.y_m - before.y_m - 0.25).abs() < 1e-9);
+        assert!((after.z_m - before.z_m + 0.75).abs() < 1e-9);
+        for _ in 0..6 {
+            session.undo();
+        }
+        let restored = session.vehicle.part("module-6").unwrap().attach.as_ref().unwrap();
+        assert_eq!(
+            (restored.offset_x_m, restored.offset_y_m, restored.offset_z_m),
+            (0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            (
+                restored.rotation_x_deg,
+                restored.rotation_y_deg,
+                restored.rotation_z_deg
+            ),
+            (0.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn selected_aerodynamic_surface_rotates_and_can_be_undone() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.apply(MissileAction::Clear, &owned);
+        session.apply(MissileAction::AddPart(PartTemplate::SolidMotor), &owned);
+        let motor = session.selected.clone().unwrap();
+        session.add_at(
+            PartTemplate::FinSet,
+            Some((motor, omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let fin = session.selected.clone().unwrap();
+
+        assert!(session.rotate_selected(1).contains("15"));
+        assert_eq!(
+            session.vehicle.part(&fin).unwrap().attach.as_ref().unwrap().angle_deg,
+            15.0
+        );
+        session.undo();
+        assert_eq!(
+            session.vehicle.part(&fin).unwrap().attach.as_ref().unwrap().angle_deg,
+            0.0
+        );
     }
 
     #[test]

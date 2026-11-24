@@ -1,4 +1,18 @@
-## Unreleased — Visual programming (0.36.0)
+## 0.37.0 — Atelier de construction et interface française
+
+- Palette de construction filtrable par catégorie : tout, propulsion, structure, aérodynamique, capteurs et avionique. Le filtre est un état d'interface et ne modifie pas le véhicule.
+- Arbre d'assemblage plus lisible : noms de pièces compréhensibles, points d'attache et étage affichés au lieu des identifiants internes.
+- Instructions de construction clarifiées ; commandes de déplacement de sous-ensemble, symétrie, annulation et rétablissement rappelées dans l'atelier.
+- Caméra de construction : F centre la pièce sélectionnée ; Début (Home) cadre automatiquement l'ensemble du véhicule.
+- Points d'attache libres visibles sur la pièce sélectionnée, même hors glisser-déposer.
+- Outil de transformation 3D inspiré de KSP : poignées colorées X/Y/Z pour déplacer une pièce, anneaux pour la faire tourner sur les trois axes, aperçu pendant le glissement et une seule entrée d'annulation par geste.
+- Les transformations complètes (translation et rotation sur les trois axes) sont sauvegardées dans le schéma véhicule 6 ; les anciens véhicules chargent avec des transformations nulles.
+- Rotation rapide des surfaces aérodynamiques avec Q/E par incréments de 15°, angle affiché dans l'inspecteur et opération annulable.
+- Interface utilisateur traduite en français : navigation, atelier, contrats, recherche, programmation, essais, boutons, états et principaux messages.
+- Ajout de `README.fr.md`. Les identifiants, fichiers et schémas de sauvegarde restent inchangés.
+- Vérification graphique recommandée à 1600 × 960 et sur une fenêtre plus étroite.
+
+## 0.36.0 — Programmation visuelle
 - **The block language grows to 15 blocks in eight categories.** `omega-rules::program` now owns `BlockCategory` and assigns every block to inputs, conditions, logic, states, timers, outputs, modes or diagnostics; the editor renders one library section per category. Seven blocks are new: wait speed, wait pressure, wait flag, toggle flag, set flag, set mode / wait mode and mark. The existing seven and their hardware rules are unchanged.
 - **A small, real state machine.** Four flags and one mode register are shared by all threads; `wait flag` and `wait mode` are gates that hold their thread until met, then record an anomaly and continue at the timeout. `mark` only writes an event. Nothing carries guidance or targeting logic.
 - **Connections are explicit and checked.** Threads are chains drawn with a connector between consecutive blocks; the selected block is the insertion point (library click splices, `DUPLICATE` copies, `MOVE` reorders). The rules refuse a block after `Lock target`, an ignition of a stage that was already separated in the chain, and a second `Lock target`.

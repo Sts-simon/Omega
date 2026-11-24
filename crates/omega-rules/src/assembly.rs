@@ -14,9 +14,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Current `designs/vehicle.json` schema. 1-2 were the flat stage lists of the early workshops;
-/// 3 added the attachment graph, 4 the aerodynamic surfaces and 5 the mission electronics
-/// (older files load unchanged and are rewritten at the current version).
-pub const VEHICLE_SCHEMA: u32 = 5;
+/// 3 added the attachment graph, 4 the aerodynamic surfaces, 5 mission electronics and 6
+/// per-part three-axis transforms (older files load with zero offsets and rotations).
+pub const VEHICLE_SCHEMA: u32 = 6;
 /// A design may not grow beyond this many derived stages (the old workshop limit).
 pub const MAX_STAGES: usize = 4;
 
@@ -54,6 +54,20 @@ pub struct Attach {
     /// Explicit stage boundary, used by migrated designs whose stage had no decoupler.
     #[serde(default)]
     pub separation: bool,
+    /// Free translation offsets in the assembly's world axes, in metres.
+    #[serde(default)]
+    pub offset_x_m: f64,
+    #[serde(default)]
+    pub offset_y_m: f64,
+    #[serde(default)]
+    pub offset_z_m: f64,
+    /// Local Euler orientation, in degrees. Existing designs default to zero rotation.
+    #[serde(default)]
+    pub rotation_x_deg: f64,
+    #[serde(default)]
+    pub rotation_y_deg: f64,
+    #[serde(default)]
+    pub rotation_z_deg: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -258,6 +272,55 @@ pub struct PartPose {
     pub z_m: f64,
     pub height_m: f64,
     pub radius_m: f64,
+    pub rotation_x_deg: f64,
+    pub rotation_y_deg: f64,
+    pub rotation_z_deg: f64,
+}
+
+// Quaternion math keeps this rules crate independent from Bevy.
+fn quaternion_multiply(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    let [aw, ax, ay, az] = a;
+    let [bw, bx, by, bz] = b;
+    [
+        aw * bw - ax * bx - ay * by - az * bz,
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+    ]
+}
+fn quaternion_from_euler_xyz(x: f64, y: f64, z: f64) -> [f64; 4] {
+    let (sx, cx) = (x * 0.5).sin_cos();
+    let (sy, cy) = (y * 0.5).sin_cos();
+    let (sz, cz) = (z * 0.5).sin_cos();
+    quaternion_multiply(
+        quaternion_multiply([cx, sx, 0.0, 0.0], [cy, 0.0, sy, 0.0]),
+        [cz, 0.0, 0.0, sz],
+    )
+}
+fn quaternion_rotate(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
+    let u = [q[1], q[2], q[3]];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let uv = cross(u, v);
+    let uuv = cross(u, uv);
+    [
+        v[0] + 2.0 * (q[0] * uv[0] + uuv[0]),
+        v[1] + 2.0 * (q[0] * uv[1] + uuv[1]),
+        v[2] + 2.0 * (q[0] * uv[2] + uuv[2]),
+    ]
+}
+fn quaternion_to_euler_xyz(q: [f64; 4]) -> (f64, f64, f64) {
+    let [w, x, y, z] = q;
+    (
+        (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y)),
+        (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin(),
+        (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z)),
+    )
 }
 
 impl Vehicle {
@@ -273,6 +336,12 @@ impl Vehicle {
                     node: NodeId::Top,
                     angle_deg: 0.0,
                     separation: stage_index > 0 && part_index == 0 && !*parent_is_decoupler,
+                    offset_x_m: 0.0,
+                    offset_y_m: 0.0,
+                    offset_z_m: 0.0,
+                    rotation_x_deg: 0.0,
+                    rotation_y_deg: 0.0,
+                    rotation_z_deg: 0.0,
                 });
                 previous = Some((part.id.clone(), matches!(part.spec, PartSpec::Decoupler)));
                 parts.push(PlacedPart {
@@ -515,6 +584,12 @@ impl Vehicle {
             node,
             angle_deg,
             separation: false,
+            offset_x_m: 0.0,
+            offset_y_m: 0.0,
+            offset_z_m: 0.0,
+            rotation_x_deg: 0.0,
+            rotation_y_deg: 0.0,
+            rotation_z_deg: 0.0,
         });
         if self.stage_count() > MAX_STAGES {
             let part = self.part_mut(child).ok_or("missing part")?;
@@ -959,7 +1034,8 @@ impl Vehicle {
         reports
     }
 
-    /// 3D positions of every part, derived from the attachment tree.
+    /// 3D world poses derived from the attachment tree. Child mounts and offsets are
+    /// transformed by the parent's orientation, so rotating a part carries its full subtree.
     pub fn poses(&self) -> Vec<PartPose> {
         let depths = self.stage_depths();
         let mut poses = Vec::new();
@@ -967,9 +1043,10 @@ impl Vehicle {
             return poses;
         };
         let (height, radius) = dimensions(&root.spec);
-        let mut stack = vec![(root.id.clone(), (height / 2.0, 0.0, 0.0, height, radius))];
+        let identity = [1.0, 0.0, 0.0, 0.0];
+        let mut stack = vec![(root.id.clone(), [0.0, height / 2.0, 0.0], identity, height, radius)];
         let mut seen = BTreeSet::new();
-        while let Some((id, (y, x, z, parent_height, parent_radius))) = stack.pop() {
+        while let Some((id, position, orientation, parent_height, parent_radius)) = stack.pop() {
             if !seen.insert(id.clone()) {
                 continue;
             }
@@ -977,47 +1054,58 @@ impl Vehicle {
                 continue;
             };
             let (height, radius) = dimensions(&part.spec);
+            let (rx, ry, rz) = quaternion_to_euler_xyz(orientation);
             poses.push(PartPose {
                 id: id.clone(),
                 stage: depths.get(&id).copied().unwrap_or(0),
-                y_m: y,
-                x_m: x,
-                z_m: z,
+                y_m: position[1],
+                x_m: position[0],
+                z_m: position[2],
                 height_m: height,
                 radius_m: radius,
+                rotation_x_deg: rx.to_degrees(),
+                rotation_y_deg: ry.to_degrees(),
+                rotation_z_deg: rz.to_degrees(),
             });
             for child in self.children(&id) {
                 let (child_height, child_radius) = dimensions(&child.spec);
-                let pose = match child.attach.as_ref().map(|a| a.node) {
-                    Some(NodeId::Top) => (
-                        y + parent_height / 2.0 + child_height / 2.0,
-                        x,
-                        z,
-                        child_height,
-                        child_radius,
-                    ),
-                    Some(NodeId::Bottom) => (
-                        y - parent_height / 2.0 - child_height / 2.0,
-                        x,
-                        z,
-                        child_height,
-                        child_radius,
-                    ),
+                let attach = child.attach.as_ref();
+                let mut local = match attach.map(|a| a.node) {
+                    Some(NodeId::Top) => [0.0, parent_height / 2.0 + child_height / 2.0, 0.0],
+                    Some(NodeId::Bottom) => [0.0, -parent_height / 2.0 - child_height / 2.0, 0.0],
                     Some(NodeId::Radial(index)) => {
-                        let angle = f64::from(index) * 90.0 + child.attach.as_ref().map_or(0.0, |a| a.angle_deg);
-                        let angle = angle.to_radians();
+                        let angle = (f64::from(index) * 90.0 + attach.map_or(0.0, |a| a.angle_deg)).to_radians();
                         let offset = parent_radius + child_radius;
-                        (
-                            y,
-                            x + angle.cos() * offset,
-                            z + angle.sin() * offset,
-                            child_height,
-                            child_radius,
-                        )
+                        [angle.cos() * offset, 0.0, angle.sin() * offset]
                     }
-                    None => (y, x, z, child_height, child_radius),
+                    None => [0.0, 0.0, 0.0],
                 };
-                stack.push((child.id.clone(), pose));
+                if let Some(a) = attach {
+                    local[0] += a.offset_x_m;
+                    local[1] += a.offset_y_m;
+                    local[2] += a.offset_z_m;
+                }
+                let offset = quaternion_rotate(orientation, local);
+                let child_position = [
+                    position[0] + offset[0],
+                    position[1] + offset[1],
+                    position[2] + offset[2],
+                ];
+                let local_rotation = attach.map_or(identity, |a| {
+                    quaternion_from_euler_xyz(
+                        a.rotation_x_deg.to_radians(),
+                        a.rotation_y_deg.to_radians(),
+                        a.rotation_z_deg.to_radians(),
+                    )
+                });
+                let child_orientation = quaternion_multiply(orientation, local_rotation);
+                stack.push((
+                    child.id.clone(),
+                    child_position,
+                    child_orientation,
+                    child_height,
+                    child_radius,
+                ));
             }
         }
         poses.sort_by(|a, b| a.y_m.total_cmp(&b.y_m));
@@ -1266,6 +1354,12 @@ pub(crate) mod tests {
                 node: NodeId::Radial(0),
                 angle_deg: 0.0,
                 separation: false,
+                offset_x_m: 0.0,
+                offset_y_m: 0.0,
+                offset_z_m: 0.0,
+                rotation_x_deg: 0.0,
+                rotation_y_deg: 0.0,
+                rotation_z_deg: 0.0,
             }),
             symmetry: None,
         });
@@ -1351,6 +1445,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn rotating_a_parent_carries_child_positions_and_orientations() {
+        let mut vehicle = sounding_rocket();
+        let before = vehicle.poses();
+        let original = before.iter().find(|pose| pose.id == "sustainer").unwrap();
+        assert!(original.x_m.abs() < 1e-9);
+
+        let parent_y = before.iter().find(|pose| pose.id == "dec1").unwrap().y_m;
+        let attach = vehicle.part_mut("dec1").unwrap().attach.as_mut().unwrap();
+        attach.rotation_z_deg = 90.0;
+        let after = vehicle.poses();
+        let rotated = after.iter().find(|pose| pose.id == "sustainer").unwrap();
+        assert!(rotated.x_m < -0.5, "child should orbit with its parent: {rotated:?}");
+        assert!(
+            (rotated.y_m - parent_y).abs() < 1e-9,
+            "a quarter-turn around Z moves the child sideways"
+        );
+        assert!((rotated.rotation_z_deg - 90.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn three_axis_transforms_round_trip_in_schema_six() {
+        let mut vehicle = sounding_rocket();
+        let attach = vehicle.part_mut("pc").unwrap().attach.as_mut().unwrap();
+        attach.offset_x_m = 0.35;
+        attach.offset_y_m = -0.2;
+        attach.offset_z_m = 0.6;
+        attach.rotation_x_deg = 15.0;
+        attach.rotation_y_deg = 45.0;
+        attach.rotation_z_deg = 90.0;
+        let json = serde_json::to_string(&vehicle).unwrap();
+        assert!(json.contains("\"schema_version\":6"));
+        let restored: Vehicle = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, vehicle);
+    }
+
+    #[test]
     fn a_diameter_step_is_a_warning_not_an_error() {
         let vehicle = sounding_rocket();
         assert!(vehicle.validate().is_ok());
@@ -1374,7 +1504,7 @@ pub(crate) mod tests {
     fn saved_designs_round_trip_and_legacy_files_migrate() {
         let vehicle = sounding_rocket();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":5"), "{json}");
+        assert!(json.contains("\"schema_version\":6"), "{json}");
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
 
@@ -1451,9 +1581,9 @@ pub(crate) mod tests {
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
         assert_eq!(vehicle.aero().surface_count, 0);
         let written = serde_json::to_string(&vehicle).unwrap();
-        assert!(written.contains("\"schema_version\":5"), "{written}");
+        assert!(written.contains("\"schema_version\":6"), "{written}");
 
-        let future = r#"{"schema_version": 6, "name": "Future", "parts": []}"#;
+        let future = r#"{"schema_version": 7, "name": "Future", "parts": []}"#;
         let refused = serde_json::from_str::<Vehicle>(future).unwrap_err();
         assert!(refused.to_string().contains("newer"), "{refused}");
     }
@@ -1472,7 +1602,7 @@ pub(crate) mod tests {
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
         assert_eq!(vehicle.avionics().mission_modules, 0);
         let written = serde_json::to_string(&vehicle).unwrap();
-        assert!(written.contains("\"schema_version\":5"), "{written}");
+        assert!(written.contains("\"schema_version\":6"), "{written}");
     }
 
     #[test]
@@ -1524,7 +1654,7 @@ pub(crate) mod tests {
             )
             .unwrap();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":5"), "{json}");
+        assert!(json.contains("\"schema_version\":6"), "{json}");
         assert!(!json.contains("variable_geometry"));
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);

@@ -24,7 +24,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "OMEGA 0.36.0 | Missile Design".to_string(),
+                title: "OMEGA 0.37.0 | Conception de véhicules".to_string(),
                 resolution: (1600, 960).into(),
                 ..default()
             }),
@@ -40,6 +40,7 @@ fn main() {
         .init_resource::<campus::WorkshopScroll>()
         .init_resource::<workshop::DragState>()
         .init_resource::<workshop::WorkshopInput>()
+        .init_resource::<workshop::TransformGizmo>()
         .add_systems(
             Startup,
             (
@@ -71,6 +72,7 @@ fn main() {
                     campus::scroll_program_list,
                     campus::scroll_research_grid,
                     campus::scroll_part_list,
+                    workshop::draw_attachment_markers,
                     workshop::draw_aero_markers,
                     missile::sync_missile_visuals,
                     missile::focus_missile_camera,
@@ -95,6 +97,7 @@ fn move_camera(
     mouse_scroll: Res<AccumulatedMouseScroll>,
     time: Res<Time>,
     campus: Res<CampusState>,
+    session: Res<missile::MissileSession>,
     ui_buttons: Query<&UiInteraction>,
     mut cameras: Query<(&mut Transform, &mut scene::OrbitCameraRig), With<Camera3d>>,
 ) {
@@ -110,6 +113,42 @@ fn move_camera(
 
     let pointer_over_button = ui_buttons.iter().any(|interaction| *interaction != UiInteraction::None);
     let mut changed = false;
+
+    // KSP-style framing shortcuts: F focuses the selected part, Home frames the whole design.
+    if campus.view == CampusView::Missile {
+        if keys.just_pressed(KeyCode::KeyF)
+            && let Some(pose) = session
+                .selected
+                .as_deref()
+                .and_then(|id| session.vehicle.poses().into_iter().find(|pose| pose.id == id))
+        {
+            rig.target =
+                missile::ANCHOR + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
+            rig.distance = ((pose.radius_m as f32) * missile::VISUAL_SCALE * 4.0 + 8.0).clamp(12.0, 45.0);
+            changed = true;
+        }
+        if keys.just_pressed(KeyCode::Home) {
+            let poses = session.vehicle.poses();
+            if poses.is_empty() {
+                rig.target = missile::ANCHOR;
+                rig.distance = 22.0;
+            } else {
+                let mut min = Vec3::splat(f32::INFINITY);
+                let mut max = Vec3::splat(f32::NEG_INFINITY);
+                let mut extent = 0.0_f32;
+                for pose in &poses {
+                    let point = missile::ANCHOR
+                        + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
+                    min = min.min(point);
+                    max = max.max(point);
+                    extent = extent.max(pose.height_m.max(pose.radius_m * 2.0) as f32 * missile::VISUAL_SCALE);
+                }
+                rig.target = (min + max) * 0.5;
+                rig.distance = ((max - min).length() * 1.25 + extent * 2.0 + 8.0).clamp(12.0, 115.0);
+            }
+            changed = true;
+        }
+    }
 
     // CAD-like mouse navigation: right drag orbits, middle drag pans, wheel zooms.
     if !pointer_over_button {
@@ -143,22 +182,25 @@ fn move_camera(
     let control_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let forward = Vec3::new(-rig.yaw.sin(), 0.0, -rig.yaw.cos());
     let right = Vec3::new(rig.yaw.cos(), 0.0, -rig.yaw.sin());
-    if !control_held && (keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp)) {
+    // In the workshop W/R belong to the transform tools, so camera keyboard panning
+    // uses the arrow keys there. The rest of the campus keeps WASD navigation.
+    let workshop_view = campus.view == CampusView::Missile;
+    if !control_held && (keys.pressed(KeyCode::ArrowUp) || (!workshop_view && keys.pressed(KeyCode::KeyW))) {
         direction += forward;
     }
-    if !control_held && (keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown)) {
+    if !control_held && (keys.pressed(KeyCode::ArrowDown) || (!workshop_view && keys.pressed(KeyCode::KeyS))) {
         direction -= forward;
     }
-    if !control_held && (keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft)) {
+    if !control_held && (keys.pressed(KeyCode::ArrowLeft) || (!workshop_view && keys.pressed(KeyCode::KeyA))) {
         direction -= right;
     }
-    if !control_held && (keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight)) {
+    if !control_held && (keys.pressed(KeyCode::ArrowRight) || (!workshop_view && keys.pressed(KeyCode::KeyD))) {
         direction += right;
     }
-    if keys.pressed(KeyCode::KeyQ) {
+    if !workshop_view && keys.pressed(KeyCode::KeyQ) {
         direction.y -= 1.0;
     }
-    if keys.pressed(KeyCode::KeyE) {
+    if !workshop_view && keys.pressed(KeyCode::KeyE) {
         direction.y += 1.0;
     }
     if direction.length_squared() > 0.0 {

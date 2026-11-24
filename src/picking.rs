@@ -4,13 +4,23 @@
 //! Kept apart from Bevy so the picking rules can be tested without a window; `workshop.rs` builds
 //! the ray and the node list, this module decides what is under the cursor.
 
-use bevy::prelude::{Vec2, Vec3};
+use bevy::prelude::{Quat, Vec2, Vec3};
 
 /// Nearest positive distance along `direction` where the ray enters the cylinder, if it does.
 /// `direction` does not need to be normalised. The cylinder is upright: its axis is Y and
 /// `center` is its middle.
-pub fn ray_cylinder(origin: Vec3, direction: Vec3, center: Vec3, radius: f32, half_height: f32) -> Option<f32> {
-    let o = origin - center;
+pub fn ray_cylinder(
+    origin: Vec3,
+    direction: Vec3,
+    center: Vec3,
+    radius: f32,
+    half_height: f32,
+    rotation: Quat,
+) -> Option<f32> {
+    let inverse = rotation.inverse();
+    let origin = inverse * (origin - center);
+    let direction = inverse * direction;
+    let o = origin;
     let a = direction.x * direction.x + direction.z * direction.z;
     let b = 2.0 * (o.x * direction.x + o.z * direction.z);
     let c = o.x * o.x + o.z * o.z - radius * radius;
@@ -55,29 +65,20 @@ pub enum PickShape {
         center: Vec3,
         radius: f32,
         half_height: f32,
+        rotation: Quat,
     },
     Box {
         center: Vec3,
         half: Vec3,
-        /// Rotation about Y in radians, matching the 3D mesh.
-        yaw: f32,
+        /// Full local-to-world orientation, matching the 3D mesh.
+        rotation: Quat,
     },
 }
 
-fn ray_box(origin: Vec3, direction: Vec3, center: Vec3, half: Vec3, yaw: f32) -> Option<f32> {
-    let (sin, cos) = (-yaw).sin_cos();
-    let offset = origin - center;
-    // Rotate the ray into the box's local frame (inverse of the render rotation).
-    let local_origin = Vec3::new(
-        offset.x * cos - offset.z * sin,
-        offset.y,
-        offset.x * sin + offset.z * cos,
-    );
-    let local_direction = Vec3::new(
-        direction.x * cos - direction.z * sin,
-        direction.y,
-        direction.x * sin + direction.z * cos,
-    );
+fn ray_box(origin: Vec3, direction: Vec3, center: Vec3, half: Vec3, rotation: Quat) -> Option<f32> {
+    let inverse = rotation.inverse();
+    let local_origin = inverse * (origin - center);
+    let local_direction = inverse * direction;
     let mut near = f32::NEG_INFINITY;
     let mut far = f32::INFINITY;
     for axis in 0..3 {
@@ -118,8 +119,9 @@ pub fn nearest_hit(origin: Vec3, direction: Vec3, shapes: &[PickShape]) -> Optio
                     center,
                     radius,
                     half_height,
-                } => ray_cylinder(origin, direction, center, radius, half_height),
-                PickShape::Box { center, half, yaw } => ray_box(origin, direction, center, half, yaw),
+                    rotation,
+                } => ray_cylinder(origin, direction, center, radius, half_height, rotation),
+                PickShape::Box { center, half, rotation } => ray_box(origin, direction, center, half, rotation),
             };
             t.map(|t| (index, t))
         })
@@ -152,13 +154,13 @@ mod tests {
 
     #[test]
     fn a_ray_down_the_axis_hits_the_top_cap() {
-        let t = ray_cylinder(Vec3::new(0.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0).unwrap();
+        let t = ray_cylinder(Vec3::new(0.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).unwrap();
         assert!((t - 9.0).abs() < 1e-6, "{t}");
     }
 
     #[test]
     fn a_ray_beside_the_body_misses() {
-        assert!(ray_cylinder(Vec3::new(2.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0).is_none());
+        assert!(ray_cylinder(Vec3::new(2.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).is_none());
     }
 
     #[test]
@@ -166,9 +168,16 @@ mod tests {
         // Grazing the side from close range but above the cap: passes over the part.
         let origin = Vec3::new(-2.0, 5.0, 0.0);
         let direction = Vec3::new(1.0, 0.0, 0.0);
-        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0).is_none());
+        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).is_none());
         let origin = Vec3::new(-2.0, 0.5, 0.0);
-        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0).is_some());
+        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).is_some());
+    }
+
+    #[test]
+    fn a_cylinder_can_be_picked_after_a_quarter_turn() {
+        let rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let hit = ray_cylinder(Vec3::new(-5.0, 0.0, 0.0), Vec3::X, Vec3::ZERO, 0.5, 1.0, rotation);
+        assert!(hit.is_some(), "the cylinder axis is now aligned with X");
     }
 
     #[test]
@@ -178,11 +187,13 @@ mod tests {
                 center: Vec3::new(0.0, 5.0, 0.0),
                 radius: 0.4,
                 half_height: 0.5,
+                rotation: Quat::IDENTITY,
             },
             PickShape::Cylinder {
                 center: Vec3::new(0.0, 2.0, 0.0),
                 radius: 0.4,
                 half_height: 0.5,
+                rotation: Quat::IDENTITY,
             },
         ];
         let (index, _) = nearest_hit(Vec3::new(0.0, 10.0, 0.0), down(), &shapes).unwrap();
@@ -199,7 +210,7 @@ mod tests {
             &[PickShape::Box {
                 center: Vec3::ZERO,
                 half,
-                yaw: 0.0,
+                rotation: Quat::IDENTITY,
             }],
         );
         assert!(from_above.is_some(), "the plate is hit from above");
@@ -207,7 +218,7 @@ mod tests {
         let rotated = PickShape::Box {
             center: Vec3::ZERO,
             half,
-            yaw: std::f32::consts::FRAC_PI_2,
+            rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
         };
         assert!(nearest_hit(Vec3::new(5.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0), &[rotated]).is_some());
         let edge = nearest_hit(
@@ -216,7 +227,7 @@ mod tests {
             &[PickShape::Box {
                 center: Vec3::ZERO,
                 half,
-                yaw: 0.0,
+                rotation: Quat::IDENTITY,
             }],
         );
         assert!(edge.is_none(), "outside the plate's span");
@@ -229,11 +240,12 @@ mod tests {
                 center: Vec3::new(0.0, 0.0, 0.0),
                 radius: 0.4,
                 half_height: 1.0,
+                rotation: Quat::IDENTITY,
             },
             PickShape::Box {
                 center: Vec3::new(0.0, 0.0, 2.0),
                 half: Vec3::new(1.0, 0.2, 0.03),
-                yaw: 0.0,
+                rotation: Quat::IDENTITY,
             },
         ];
         let (index, _) = nearest_hit(Vec3::new(0.0, 5.0, 2.0), down(), &shapes).unwrap();
