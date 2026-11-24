@@ -247,13 +247,30 @@ pub(crate) fn workshop_pointer(
             let center_screen = camera.world_to_viewport(camera_transform, center).ok();
             let mut nearest: Option<(usize, Vec2, f32)> = None;
             for (axis, direction) in axes.into_iter().enumerate() {
-                if let (Some(origin), Ok(point)) = (
-                    center_screen,
-                    camera.world_to_viewport(camera_transform, center + direction * 1.5),
-                ) {
-                    let distance = cursor.distance(point);
-                    if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
-                        nearest = Some((axis, point - origin, distance));
+                if transform_gizmo.mode == TransformMode::Translate {
+                    if let (Some(origin), Ok(point)) = (
+                        center_screen,
+                        camera.world_to_viewport(camera_transform, center + direction * 1.5),
+                    ) {
+                        let distance = cursor.distance(point);
+                        if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
+                            nearest = Some((axis, point - origin, distance));
+                        }
+                    }
+                } else {
+                    for step in 0..48 {
+                        let angle = std::f32::consts::TAU * step as f32 / 48.0;
+                        let ring_point = match axis {
+                            0 => center + Vec3::new(0.0, angle.cos(), angle.sin()) * 1.05,
+                            1 => center + Vec3::new(angle.cos(), 0.0, angle.sin()) * 1.05,
+                            _ => center + Vec3::new(angle.cos(), angle.sin(), 0.0) * 1.05,
+                        };
+                        if let Ok(point) = camera.world_to_viewport(camera_transform, ring_point) {
+                            let distance = cursor.distance(point);
+                            if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
+                                nearest = Some((axis, Vec2::X, distance));
+                            }
+                        }
                     }
                 }
             }
@@ -396,10 +413,11 @@ pub(crate) fn workshop_pointer(
             (Vec3::Z, Color::srgb(0.25, 0.55, 1.0)),
         ];
         for (axis_index, (axis, color)) in axes.into_iter().enumerate() {
-            let end = center + axis * 1.5;
-            gizmos.line(center, end, color);
-            gizmos.sphere(Isometry3d::from_translation(end), 0.11, color);
-            if transform_gizmo.mode == TransformMode::Rotate {
+            if transform_gizmo.mode == TransformMode::Translate {
+                let end = center + axis * 1.5;
+                gizmos.line(center, end, color);
+                gizmos.sphere(Isometry3d::from_translation(end), 0.11, color);
+            } else {
                 let mut previous = None;
                 for step in 0..=48 {
                     let angle = std::f32::consts::TAU * step as f32 / 48.0;
