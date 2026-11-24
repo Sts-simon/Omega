@@ -7,8 +7,8 @@ use crate::save::{self, SaveFile};
 use crate::scene::OrbitCameraRig;
 use bevy::prelude::*;
 use omega_rules::{
-    AirfoilProfile, ComputerClass, ControlKind, FinLayout, Part, PartSpec, RadarClass, SensorKind, StabilizerRole,
-    Stage, Vehicle, WingPlanform,
+    AirfoilProfile, AvionicsModule, ComputerClass, ControlKind, FinLayout, Part, PartSpec, RadarClass, SensorKind,
+    StabilizerRole, Stage, Vehicle, WingPlanform,
 };
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -32,6 +32,11 @@ pub(crate) enum PartTemplate {
     ComputerBasic,
     ComputerStandard,
     ComputerAdvanced,
+    ControlAugment,
+    InertialNav,
+    Datalink,
+    PowerCell,
+    Diagnostics,
     Decoupler,
     MissionModule,
     Wing,
@@ -41,7 +46,7 @@ pub(crate) enum PartTemplate {
 
 impl PartTemplate {
     /// Every palette entry, in the order the workshop shows them inside each category.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 21] = [
         Self::SolidMotor,
         Self::FuelTank,
         Self::LiquidEngine,
@@ -58,6 +63,11 @@ impl PartTemplate {
         Self::ComputerBasic,
         Self::ComputerStandard,
         Self::ComputerAdvanced,
+        Self::ControlAugment,
+        Self::InertialNav,
+        Self::Datalink,
+        Self::PowerCell,
+        Self::Diagnostics,
     ];
 
     pub fn label(self) -> &'static str {
@@ -73,6 +83,11 @@ impl PartTemplate {
             Self::ComputerBasic => "COMPUTER 1",
             Self::ComputerStandard => "COMPUTER 2",
             Self::ComputerAdvanced => "COMPUTER 3",
+            Self::ControlAugment => AvionicsModule::ControlAugment.short_label(),
+            Self::InertialNav => AvionicsModule::InertialNav.short_label(),
+            Self::Datalink => AvionicsModule::Datalink.short_label(),
+            Self::PowerCell => AvionicsModule::PowerCell.short_label(),
+            Self::Diagnostics => AvionicsModule::Diagnostics.short_label(),
             Self::Decoupler => "DECOUPLER",
             Self::MissionModule => "MISSION MODULE",
             Self::Wing => "WING",
@@ -91,6 +106,11 @@ impl PartTemplate {
             Self::Barometer => "baro",
             Self::RadarBasic | Self::RadarActive => "radar",
             Self::ComputerBasic | Self::ComputerStandard | Self::ComputerAdvanced => "computer",
+            Self::ControlAugment => "control_module",
+            Self::InertialNav => "nav",
+            Self::Datalink => "datalink",
+            Self::PowerCell => "power",
+            Self::Diagnostics => "selftest",
             Self::Decoupler => "decoupler",
             Self::MissionModule => "module",
             Self::Wing => "wing",
@@ -132,6 +152,21 @@ impl PartTemplate {
             },
             Self::ComputerAdvanced => PartSpec::Computer {
                 class: ComputerClass::Advanced,
+            },
+            Self::ControlAugment => PartSpec::Avionics {
+                module: AvionicsModule::ControlAugment,
+            },
+            Self::InertialNav => PartSpec::Avionics {
+                module: AvionicsModule::InertialNav,
+            },
+            Self::Datalink => PartSpec::Avionics {
+                module: AvionicsModule::Datalink,
+            },
+            Self::PowerCell => PartSpec::Avionics {
+                module: AvionicsModule::PowerCell,
+            },
+            Self::Diagnostics => PartSpec::Avionics {
+                module: AvionicsModule::Diagnostics,
             },
             Self::Decoupler => PartSpec::Decoupler,
             Self::MissionModule => PartSpec::MissionModule { mass_kg: 40.0 },
@@ -1347,6 +1382,22 @@ fn appearance(spec: &PartSpec) -> (Shape, [f32; 3]) {
             ..
         } => (Shape::Surface, [0.62, 0.64, 0.68]),
         PartSpec::ControlSurface { .. } => (Shape::Surface, [0.90, 0.72, 0.28]),
+        // Mission electronics read as small discs, one colour per category group.
+        PartSpec::Avionics {
+            module: AvionicsModule::ControlAugment,
+        } => (Shape::Disc, [0.72, 0.48, 0.92]),
+        PartSpec::Avionics {
+            module: AvionicsModule::InertialNav,
+        } => (Shape::Disc, [0.32, 0.82, 0.88]),
+        PartSpec::Avionics {
+            module: AvionicsModule::Datalink,
+        } => (Shape::Disc, [0.48, 0.70, 0.98]),
+        PartSpec::Avionics {
+            module: AvionicsModule::PowerCell,
+        } => (Shape::Disc, [0.96, 0.68, 0.30]),
+        PartSpec::Avionics {
+            module: AvionicsModule::Diagnostics,
+        } => (Shape::Disc, [0.55, 0.88, 0.50]),
     }
 }
 
@@ -1850,15 +1901,30 @@ mod tests {
     }
 
     #[test]
-    fn legacy_files_load_and_save_as_schema_four() {
+    fn legacy_files_load_and_save_as_schema_five() {
         let legacy = br#"{"name":"Old","stages":[{"parts":[{"id":"m","spec":{"part":"solid_motor","length_m":2.0,"diameter_m":0.4,"burn_time_s":20.0}},{"id":"pc","spec":{"part":"computer","class":"basic"}}]}]}"#;
         let session = MissileSession::from_bytes(legacy).unwrap();
         assert_eq!(session.vehicle.stage_count(), 1);
         assert_eq!(session.vehicle.aero().surface_count, 0);
         let saved = String::from_utf8(session.to_bytes().unwrap()).unwrap();
-        assert!(saved.contains("\"schema_version\": 4"), "{saved}");
+        assert!(saved.contains("\"schema_version\": 5"), "{saved}");
         let again = MissileSession::from_bytes(saved.as_bytes()).unwrap();
         assert_eq!(again.vehicle, session.vehicle);
+    }
+
+    #[test]
+    fn mission_electronics_need_a_power_cell_before_a_trial() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        let message = session.add_at(PartTemplate::InertialNav, None, &owned);
+        assert!(message.contains("Added"), "{message}");
+        let errors = session.vehicle.validate().unwrap_err().join(" | ");
+        assert!(errors.contains("no power source"), "{errors}");
+
+        let message = session.add_at(PartTemplate::PowerCell, None, &owned);
+        assert!(message.contains("Added"), "{message}");
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        assert_eq!(session.vehicle.avionics().mission_modules, 2);
     }
 
     #[test]

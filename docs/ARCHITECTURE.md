@@ -117,8 +117,8 @@ computer outside the last stage; `warnings()` reports diameter steps without blo
 
 `src/missile.rs` keeps only the session (selection by part id, palette additions, parameter edits),
 the 3D layout built from `Vehicle::poses()` and the revision diff. Save files carry
-`schema_version: 4`; deserialization accepts a schema-3 graph or the old stage list and rewrites it as
-4, and refuses a newer schema with an error instead of guessing.
+`schema_version: 5`; deserialization accepts a schema-3 or schema-4 graph or the old stage list and
+rewrites it as 5, and refuses a newer schema with an error instead of guessing.
 
 ## Workshop screen (0.34.0)
 
@@ -164,10 +164,25 @@ part it concerns so the workshop can select it. The workshop draws CG (yellow), 
 acceptable band and the surface plates from the same figures, quotes the selected surface's
 contribution (`aero::breakdown`) and lists the surface fault risk of a fragile airframe.
 
+## Onboard electronics (0.35.0)
+
+`crates/omega-rules/src/avionics.rs` owns the family: seven `AvionicsCategory` values, five mission
+modules and one `AvionicsSpec` shape used by the legacy computers and sensors too. `spec_of()` maps
+any part to its electronics view, `figures()` makes one pass over the tree and `issues()` returns
+ordinary `VehicleIssue`s, which `Vehicle::error_issues()` and `warning_issues()` merge with the
+assembly and aerodynamic rules. The module therefore owns every electronics rule: categories,
+costs, power, dependencies, duplicates and the power budget.
+
+`PartSpec::Avionics { module }` is the only new save variant; mass comes from `stats()`, dimensions
+from `avionics::dimensions()` and the palette category from `PartSpec::category()`. The trial reads
+`AvionicsFigures` once, applies the authority, lock and fault multipliers to the existing flight
+integration, and quotes `AvionicsSummary` and `surface_fault` on the report. A design without
+mission modules keeps every previous figure, so no pre-avionics save changes behaviour.
+
 ## Screenless commands (0.33.0)
 
 `src/headless.rs` runs before the Bevy app when a command flag is present: `--trial` flies the
 saved design and program, `--revisions` replays the working copy and the newest revisions with one
-seed, `--export-design` / `--import-design` move a schema-4 vehicle through the normal save path,
+seed, `--export-design` / `--import-design` move a schema-5 vehicle through the normal save path,
 and `--aero-report` prints the effect tables. All of them reuse `omega-rules`, so the flight and
 dossier rules are identical to the game's; only the rendering is skipped.

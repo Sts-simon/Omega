@@ -666,6 +666,8 @@ mod tests {
             events: vec![(1.0, "Stage 1 separated".to_string())],
             anomalies: Vec::new(),
             aero: crate::aero::AeroSummary::default(),
+            avionics: crate::avionics::AvionicsSummary::default(),
+            surface_fault: false,
             first_ignition_twr: Some(2.0),
             lifted_off: true,
             max_speed_ms: speed,

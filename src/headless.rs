@@ -303,6 +303,17 @@ fn flight_json(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> Re
         "lock": lock,
         "events": report.events,
         "anomalies": report.anomalies,
+        "surface_fault": report.surface_fault,
+        "avionics": {
+            "mission_modules": report.avionics.mission_modules,
+            "cost_cr": report.avionics.cost_cr,
+            "power_draw_w": report.avionics.power_draw_w,
+            "power_supply_w": report.avionics.power_supply_w,
+            "power_margin_w": report.avionics.power_margin_w,
+            "lock_bonus": report.avionics.lock_bonus,
+            "authority_bonus": report.avionics.authority_bonus,
+            "fault_reduction": report.avionics.fault_reduction,
+        },
     }))
 }
 
@@ -323,6 +334,8 @@ mod tests {
         assert!(value["aero"]["surface_count"].is_number());
         assert!(value["flight"]["max_speed_ms"].is_number());
         assert!(value["flight"]["samples"].as_u64().unwrap() > 0);
+        assert!(value["flight"]["avionics"]["power_margin_w"].is_number());
+        assert!(value["flight"]["surface_fault"].is_boolean());
         assert_eq!(value["seed"], 1);
         assert_eq!(value["launch"], "vertical");
     }

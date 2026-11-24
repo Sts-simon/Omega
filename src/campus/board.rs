@@ -915,6 +915,7 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
             burn_time_s,
         } => format!("Solid motor {length_m:.1} m x {diameter_m:.2} m, {burn_time_s:.0} s"),
         FuelTank { length_m, diameter_m } => format!("Fuel tank {length_m:.1} m x {diameter_m:.2} m"),
+        Avionics { module } => format!("{} module", module.label()),
         LiquidEngine { scale } => format!("Liquid engine x{scale:.1}"),
         AirBreathing { scale } => format!("Turbofan x{scale:.1}"),
         Sensor { kind } => format!("{kind:?}").replace("Radar(", "Radar ").replace(')', ""),
@@ -1418,6 +1419,30 @@ fn build_missile(
                 11.0,
                 ui_kit::TEXT,
             );
+            let avionics = vehicle.avionics();
+            if avionics.devices > 0 {
+                let power = if avionics.power_draw_w > 0.0 {
+                    format!(
+                        "{:.0}/{:.0} W, margin {:.0} W",
+                        avionics.power_draw_w, avionics.power_supply_w, avionics.power_margin_w
+                    )
+                } else {
+                    "bus powered".to_string()
+                };
+                ui_kit::label(
+                    panel,
+                    format!(
+                        "Electronics {} devices | {} | {} cr",
+                        avionics.devices, power, avionics.cost_cr
+                    ),
+                    10.0,
+                    if avionics.power_shortfall() {
+                        ui_kit::BAD
+                    } else {
+                        ui_kit::TEXT_DIM
+                    },
+                );
+            }
             match vehicle.computer() {
                 Some(class) => ui_kit::label(
                     panel,
@@ -1558,6 +1583,57 @@ fn build_missile(
                             9.5,
                             ui_kit::WARN,
                         );
+                    }
+                    if let Some(category) = omega_rules::avionics::category_of(&part.spec) {
+                        ui_kit::label(
+                            panel,
+                            format!("Electronics: {}", category.label()),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
+                    if let omega_rules::PartSpec::Avionics { module } = part.spec {
+                        let spec = module.spec();
+                        let power = if spec.power_w < 0.0 {
+                            format!("supplies {:.0} W", -spec.power_w)
+                        } else {
+                            format!("draws {:.0} W", spec.power_w)
+                        };
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "{} cr | {} | complexity {:.0}%",
+                                spec.cost_cr,
+                                power,
+                                spec.complexity * 100.0
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                        let mut effect = Vec::new();
+                        if spec.authority_bonus > 0.0 {
+                            effect.push(format!("authority +{:.0}%", spec.authority_bonus * 100.0));
+                        }
+                        if spec.lock_bonus > 0.0 {
+                            effect.push(format!("lock +{:.0} pts", spec.lock_bonus * 100.0));
+                        }
+                        if spec.fault_reduction > 0.0 {
+                            effect.push(format!("faults -{:.0}%", spec.fault_reduction * 100.0));
+                        }
+                        if effect.is_empty() {
+                            effect.push(format!("no flight effect, reliability {:+.2}", spec.reliability));
+                        }
+                        ui_kit::label(panel, effect.join(" | "), 9.5, ui_kit::TEXT_DIM);
+                        let mut needs = Vec::new();
+                        if module.needs_standard_computer() {
+                            needs.push("a Standard computer");
+                        }
+                        if module.needs_navigation() {
+                            needs.push("a navigation module");
+                        }
+                        if !needs.is_empty() {
+                            ui_kit::label(panel, format!("Needs {}", needs.join(" and ")), 9.5, ui_kit::WARN);
+                        }
                     }
                     let params = missile::params_of(&part.spec);
                     if params.is_empty() {

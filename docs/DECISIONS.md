@@ -3,6 +3,22 @@
 Short records for the choices made while rebuilding the missile workshop. Each one names the
 simplest option that keeps the game playable and testable; revisit only with a measured reason.
 
+## 2026-11-24 — Mission electronics share one shape; only they draw power
+
+Every electronic device answers the same `AvionicsSpec` questions, including the legacy computers
+and sensors, so the workshop, the validation panel and the trial cannot disagree about cost, power
+or category. The mission bus is drawn by the five new modules only: the computer and the legacy
+sensors stay on the vehicle bus. Otherwise every existing save would need a power cell to validate,
+which is a rule the player never chose.
+
+## 2026-11-24 — Effects are capped, and duplicates are refused
+
+Authority, lock and fault bonuses are summed and clamped (+20 %, +15 points, −65 %), so stacking
+modules is a trade, not a free win. A module may be fitted once (the power cell is the exception,
+because capacity is its whole purpose), which keeps the rule explainable and the part list short.
+Effects are applied in `flight::simulate` once per run and quoted on the report; no new guidance or
+sensor model is introduced.
+
 ## 2026-11-23 — The vehicle is an attachment tree, stages are derived
 
 `Vehicle` stores a list of placed parts, each with an optional attachment (`parent`, node, angle)

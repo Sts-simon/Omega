@@ -14,8 +14,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Current `designs/vehicle.json` schema. 1-2 were the flat stage lists of the early workshops;
-/// 3 added the attachment graph, 4 the aerodynamic surfaces (schema-3 files load unchanged).
-pub const VEHICLE_SCHEMA: u32 = 4;
+/// 3 added the attachment graph, 4 the aerodynamic surfaces and 5 the mission electronics
+/// (older files load unchanged and are rewritten at the current version).
+pub const VEHICLE_SCHEMA: u32 = 5;
 /// A design may not grow beyond this many derived stages (the old workshop limit).
 pub const MAX_STAGES: usize = 4;
 
@@ -209,6 +210,7 @@ pub fn dimensions(spec: &PartSpec) -> (f64, f64) {
         PartSpec::Wing { span_m, chord_m, .. }
         | PartSpec::FinSet { span_m, chord_m, .. }
         | PartSpec::ControlSurface { span_m, chord_m, .. } => (chord_m, span_m / 2.0),
+        PartSpec::Avionics { module } => crate::avionics::dimensions(module),
     }
 }
 
@@ -732,6 +734,12 @@ impl Vehicle {
                 ));
             }
         }
+        // Electronics dependencies, duplicates and the mission power budget live in one place.
+        issues.extend(
+            crate::avionics::issues(self)
+                .into_iter()
+                .filter(|issue| issue.severity == IssueSeverity::Error),
+        );
         issues
     }
 
@@ -777,6 +785,11 @@ impl Vehicle {
                 .into_iter()
                 .map(|warning| VehicleIssue::warning(warning.message, warning.part)),
         );
+        warnings.extend(
+            crate::avionics::issues(self)
+                .into_iter()
+                .filter(|issue| issue.severity == IssueSeverity::Warning),
+        );
         warnings
     }
 
@@ -791,6 +804,12 @@ impl Vehicle {
     /// Abstract aerodynamic figures for the whole vehicle; one pass, computed once per edit.
     pub fn aero(&self) -> crate::aero::AeroFigures {
         crate::aero::figures(self)
+    }
+
+    /// Abstract electronics figures for the whole vehicle: the same single pass the workshop and
+    /// a trial read, so the panel and the flight can never disagree about the power budget.
+    pub fn avionics(&self) -> crate::avionics::AvionicsFigures {
+        crate::avionics::figures(self)
     }
 
     pub fn computer(&self) -> Option<ComputerClass> {
@@ -1333,7 +1352,7 @@ pub(crate) mod tests {
     fn saved_designs_round_trip_and_legacy_files_migrate() {
         let vehicle = sounding_rocket();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":4"), "{json}");
+        assert!(json.contains("\"schema_version\":5"), "{json}");
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
 
@@ -1396,7 +1415,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn schema_three_still_loads_and_is_rewritten_as_four() {
+    fn schema_three_still_loads_and_is_rewritten_as_five() {
         let old = r#"{
             "schema_version": 3,
             "name": "Schema three",
@@ -1410,11 +1429,56 @@ pub(crate) mod tests {
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
         assert_eq!(vehicle.aero().surface_count, 0);
         let written = serde_json::to_string(&vehicle).unwrap();
-        assert!(written.contains("\"schema_version\":4"), "{written}");
+        assert!(written.contains("\"schema_version\":5"), "{written}");
 
-        let future = r#"{"schema_version": 5, "name": "Future", "parts": []}"#;
+        let future = r#"{"schema_version": 6, "name": "Future", "parts": []}"#;
         let refused = serde_json::from_str::<Vehicle>(future).unwrap_err();
         assert!(refused.to_string().contains("newer"), "{refused}");
+    }
+
+    #[test]
+    fn schema_four_designs_still_load_and_are_rewritten_as_five() {
+        let old = r#"{
+            "schema_version": 4,
+            "name": "Schema four",
+            "parts": [
+                {"id": "m", "spec": {"part": "solid_motor", "length_m": 2.0, "diameter_m": 0.4, "burn_time_s": 20.0}},
+                {"id": "pc", "spec": {"part": "computer", "class": "basic"}, "attach": {"parent": "m", "node": "top"}}
+            ]
+        }"#;
+        let vehicle: Vehicle = serde_json::from_str(old).unwrap();
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
+        assert_eq!(vehicle.avionics().mission_modules, 0);
+        let written = serde_json::to_string(&vehicle).unwrap();
+        assert!(written.contains("\"schema_version\":5"), "{written}");
+    }
+
+    #[test]
+    fn mission_electronics_validate_power_and_round_trip() {
+        let mut vehicle = sounding_rocket();
+        let nav = PartSpec::Avionics {
+            module: crate::avionics::AvionicsModule::InertialNav,
+        };
+        vehicle.add_attached("nav", nav, "module", NodeId::Top).unwrap();
+        let errors = vehicle.validate().unwrap_err().join(" | ");
+        assert!(errors.contains("no power source"), "{errors}");
+
+        vehicle
+            .add_attached(
+                "power",
+                PartSpec::Avionics {
+                    module: crate::avionics::AvionicsModule::PowerCell,
+                },
+                "nav",
+                NodeId::Top,
+            )
+            .unwrap();
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
+        let json = serde_json::to_string(&vehicle).unwrap();
+        assert!(json.contains("inertial_nav"), "{json}");
+        let read: Vehicle = serde_json::from_str(&json).unwrap();
+        assert_eq!(read, vehicle);
+        assert_eq!(read.avionics().mission_modules, 2);
     }
 
     #[test]
@@ -1438,7 +1502,7 @@ pub(crate) mod tests {
             )
             .unwrap();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":4"), "{json}");
+        assert!(json.contains("\"schema_version\":5"), "{json}");
         assert!(!json.contains("variable_geometry"));
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
