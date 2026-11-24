@@ -40,6 +40,7 @@ fn main() {
         .init_resource::<campus::WorkshopScroll>()
         .init_resource::<workshop::DragState>()
         .init_resource::<workshop::WorkshopInput>()
+        .init_resource::<workshop::TransformGizmo>()
         .add_systems(
             Startup,
             (
