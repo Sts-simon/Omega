@@ -604,10 +604,18 @@ pub fn figures(vehicle: &Vehicle) -> AeroFigures {
     }
 }
 
+/// One design note, with the part it is about when the player can act on that part directly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AeroWarning {
+    pub message: String,
+    pub part: Option<String>,
+}
+
 /// Non-blocking design notes for the aerodynamics. Refusals live in `Vehicle::validate`.
-pub fn warnings(vehicle: &Vehicle) -> Vec<String> {
+pub fn warning_details(vehicle: &Vehicle) -> Vec<AeroWarning> {
     let figures = figures(vehicle);
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<AeroWarning> = Vec::new();
+    let mut note = |message: String, part: Option<String>| warnings.push(AeroWarning { message, part });
     let body_diameter = vehicle.max_diameter_m().max(0.1);
     for part in &vehicle.parts {
         let (PartSpec::Wing { span_m, .. } | PartSpec::FinSet { span_m, .. } | PartSpec::ControlSurface { span_m, .. }) =
@@ -616,36 +624,119 @@ pub fn warnings(vehicle: &Vehicle) -> Vec<String> {
             continue;
         };
         if span_m > 2.0 * body_diameter {
-            warnings.push(format!(
-                "{} spans {span_m:.2} m on a {body_diameter:.2} m body: ground clearance and launcher fit",
-                part.id
-            ));
+            note(
+                format!(
+                    "{} spans {span_m:.2} m on a {body_diameter:.2} m body: ground clearance and launcher fit",
+                    part.id
+                ),
+                Some(part.id.clone()),
+            );
         }
     }
     if figures.mass_kg > 0.0 {
         let total = vehicle.total_wet_mass_kg().max(1e-9);
         let share = figures.mass_kg / total;
         if share > 0.20 {
-            warnings.push(format!(
-                "aerodynamic surfaces add {:.0} kg, {:.0}% of launch mass",
-                figures.mass_kg,
-                share * 100.0
-            ));
+            note(
+                format!(
+                    "aerodynamic surfaces add {:.0} kg, {:.0}% of launch mass",
+                    figures.mass_kg,
+                    share * 100.0
+                ),
+                None,
+            );
         }
     }
     if figures.control_area_m2 > 0.0 && figures.wing_area_m2 == 0.0 && figures.fin_area_m2 == 0.0 {
-        warnings.push("control surfaces have no fixed wing or fin to act with: add a lifting surface".to_string());
+        note(
+            "control surfaces have no fixed wing or fin to act with: add a lifting surface".to_string(),
+            None,
+        );
     }
     if figures.asymmetric {
-        warnings.push("asymmetric fin set: experimental, stability reduced".to_string());
+        let fin = vehicle
+            .parts
+            .iter()
+            .find(|part| {
+                matches!(
+                    part.spec,
+                    PartSpec::FinSet {
+                        layout: FinLayout::Asymmetric,
+                        ..
+                    }
+                )
+            })
+            .map(|part| part.id.clone());
+        note("asymmetric fin set: experimental, stability reduced".to_string(), fin);
     }
     if figures.surface_count > 0 && figures.margin_m < 0.0 {
-        warnings.push(format!(
-            "centre of aerodynamics is {:.2} m ahead of the centre of gravity: unstable",
-            -figures.margin_m
-        ));
+        let wing = vehicle
+            .parts
+            .iter()
+            .filter(|part| matches!(part.spec, PartSpec::Wing { .. }))
+            .max_by(|a, b| {
+                surface_area(&a.spec)
+                    .unwrap_or(0.0)
+                    .total_cmp(&surface_area(&b.spec).unwrap_or(0.0))
+            })
+            .map(|part| part.id.clone());
+        note(
+            format!(
+                "centre of aerodynamics is {:.2} m ahead of the centre of gravity: unstable",
+                -figures.margin_m
+            ),
+            wing,
+        );
     }
     warnings
+}
+
+/// The same notes as plain text, for callers that only print them.
+pub fn warnings(vehicle: &Vehicle) -> Vec<String> {
+    warning_details(vehicle)
+        .into_iter()
+        .map(|warning| warning.message)
+        .collect()
+}
+
+/// What one placed surface contributes to the sheet, in area-weighted m². The panel shows the
+/// selected surface so a design note such as "fins stabilise" can be traced to a real part.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceContribution {
+    pub id: String,
+    pub family: &'static str,
+    pub area_m2: f64,
+    pub lift: f64,
+    pub drag: f64,
+    pub stability: f64,
+    pub authority: f64,
+    pub mass_kg: f64,
+}
+
+pub fn breakdown(vehicle: &Vehicle) -> Vec<SurfaceContribution> {
+    vehicle
+        .parts
+        .iter()
+        .filter_map(|part| {
+            let effect = surface_effect(&part.spec)?;
+            let area = surface_area(&part.spec)? * effect.area;
+            let (family, drag) = match part.spec {
+                PartSpec::Wing { sweep_deg, .. } => ("WING", area * effect.drag * sweep_drag_factor(sweep_deg)),
+                PartSpec::FinSet { .. } => ("FIN", area * effect.drag),
+                _ => ("CONTROL", area * effect.drag),
+            };
+            Some(SurfaceContribution {
+                id: part.id.clone(),
+                family,
+                area_m2: area,
+                lift: area * effect.lift,
+                drag,
+                stability: area * effect.stability,
+                authority: area * effect.authority,
+                mass_kg: surface_mass_kg(&part.spec).unwrap_or(0.0),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -831,6 +922,35 @@ mod tests {
             "{:?}",
             warnings(&vehicle)
         );
+    }
+
+    #[test]
+    fn each_surface_contribution_can_be_traced_to_its_part() {
+        let mut vehicle = sounding_rocket();
+        mount(&mut vehicle, "wing-1", wing(1.2, 0.4), "sustainer", NodeId::Radial(0));
+        mount(
+            &mut vehicle,
+            "ctrl-1",
+            control(0.4, 0.4, ControlKind::Fixed),
+            "booster",
+            NodeId::Radial(1),
+        );
+        let rows = breakdown(&vehicle);
+        assert_eq!(rows.len(), 2);
+        let wing = rows.iter().find(|row| row.id == "wing-1").unwrap();
+        assert_eq!(wing.family, "WING");
+        assert!(wing.lift > wing.drag, "a swept wing lifts more than it drags");
+        assert!(wing.stability > 0.0 && wing.mass_kg > 0.0);
+        let fixed = rows.iter().find(|row| row.id == "ctrl-1").unwrap();
+        assert_eq!(fixed.authority, 0.0, "a fixed surface has no authority");
+        assert!(fixed.stability > 0.0);
+
+        let details = warning_details(&vehicle);
+        let span = details
+            .iter()
+            .find(|warning| warning.message.contains("spans"))
+            .expect("a 1.2 m wing on a small body is a span warning");
+        assert_eq!(span.part.as_deref(), Some("wing-1"));
     }
 
     #[test]
