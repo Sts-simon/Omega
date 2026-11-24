@@ -1986,13 +1986,13 @@ mod tests {
     }
 
     #[test]
-    fn legacy_files_load_and_save_as_schema_five() {
+    fn legacy_files_load_and_save_as_schema_six() {
         let legacy = br#"{"name":"Old","stages":[{"parts":[{"id":"m","spec":{"part":"solid_motor","length_m":2.0,"diameter_m":0.4,"burn_time_s":20.0}},{"id":"pc","spec":{"part":"computer","class":"basic"}}]}]}"#;
         let session = MissileSession::from_bytes(legacy).unwrap();
         assert_eq!(session.vehicle.stage_count(), 1);
         assert_eq!(session.vehicle.aero().surface_count, 0);
         let saved = String::from_utf8(session.to_bytes().unwrap()).unwrap();
-        assert!(saved.contains("\"schema_version\": 5"), "{saved}");
+        assert!(saved.contains("\"schema_version\": 6"), "{saved}");
         let again = MissileSession::from_bytes(saved.as_bytes()).unwrap();
         assert_eq!(again.vehicle, session.vehicle);
     }
