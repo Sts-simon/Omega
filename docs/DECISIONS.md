@@ -49,3 +49,23 @@ lands, unless a measurement says otherwise.
 - **Undo stack** bounded at 50 vehicle snapshots, in memory only, cleared when the preset changes.
 - **Symmetry** cycles 1 → 2 → 3 → 4 with `X`, copies share a `symmetry` group id and are placed on
   consecutive radial slots.
+
+## 2026-11-23 — Pointer interaction (delivered)
+
+The interaction lot kept the values below; each is now covered by code and by a game check.
+
+- **Picking** is a camera ray against each part's cylinder (`src/picking.rs`), not Bevy's mesh
+  picking: identical results for these primitives, no extra plugin, and 5 pure unit tests.
+- **Click versus drag** uses a 5 px threshold. A press selects immediately (so the inspector follows
+  the pointer) but the part only starts moving past 5 px; without it, releasing a plain click over a
+  free node moved the part under the cursor.
+- **Drop outside a node cancels** and never deletes. Dropping a palette entry back over the palette
+  is a plain click and adds above the selection, so the old click-to-add path still works.
+- **Symmetry copies** share `sym-<undo-depth>` as their group id and occupy consecutive radial slots
+  starting at the dropped slot; if any slot is taken the whole drop is refused before any mutation,
+  so no orphan copies remain.
+- **Undo** is a stack of `Vehicle` clones bounded at 50, memory only; a preset change clears both
+  stacks. Every mutation (add, move, delete, adjust, computer swap) pushes one snapshot.
+- **Keyboard shortcuts use logical keys** for `Ctrl+Z` / `Ctrl+Y`. On the French AZERTY layout in use
+  on the test machine, `Ctrl+Z` arrives as the physical `KeyW`; a `KeyCode::KeyZ` binding silently
+  never fired (found in game).

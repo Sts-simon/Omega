@@ -111,9 +111,12 @@ and a real build interaction become possible.
 - Done: `omega-rules::assembly` (nodes, attachments, symmetry slots, derived stages, validation,
   diameter warnings, save schema 3 with migration), 3D layout from the tree, workshop UI showing
   derived stages, part selection by id and palette additions above the selected part.
-- Remaining for this lot: drag-and-drop from the palette and between nodes, node picking in 3D,
-  symmetry placement linked by group, undo/redo, direct parameter dragging, live flight forecast and
-  the active-contract requirement bar.
+- Delivered: 3D picking (`src/picking.rs`: cylinder raycast, nearest part, 28 px node snapping), a
+  drag ghost and node markers (`src/workshop.rs`), palette-to-node drops, subtree moves with a 5 px
+  drag threshold so a click only selects, `Delete`, linked radial symmetry (`X`, 1 → 2 → 3 → 4),
+  undo/redo (50 snapshots, buttons and layout-independent `Ctrl+Z` / `Ctrl+Y`) and the wheel
+  adjusting the selected part's main value without zooming the camera.
+- Remaining for this lot: live flight forecast and the active-contract requirement bar.
 
 **Acceptance:** a new player builds a two-stage rocket with two radial boosters with the mouse only;
 old presets keep identical stage figures; every refusal has a message and a test.

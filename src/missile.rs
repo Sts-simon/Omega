@@ -9,8 +9,8 @@ use bevy::prelude::*;
 use omega_rules::{ComputerClass, Part, PartSpec, RadarClass, SensorKind, Stage, Vehicle};
 use std::collections::BTreeSet;
 
-const ANCHOR: Vec3 = Vec3::new(0.0, 0.2, 18.0);
-const VISUAL_SCALE: f32 = 1.6;
+pub(crate) const ANCHOR: Vec3 = Vec3::new(0.0, 0.2, 18.0);
+pub(crate) const VISUAL_SCALE: f32 = 1.6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PartTemplate {
@@ -229,19 +229,43 @@ pub(crate) fn adjusted(spec: PartSpec, param: Param, direction: f64) -> Option<P
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MissileAction {
+    /// Kept for tests and saved key bindings; the palette itself drags (see `workshop`).
+    #[allow(dead_code)]
     AddPart(PartTemplate),
-    Select { id: String },
+    Select {
+        id: String,
+    },
     Adjust(Param, i8),
     RemovePart,
     Preset(u8),
     Clear,
+    CycleSymmetry,
+    Undo,
+    Redo,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub(crate) struct MissileSession {
     pub vehicle: Vehicle,
     pub selected: Option<String>,
+    /// Radial copies placed by the next drop: 1 (off), 2, 3 or 4.
+    pub symmetry: u8,
     next_id: u32,
+    undo: Vec<Vehicle>,
+    redo: Vec<Vehicle>,
+}
+
+impl Default for MissileSession {
+    fn default() -> Self {
+        Self {
+            vehicle: Vehicle::default(),
+            selected: None,
+            symmetry: 1,
+            next_id: 0,
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
+    }
 }
 
 fn part(id: &str, spec: PartSpec) -> Part {
@@ -374,6 +398,7 @@ impl MissileSession {
                 };
                 match adjusted(part.spec, param, f64::from(direction)) {
                     Some(spec) => {
+                        self.push_undo();
                         self.vehicle.replace_part(&id, spec);
                         String::new()
                     }
@@ -387,6 +412,7 @@ impl MissileSession {
                 if self.vehicle.part(&id).is_none() {
                     return String::new();
                 }
+                self.push_undo();
                 let removed = self.vehicle.remove_subtree(&id);
                 self.selected = self.vehicle.topmost_id();
                 let label = if removed.len() == 1 {
@@ -407,18 +433,194 @@ impl MissileSession {
                 if !missing.is_empty() {
                     return format!("Preset locked: research {} first", missing.join(", "));
                 }
+                // A preset starts a new history; the old design is not one undo away.
                 *self = candidate;
                 format!("Loaded preset: {}", self.vehicle.name)
             }
             MissileAction::Clear => {
+                self.push_undo();
                 self.vehicle = Vehicle {
                     name: "New vehicle".into(),
                     parts: Vec::new(),
                 };
                 self.selected = None;
-                self.next_id = 0;
-                "Started an empty vehicle: drag or click a part from the palette".to_string()
+                "Started an empty vehicle: drag a part from the palette".to_string()
             }
+            MissileAction::CycleSymmetry => self.cycle_symmetry(),
+            MissileAction::Undo => self.undo(),
+            MissileAction::Redo => self.redo(),
+        }
+    }
+
+    fn push_undo(&mut self) {
+        self.undo.push(self.vehicle.clone());
+        if self.undo.len() > 50 {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Undo the last workshop edit. The stack holds at most 50 vehicle snapshots.
+    pub fn undo(&mut self) -> String {
+        let Some(previous) = self.undo.pop() else {
+            return "Nothing to undo".to_string();
+        };
+        let current = std::mem::replace(&mut self.vehicle, previous);
+        self.redo.push(current);
+        self.selected = self.vehicle.topmost_id();
+        "Undid the last workshop edit".to_string()
+    }
+
+    pub fn redo(&mut self) -> String {
+        let Some(next) = self.redo.pop() else {
+            return "Nothing to redo".to_string();
+        };
+        let current = std::mem::replace(&mut self.vehicle, next);
+        self.undo.push(current);
+        self.selected = self.vehicle.topmost_id();
+        "Redid the workshop edit".to_string()
+    }
+
+    pub fn cycle_symmetry(&mut self) -> String {
+        self.symmetry = match self.symmetry {
+            1 => 2,
+            2 => 3,
+            3 => 4,
+            _ => 1,
+        };
+        format!("Symmetry x{}", self.symmetry)
+    }
+
+    /// Remove the selected part (and its subtree). Returns the message to show.
+    pub fn delete_selected(&mut self) -> String {
+        match self.selected.clone() {
+            Some(id) if self.vehicle.part(&id).is_some() => {
+                self.push_undo();
+                let removed = self.vehicle.remove_subtree(&id);
+                self.selected = self.vehicle.topmost_id();
+                if removed.len() > 1 {
+                    format!("Removed {id} and {} attached part(s)", removed.len() - 1)
+                } else {
+                    format!("Removed {id}")
+                }
+            }
+            _ => "Select a part to delete".to_string(),
+        }
+    }
+
+    /// Add a template on a node (or above the stack when `target` is `None`). A radial drop with
+    /// symmetry creates linked copies on consecutive free radial slots.
+    pub fn add_at(
+        &mut self,
+        template: PartTemplate,
+        target: Option<(String, omega_rules::NodeId, f64)>,
+        owned: &BTreeSet<String>,
+    ) -> String {
+        let spec = template.spec();
+        if !owned.contains(spec.required_capability()) {
+            return format!("Locked: research {} first", spec.required_capability());
+        }
+        if template.is_computer()
+            && let Some(existing) = self
+                .vehicle
+                .parts
+                .iter()
+                .find(|p| matches!(p.spec, PartSpec::Computer { .. }))
+                .map(|p| p.id.clone())
+        {
+            self.push_undo();
+            self.vehicle.replace_part(&existing, spec);
+            self.selected = Some(existing.clone());
+            return format!("Flight computer {existing} set to {}", template.label());
+        }
+        // Without an explicit node, mount above the stack (or become the root of an empty design).
+        let target = match target {
+            None if !self.vehicle.is_empty() => self.vehicle.topmost_id().map(|id| (id, omega_rules::NodeId::Top, 0.0)),
+            other => other,
+        };
+        let mut placements: Vec<(omega_rules::NodeId, f64)> = Vec::new();
+        if let Some((parent, node, angle)) = &target {
+            if self.vehicle.part(parent).is_none() {
+                return "That part is no longer there".to_string();
+            }
+            if node.is_radial() && self.symmetry > 1 {
+                let first = match node {
+                    omega_rules::NodeId::Radial(index) => *index,
+                    _ => 0,
+                };
+                placements = Vehicle::symmetry_slots(parent, &spec, first, self.symmetry);
+            } else {
+                placements.push((*node, *angle));
+            }
+        }
+        if let Some((parent, _, _)) = &target {
+            for (node, _) in &placements {
+                if let Err(error) = self.vehicle.node_status(parent, *node, &spec) {
+                    return format!("Cannot attach there: {error}");
+                }
+            }
+        }
+        self.push_undo();
+        let group = format!("sym-{}", self.undo.len());
+        let mut created = Vec::new();
+        let placements: Vec<Option<(omega_rules::NodeId, f64)>> = if placements.is_empty() {
+            vec![None]
+        } else {
+            placements.into_iter().map(Some).collect()
+        };
+        for placement in placements {
+            let id = self.fresh_id(template.prefix());
+            self.vehicle.parts.push(omega_rules::PlacedPart {
+                id: id.clone(),
+                spec,
+                attach: None,
+                symmetry: (self.symmetry > 1).then(|| group.clone()),
+            });
+            if let (Some((parent, _, _)), Some((node, angle))) = (&target, placement)
+                && let Err(error) = self.vehicle.attach(&id, parent, node, angle)
+            {
+                for created_id in created.iter().chain(std::iter::once(&id)) {
+                    self.vehicle.remove_subtree(created_id);
+                }
+                self.undo.pop();
+                return format!("Cannot attach there: {error}");
+            }
+            created.push(id);
+        }
+        self.selected = created.last().cloned();
+        let stage = self
+            .vehicle
+            .stage_of(created.last().map(String::as_str).unwrap_or(""))
+            .unwrap_or(0);
+        let count = if created.len() > 1 {
+            format!("{} copies", created.len())
+        } else {
+            created.last().cloned().unwrap_or_default()
+        };
+        if target.is_none() {
+            format!("Added {count} as the root part")
+        } else {
+            format!("Added {count} to stage {}", stage + 1)
+        }
+    }
+
+    /// Move an existing part (with its subtree) to another node.
+    pub fn move_part(&mut self, id: &str, parent: &str, node: omega_rules::NodeId, angle: f64) -> String {
+        let Some(part) = self.vehicle.part(id) else {
+            return "That part is no longer there".to_string();
+        };
+        if part.attach.is_none() {
+            return "The root part stays at the bottom".to_string();
+        }
+        let before = self.vehicle.clone();
+        match self.vehicle.attach(id, parent, node, angle) {
+            Ok(()) => {
+                self.undo.push(before);
+                self.redo.clear();
+                self.selected = Some(id.to_string());
+                format!("Moved {id} to {} {}", parent, node.label())
+            }
+            Err(error) => format!("Cannot move {id}: {error}"),
         }
     }
 
@@ -938,6 +1140,77 @@ mod tests {
         let boxes = layout(&session.vehicle);
         let radial = boxes.iter().find(|b| b.id == booster).unwrap();
         assert!(radial.x.abs() > 0.1, "a radial part sits off the centre line");
+    }
+
+    #[test]
+    fn radial_symmetry_creates_linked_copies() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.symmetry = 3;
+        let message = session.add_at(
+            PartTemplate::SolidMotor,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        assert!(message.contains("3 copies"), "{message}");
+        let boosters: Vec<_> = session
+            .vehicle
+            .parts
+            .iter()
+            .filter(|p| p.symmetry.as_deref() == Some("sym-1"))
+            .collect();
+        assert_eq!(boosters.len(), 3);
+        let slots: BTreeSet<_> = boosters
+            .iter()
+            .filter_map(|p| p.attach.as_ref().map(|a| a.node))
+            .collect();
+        assert_eq!(slots.len(), 3);
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        session.undo();
+        assert!(session.vehicle.parts.iter().all(|p| p.symmetry.is_none()));
+    }
+
+    #[test]
+    fn a_subtree_can_be_moved_and_bad_moves_are_refused() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        let message = session.move_part("module-6", "motor-3", omega_rules::NodeId::Radial(0), 0.0);
+        assert!(message.starts_with("Moved"), "{message}");
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        let refused = session.move_part("motor-1", "module-6", omega_rules::NodeId::Top, 0.0);
+        assert!(refused.contains("root"), "moving the root is refused: {refused}");
+        let cycle = session.move_part("motor-3", "module-6", omega_rules::NodeId::Top, 0.0);
+        assert!(cycle.contains("root") || cycle.contains("cycle"), "{cycle}");
+        assert!(session.vehicle.part("module-6").unwrap().attach.is_some());
+        let _ = owned;
+    }
+
+    #[test]
+    fn clearing_then_undoing_keeps_ids_unique() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.apply(MissileAction::Clear, &owned);
+        session.undo();
+        session.add_at(PartTemplate::SolidMotor, None, &owned);
+        session.add_at(PartTemplate::FuelTank, None, &owned);
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        let ids: BTreeSet<_> = session.vehicle.parts.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids.len(), session.vehicle.parts.len());
+    }
+
+    #[test]
+    fn undo_and_redo_walk_the_edit_history() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        let before = session.vehicle.parts.len();
+        session.add_at(PartTemplate::FuelTank, None, &owned);
+        assert_eq!(session.vehicle.parts.len(), before + 1);
+        assert!(session.undo().contains("Undid"));
+        assert_eq!(session.vehicle.parts.len(), before);
+        assert!(session.redo().contains("Redid"));
+        assert_eq!(session.vehicle.parts.len(), before + 1);
+        session.delete_selected();
+        assert!(session.undo().contains("Undid"), "deletion is undoable too");
     }
 
     #[test]

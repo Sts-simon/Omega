@@ -58,9 +58,14 @@ workspace folder are ignored.
   `bottom`, or one of four radial mounts on motors, tanks and modules); the stages are derived from
   that tree, so a decoupler starts a new stage instead of a separate stage editor. The tree is saved
   as `designs/vehicle.json` schema 3; older stage-list files are migrated when read.
-- The palette adds above the selected part when its top node is free, otherwise above the highest
-  part. A second flight computer replaces the first in place, so the single computer stays in the
-  last stage. A diameter step between a part and its mount is reported as a warning, not refused.
+- **Parts are placed with the mouse.** Drag a palette entry onto any free node shown in the 3D view;
+  a plain click still adds above the selected part (or the highest one). Drag an existing part onto
+  another node to move its whole subtree, `Delete` removes the selection, `X` cycles radial symmetry
+  (1 → 2 → 3 → 4, copies share a group id) and `Ctrl+Z` / `Ctrl+Y` undo and redo up to 50 edits.
+- The wheel adjusts the selected part's main value when the pointer is over it, and zooms the camera
+  everywhere else. A second flight computer replaces the first in place, so the single computer
+  stays in the last stage. A diameter step between a part and its mount is reported as a warning,
+  not refused.
 - Presets: two-stage rocket, cruise vehicle, or an empty vehicle. Presets whose parts are not yet
   researched are refused with the missing technologies.
 - Selected part resizing with `-` / `+`: length and diameter (motors, tanks), burn time (solid
@@ -208,9 +213,11 @@ card opens it.
 
 ### Missile workshop
 
-Editing is mouse-only: presets, part palette (locked parts greyed), stage buttons and `+ STAGE` /
-`- STAGE`, the part list per stage, `-` / `+` on the selected part's adjustable values,
-`REMOVE PART` and `RECORD REVISION`. Stage figures and validation update immediately.
+Editing is mouse-first: presets, part palette (locked parts greyed), drag a part from the palette to
+a glowing node in the 3D view or drag an existing part to move its subtree, `Delete`, `X` for
+symmetry, `Ctrl+Z` / `Ctrl+Y`, the derived part list with click-to-select, `-` / `+` on the selected
+part's adjustable values (or the wheel over the part), `UNDO` / `REDO`, `REMOVE PART` and
+`RECORD REVISION`. Stage figures and validation update immediately.
 
 ### Research Centre
 
@@ -263,6 +270,8 @@ src/
   procurement.rs       offers, active contracts, trial evidence, dossier, delivery, persistence
   revisions.rs         missile design revision log
   missile.rs           missile workshop session, parts, attachment tree view, 3D layout
+  picking.rs           camera-ray picking and screen-space node snapping (pure, tested)
+  workshop.rs          pointer system: palette drag, subtree move, delete, symmetry, undo, wheel
   program_editor.rs    missile program session, validation, persistence
   trials.rs            seeded trial session, batches, comparison
   interface.rs         navigation bar, UiAction dispatch

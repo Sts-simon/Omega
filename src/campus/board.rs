@@ -1012,26 +1012,42 @@ fn build_missile(
                     .with_children(|r| {
                         for template in row {
                             let unlocked = owned.contains(template.spec().required_capability());
-                            let tone = if unlocked {
-                                ButtonTone::Secondary
-                            } else {
-                                ButtonTone::Disabled
-                            };
-                            ui_kit::button_row_item(
-                                r,
-                                template.label(),
-                                UiAction::Missile(MissileAction::AddPart(*template)),
-                                tone,
-                            );
+                            crate::workshop::spawn_palette_button(r, *template, unlocked);
                         }
                     });
             }
             ui_kit::label(
                 panel,
-                "Greyed parts need research. New parts attach above the selected one; a decoupler starts a stage.",
+                "Drag a part onto a glowing node in the 3D view. Click adds above the selection. X cycles symmetry, Delete removes, Ctrl+Z undoes.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    ui_kit::button_row_item(
+                        row,
+                        format!("SYMMETRY x{}", session.symmetry),
+                        UiAction::Missile(MissileAction::CycleSymmetry),
+                        ButtonTone::Secondary,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "UNDO",
+                        UiAction::Missile(MissileAction::Undo),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "REDO",
+                        UiAction::Missile(MissileAction::Redo),
+                        ButtonTone::Ghost,
+                    );
+                });
             heading(panel, "REVISIONS");
             ui_kit::label(panel, log.missile_hud_text(vehicle), 9.0, ui_kit::TEXT_DIM);
             ui_kit::button(
@@ -2183,9 +2199,10 @@ fn signature(
         ),
         BoardKind::Research => format!("{:?}|{}|{}", campus.research, campus.credits, campus.day),
         BoardKind::Missile => format!(
-            "{:?}|{:?}|{}|{:?}|{:?}",
+            "{:?}|{:?}|{}|{}|{:?}|{:?}",
             missile.vehicle,
             missile.selected,
+            missile.symmetry,
             campus.credits,
             campus.research,
             log.head().map(|revision| revision.hash.clone())
