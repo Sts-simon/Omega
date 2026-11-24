@@ -80,22 +80,50 @@ The interaction lot kept the values below; each is now covered by code and by a 
   the workshop system and read by `campus::handle_input`, which runs first: while a drag (or a press
   about to become one) is active, Escape only clears it. A second Escape behaves as before.
 - **Picking shapes** stay in `picking.rs`. Bodies are ray-cast against their cylinder; wings, fins and
-  control surfaces will add a box path in the aerodynamics lot, with the same nearest-hit rule.
+  control surfaces use an oriented box, with the same nearest-hit rule.
 
-## Open values for the aerodynamics lot
+## 2026-11-24 — Aerodynamics: surfaces, figures and balance (delivered)
 
-These are proposals, not decisions: settle them at the end of phase 1 and record the measured
-figures in this file.
-
-- Surface areal density (kg/m²) for wing, fin set and control surface, and whether mass scales with
-  both span and chord or only area.
-- Body drag coefficient, surface form factor and the sweep penalty: one value per Mach band or a
-  single smooth factor.
-- Lift model: the reduction of the air-breathing minimum speed and the pitch-over gravity loss as a
-  function of `wing_area / reference_area`, with floors so a huge wing cannot make a design free.
-- Stability and control effects: the dispersion reduction curve and the controller error improvement;
-  whether a flight without fins can still be launched vertically.
-- Whether mission families impose hard stability/control requirements or only make the offer
-  unreachable in practice.
-- Tech costs and prerequisites for the three new capabilities; whether wings also need the cruise
-  family or only the aerodynamics node.
+- **Three leaf parts on radial mounts.** `Wing`, `FinSet` and `ControlSurface` are `PartSpec`
+  variants; they mount on a body's radial slots, cannot carry children and are excluded from the
+  body-diameter reference area. Placing them through the tree, symmetry, undo and picking needed no
+  second model.
+- **One effect table per choice family.** Planform, profile, stabiliser role, fin layout and control
+  family each map to a single `Effect { area, lift, drag, stability, authority, complexity,
+  reliability, mass }` in `omega-rules::aero`; the aggregation only multiplies and sums those. No
+  coefficient is repeated in the app or in the flight model.
+- **Scores are normalised against 0.30 m².** Fin effectiveness and moving-control area divide by
+  that reference, clamped to 0..1; lift divides by 0.90 m² so one default wing reads about 50 and a
+  pair reaches the top of the scale; the drag indicator divides surface drag area by 0.60 m². This
+  keeps a small four-fin set useful without letting one huge wing break the scale.
+- **Mass is span × chord.** Areal densities: wing 3.2, fin 4.8, control 5.6 kg/m²; a planform mass
+  factor applies on top. The light build multiplies by 0.70 and adds complexity and reliability
+  cost. Aerodynamic mass is ordinary dry mass, so stage reports, TWR and delta-v already include it.
+- **CG and CA are fictional but consistent.** CG is the mass-weighted mean part position; CA is the
+  area-weighted mean of the surfaces only (wing 1.0, fin 0.55, control 0.25). The margin is `CG−CA`,
+  i.e. positive when the CA is behind the CG. The acceptable band is 2 %–10 % of vehicle length;
+  outside it is a warning, and ahead of the CG is reported as unstable. No real static-margin or
+  centre-of-pressure formula is used.
+- **Flight effects.** Surface drag area is added to the body term (`DRAG_COEFFICIENT` still folded in,
+  so a surface-less design is unchanged); lift lowers the air-breathing minimum from 90 m/s by up to
+  45 % (floor 55 %) and the pre-pitch-over gravity by up to 35 %; stability damps the seeded drag
+  spread by up to 60 %; stability and authority raise the altitude-hold rate by up to 50 %. The
+  figures are computed once per run, in `AeroSummary` on the report, so seeds stay deterministic.
+- **Compatibility is a rule, not a guess.** Integrated surfaces need a standard computer, combined
+  surfaces an advanced one; fixed and classic surfaces work with the basic computer. Unlocked
+  advanced profiles/variable geometry/asymmetric fins need `aero:advanced_profiles`, and the light
+  build needs `aero:light_structures`.
+- **Contracts stay soft.** Only surface-to-air offers add `STABILITY ≥ 20`, with weight 0.5 and
+  `hard: false`; a marginal airframe is a compromise, not an impossible contract. Evidence carries
+  the stability of the trial's design, so an edit invalidates it through the normal hash check.
+- **Save schema 4.** New `PartSpec` variants; schema 3 and earlier load with no surfaces and rewrite
+  as 4 on the next edit. A newer schema is still refused.
+- **Boards sized for a real airframe.** A design with wings, fins and control surfaces adds up to
+  eighteen rows, so the workshop stage list is capped (56 % of the column) and scrollable and the
+  aero snapshot control sits under the panel title; the five aero technologies form their own
+  research department and the research grid scrolls. Palette and drag edits persist immediately:
+  only `UiAction` clicks used to save, so a palette-only edit was lost on the next launch.
+- **Values accepted after the balance tests.** Four fins (span 0.3 m, chord 0.35 m) on a 0.4 m body
+  score 100 stability and damp the seeded speed spread; one 1.2 × 0.5 m swept wing lets the turbofan
+  run at 70 m/s while the wingless design never accelerates; four classic control surfaces settle the
+  900 hPa target about 25 % sooner. No constant needed a second tuning pass.

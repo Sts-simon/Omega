@@ -1,129 +1,146 @@
 # Lot 7 — Aerodynamics: wings, fins and control surfaces
 
-Status: **planned** (target 0.32.0). No code from this lot is implemented yet; the values below are
-proposals to settle during the first phase, and the open ones are listed at the end.
+Status: **delivered** (0.32.0). This document is the design record of the lot; the accepted values and
+the trade-offs are implemented in `crates/omega-rules/src/aero.rs` and recorded in
+`docs/DECISIONS.md`. It stays a game model: abstract figures, no CFD, no real aerodynamics.
 
 ## Why
 
-The assembly tree can already place radial boosters and mirror them, but every airframe flies the
-same: only diameter and mass change the drag. Surface-to-surface and air-to-surface vehicles should
+The assembly tree could already place radial boosters and mirror them, but every airframe flew the
+same: only diameter and mass changed the drag. Surface-to-surface and air-to-surface vehicles now
 benefit from fins and control surfaces, and cruise vehicles need wings before the air-breathing
-engine is worth its mass. This lot makes the *shape* of the missile a design decision without
-turning the game into a fluid-dynamics simulator.
+engine is worth its mass. The shape of the missile is a design decision without turning the game into
+a fluid-dynamics simulator.
 
-The model stays abstract and deterministic, in the spirit of `docs/VISION_MISSILES.md`: one
-vehicle-level set of aerodynamic figures derived from the parts, used by the existing 1-D flight
-integration. No guidance law, no CFD, no per-frame geometry.
+## Parts
 
-## New parts
+All three are **leaf** parts mounted on the radial nodes of a cylindrical body. A drop with `X`
+symmetry places paired/crossed sets on consecutive radial slots with a shared group id.
 
-All three are **leaf** parts mounted on the radial nodes of a cylindrical body (they have no
-`Top`/`Bottom`/`Radial` nodes of their own). A drop with `X` symmetry places paired/crossed sets on
-consecutive radial slots, reusing the existing `symmetry_slots` and group ids.
+| Part | Capability | Parameters | Discrete choices | Role |
+| --- | --- | --- | --- | --- |
+| `Wing` | `part:wing` | span, chord, sweep | planform, profile, standard/light | Lift for cruise; mass and drag at speed |
+| `FinSet` | `part:fin` | span, chord | stabiliser role, layout, standard/light | Passive stability: less dispersion, steadier altitude hold |
+| `ControlSurface` | `part:control_surface` | span, chord | control family, standard/light | Authority: tighter speed/altitude tracking |
 
-| Part | Capability | Main parameters | Role |
-| --- | --- | --- | --- |
-| `Wing` | `part:wing` | span (m), root chord (m), sweep (°) | Lift for cruise flight; mass and wave drag at high speed |
-| `FinSet` | `part:fin` | span (m), chord (m) | Passive stability: less dispersion, steadier pitch-over and altitude hold |
-| `ControlSurface` | `part:control_surface` | span (m), chord (m) | Authority: tighter speed/altitude tracking, better terminal figures |
+- Planforms: straight, swept, delta, trapezoidal, variable geometry.
+- Profiles: symmetric, classic, low drag, high lift, experimental.
+- Stabiliser roles: rear, front, blended (no independent fin), combined.
+- Fin layouts: symmetric, asymmetric (experimental: stability traded for authority).
+- Control families: classic, integrated, combined, fixed (stability only, no authority).
+- Mass is span × chord × an areal density (wing 3.2, fin 4.8, control 5.6 kg/m²), times a planform
+  factor; the light build is 0.70 of that at the cost of complexity and reliability.
 
-Mass: each surface has an areal density (kg/m²) so span × chord is the design lever. A wing has a
-lower areal density than a fin (thin skin), a control surface is in between. Exact constants are
-open values (see `docs/DECISIONS.md`).
+Ranges: span 0.2–4.0 m, chord 0.1–2.0 m, sweep 0–60°. A surface wider than twice the body diameter
+is a **warning** (ground clearance and launcher fit), not a refusal.
 
-Validation ranges (proposal): span 0.2–4.0 m, chord 0.1–2.0 m, sweep 0–60°. A surface wider than
-twice the body diameter is a **warning** (ground clearance and launcher fit), not a refusal, like
-the existing diameter step.
+## Rules (`omega-rules::aero`)
 
-## Aggregation (`omega-rules::aero`)
+`aero::figures(&Vehicle)` walks the tree once (not per flight step) and returns `AeroFigures`:
 
-A new Bevy-free module computes one `AeroFigures` value per vehicle from `Vehicle` directly (walk the
-tree once, not per flight step):
+- `reference_area_m2`: largest body cross-section (surfaces excluded).
+- `wing_area_m2`, `fin_area_m2`, `control_area_m2`, and `mean_sweep_deg` (area-weighted).
+- `stability` (0..100): 55 % fin effectiveness (`fin_area / 0.30 m²`, clamped) + 45 % CG/CA margin
+  score.
+- `control_authority` (0..100): moving control area against the same 0.30 m² reference, with a small
+  wing contribution.
+- `lift` (0..100): wing area × planform lift × profile lift, normalised so one default wing reads
+  about 50 and a pair saturates.
+- `drag_index` (0..100): summed surface drag area (shape, profile, sweep factor) against 0.60 m².
+- `complexity` and `reliability` (0..100): averaged choice effects, more surfaces and the light build
+  cost reliability.
+- `mass_kg`: summed aerodynamic dry mass, already included in the vehicle mass.
+- `cg_y_m`, `ca_y_m`, `margin_m = cg - ca`, `balance`, `length_m`, `stable_band_m()`:
+  - CG is mass-weighted over all parts at their placed positions.
+  - CA is area-weighted over the surfaces only (wing 1.0, fin 0.55, control 0.25); with no surfaces
+    it equals the CG, so the margin is zero.
+  - The acceptable band puts the CA between 2 % and 10 % of the vehicle length **behind** the CG.
+    Ahead of the CG is unstable and is a warning, never a refusal.
 
-- `reference_area_m2`: largest body cross-section, as today.
-- `wing_area_m2`, `fin_area_m2`, `control_area_m2`, each summed per stage and total.
-- `mean_sweep_deg`, area-weighted.
-- `stability`: `fin_area / reference_area`, clamped, plus a small bonus for control surfaces.
-- `control_authority`: `control_area / reference_area`, clamped.
-- `parasitic_drag_area_m2`: body drag area + surface skin drag (span × chord × a form factor).
+Every coefficient lives in one `Effect` table per choice family in `aero.rs`; no multiplier is
+duplicated in the app.
 
-The figures are exposed on the flight report (`AeroSummary`) so the workshop can show them live and
-the dossier can quote them.
+## Compatibility and validation
+
+- A surface mounts on a radial node only and cannot carry other parts (error).
+- Moving surfaces need a compatible computer: integrated → standard, combined → advanced (error).
+  Classic and fixed surfaces work with the basic computer every vehicle already needs.
+- `Vehicle::missing_research` also checks the advanced-profile and light-structure capabilities.
+- Warnings: oversized span, aerodynamic mass above 20 % of launch mass, a control surface with no
+  wing or fin, an asymmetric fin set, and a CA ahead of the CG.
 
 ## Flight integration (`omega-rules::flight`)
 
-Keep the current integration and seeded dispersion; add three effects:
+The figures are computed once per run and applied to the existing integration:
 
-1. **Drag** becomes `0.5·ρ·v²·(body_drag_area + surface_drag_area·sweep_penalty)`. The existing
-   `DRAG_COEFFICIENT` is folded into the body term so designs without surfaces keep today's figures
-   and all current tests keep their numbers.
-2. **Lift** applies after pitch-over and in air launch: the lift ratio
-   `wing_area / reference_area` lowers the speed at which the air-breathing engine can run
-   (`AIR_BREATHING_MIN_SPEED_MS`, floored) and reduces the gravity loss during the pitch-over
-   manoeuvre. A heavy, oversized wing still costs more than it saves.
-3. **Stability and authority** act on the existing abstract quantities:
-   - stability scales down the drag dispersion (±5 % base) and shortens the time to settle the
-     altitude target;
-   - control authority tightens the speed/altitude controller (smaller steady-state error) and
-     slightly reduces the "no control" anomalies, without changing the target-lock probability.
+1. **Drag** = `0.5·ρ·v²·(body_drag_area + surface_drag_area)·drag_spread`. `DRAG_COEFFICIENT` stays
+   folded into the body term, so a surface-less design keeps today's drag exactly.
+2. **Lift** lowers the air-breathing minimum speed (`90 m/s × (1 − 0.45·lift)`, floored at 55 %) and
+   reduces the pre-pitch-over gravity loss by up to 35 %.
+3. **Stability** damps the seeded drag spread by up to 60 % (never removes it).
+4. **Authority and stability** raise the altitude-hold rate by up to 50 %.
+5. `FlightReport::aero` carries the `AeroSummary` (stability, authority, lift, drag, areas, mass,
+   margin, surface count) for the trial screen and the dossier.
 
-A design with no aerodynamic part must produce **byte-identical** flight reports to the current
-build; a regression test compares a set of seeds before/after.
+A design with no aerodynamic parts leaves every term at its previous value and reports an empty
+summary; a regression test pins the determinism and the zero figures.
 
 ## Save format
 
-`PartSpec` gains three variants, so `designs/vehicle.json` moves to **schema 4**. Schema 3 (and the
-earlier migrated forms) load unchanged with no surface parts and are rewritten as schema 4 on the
-next edit; a newer schema is still refused. Tests: round-trip schema 4, migration from the current
-fixtures, refusal of schema 5, and the existing schema-3 revision fixtures.
+`PartSpec` gains the three variants, so `designs/vehicle.json` is **schema 4**. Schema 3 graphs and
+the migrated schema 1-2 stage lists load unchanged with no surfaces and are rewritten as schema 4 on
+the next edit; a newer schema is still refused. The design hash changes with any surface edit, so
+existing trial evidence and dossiers go stale through the normal hash check.
 
 ## Workshop and 3D
 
-- Palette row **AERO SURFACES** (WING / FIN SET / CONTROL SURFACE), gated by research.
-- 3D: a thin flat box lying on the surface, rotated by the attachment angle; wings get a small
-  dihedral, fins are vertical. They reuse the part colour and the selection outline.
-- Picking: `src/picking.rs` gains a box raycast; the current cylinder path stays for bodies. A part
-  carries its own pick shape, so `nearest_part` keeps one implementation.
-- Inspector: span / chord / sweep with `-`/`+` and the wheel (span first), symmetry via `X`, drag to
-  move the subtree (a surface is a leaf), `Delete`.
+- Palette row **WING / FIN SET / CONTROL**, gated by research.
+- 3D: a thin plate lying on the mount, rotated by the attachment angle; wings are blue, fin sets
+  green, fixed control surfaces grey and moving ones amber.
+- Picking: `src/picking.rs` hits plates with an oriented box and bodies with the existing cylinder;
+  one nearest-hit rule.
+- Inspector: span / chord / sweep with `-`/`+` and the wheel (span first), design choices as cycling
+  buttons, symmetry via `X`, drag to move (a surface is a leaf), `Delete`.
+- CG (yellow sphere), CA (cyan cube), their link and the acceptable band are drawn from the figures.
+- Aero panel: stability, control, lift, drag, complexity, reliability, aerodynamic mass, areas,
+  sweep, CG/CA/margin/band and a **SNAPSHOT A** comparison with signed deltas.
 
 ## Research and contracts
 
-- New tech nodes under the existing aerodynamics branch: `Aerodynamics` (`part:wing`),
-  `Fin stabilisation` (`part:fin`), `Control surfaces` (`part:control_surface`). The cruise family
-  keeps gating cruise offers; wings are not a hard requirement there, but the offer's range target is
-  out of reach without them.
-- Phase 2 of the offer model: an optional `min_stability` / `min_control` requirement derived from
-  mission family (surface-to-surface wants fins, cruise wants lift), quoted from `AeroSummary`.
-  Until then the existing mass/range/speed/lock requirements remain the only gates.
+A dedicated **AERODYNAMICS** department (the sixth, so no existing column overflows the board):
+`Aerodynamics` (`part:wing`), `Fin stabilisation` (`part:fin`), `Control surfaces`
+(`part:control_surface`), `Advanced profiles` (`aero:advanced_profiles`) and `Light aero structures`
+(`aero:light_structures`), with prerequisites so the tree progresses instead of granting everything
+at once.
 
-## Steps (each one shippable)
+Surface-to-air offers add a **soft** `STABILITY` requirement (20/100) quoted from the trial's
+`AeroSummary`; it is a compromise, not a blocking gate. Range, speed, mass, lift-off, separation and
+lock remain the existing requirements.
 
-1. **Rules and data** — `PartSpec` variants + validation + mass, `aero.rs` aggregation, schema 4 and
-   migration tests. No UI, no flight change.
-2. **Flight** — drag area, lift floor, stability/authority effects, `AeroSummary` on the report,
-   no-aero regression test, reference-design figures recorded in `docs/DECISIONS.md`.
-3. **Workshop** — palette, 3D meshes, box picking, inspector parameters, symmetry drops, game check.
-4. **Contracts and dossier** — optional stability/control requirements and the cruise offer tuning.
-5. **Balance** — three reference designs (ballistic without fins, ballistic with four fins, cruise
-   with wings + air-breathing engine) measured over fixed seeds; tune constants once, then record
-   them.
+## Delivered sub-lots
+
+1. Rules and data — `PartSpec` variants, validation, mass, `aero::figures`, schema 4 and migration.
+2. Flight — drag area, lift floor, stability/authority effects, `AeroSummary`, regression tests.
+3. Workshop — palette, 3D plates, box picking, inspector parameters and choices, symmetry, game check.
+4. Contracts — soft stability requirement derived from the mission family.
+5. Balance — three reference behaviours measured by tests: fins damp dispersion, wings let the
+   turbofan run at 70 m/s, control surfaces settle the pressure target earlier.
 
 ## Acceptance
 
-- A ballistic design with four fins has a measurably smaller drag dispersion and settles its altitude
-  target sooner than the same design without fins.
-- A cruise design with wings can run its air-breathing engine and reach the cruise offer's range at a
-  lower speed than the wingless design, which cannot complete it.
-- A design with control surfaces tracks the program's speed/altitude targets with a smaller error.
-- A design with no aerodynamic parts produces the same report as before the lot (fixed seeds).
-- Schema 3 saves open, fly and migrate to schema 4; a newer schema is refused with a message.
-- Wings/fins/control surfaces are placed, mirrored (`X`), moved, deleted and adjusted with the mouse
-  only, with readable refusals for an invalid node or an oversized surface (warning, not refusal).
+- Fins measurably reduce the seeded dispersion of a ballistic design and settle the altitude target
+  sooner than the same design without them. (Covered by flight tests.)
+- A cruise design with a wing can run its air-breathing engine at 70 m/s; the wingless version cannot.
+- Control surfaces reduce the time to reach the pressure target.
+- A design with no aerodynamic parts reports zero surfaces, zero surface drag and the same report as
+  a second run.
+- Schema 3 loads, flies and rewrites as schema 4; a newer schema is refused with a message.
+- Surfaces are placed, mirrored, moved, deleted and adjusted with the mouse only, with readable
+  refusals and warnings.
 - `cargo fmt --check`, `clippy -D warnings`, the whole test suite and a game check at 1600×960 pass.
 
 ## Out of scope
 
-- Real aerodynamics, CFD, Mach-dependent shock modelling beyond one sweep penalty, flutter analysis.
-- Guidance, seeker or warhead modelling; ailerons/elevator animation; per-surface failure modes.
+- Real aerodynamics, CFD, Mach-dependent shock modelling beyond one sweep factor, flutter analysis.
+- Guidance, seeker or warhead modelling; aileron animation; per-surface failure modes.
 - Autopilot tuning UI: the program stays the only controller input.

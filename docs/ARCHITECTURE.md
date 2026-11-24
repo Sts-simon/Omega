@@ -117,5 +117,25 @@ computer outside the last stage; `warnings()` reports diameter steps without blo
 
 `src/missile.rs` keeps only the session (selection by part id, palette additions, parameter edits),
 the 3D layout built from `Vehicle::poses()` and the revision diff. Save files carry
-`schema_version: 3`; deserialization accepts the old stage list and migrates it, and refuses a newer
-schema with an error instead of guessing.
+`schema_version: 4`; deserialization accepts a schema-3 graph or the old stage list and rewrites it as
+4, and refuses a newer schema with an error instead of guessing.
+
+## Aerodynamics (0.32.0)
+
+`crates/omega-rules/src/aero.rs` is Bevy-free and owns every aerodynamic rule. Three leaf parts
+(`Wing`, `FinSet`, `ControlSurface`) live on radial nodes; each design choice (planform, profile,
+stabiliser role, fin layout, control family, light build) maps to one fixed `Effect` table in that
+module, so no coefficient is scattered through the app.
+
+`aero::figures(&Vehicle)` walks the tree once and returns `AeroFigures`: reference area, wing/fin/
+control areas, area-weighted sweep, stability, control authority, lift, drag index, complexity,
+reliability, aerodynamic mass, surface drag area, CG, CA, margin, stable band and balance. It is
+computed on edit, not per flight step. `flight::simulate` applies it to the existing 1-D integration:
+surface drag area, a lift-dependent air-breathing minimum speed and climb gravity, a stability-damped
+seeded drag spread and a stability/authority-dependent altitude rate. A design without surfaces
+leaves every term at its previous value.
+
+`Vehicle::validate()` refuses aerodynamic parts on axial nodes, surfaces with children and moving
+surfaces without a compatible computer; `Vehicle::warnings()` reports oversized spans, heavy surface
+mass, control surfaces with no fixed surface and an unstable CG/CA margin. The workshop draws CG
+(yellow), CA (cyan), the acceptable band and the surface plates from the same figures.

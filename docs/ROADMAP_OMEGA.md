@@ -13,7 +13,7 @@ All values and outcomes are game mechanics. The project does not attempt to mode
 The following features are already present in the application:
 
 - **Research:** 13 technologies across five departments, credit costs, prerequisites, a day clock and capability grants.
-- **Workshop:** staged vehicle editor, 13 part types, one to four stages, presets, editable parameters, derived game statistics, validation and persistence.
+- **Workshop:** attachment-tree vehicle editor, 16 part types including wings, fin sets and control surfaces, one to four derived stages, presets, editable parameters and design choices, derived game statistics, validation and persistence.
 - **Program editor:** parallel threads, seven abstract block types, hardware and computer-limit validation, editing, persistence and content hashing.
 - **Trials:** repeatable seeded runs, four result plots, event timeline, anomaly summaries, batch runs of 10/100/1,000 seeds, progress reporting and A/B comparison.
 - **Contracts:** mission and vehicle families, research-gated offers, active-contract limits, deadlines, hash-bound evidence dossiers and delivery rewards.
@@ -121,25 +121,27 @@ and a real build interaction become possible.
 **Acceptance:** a new player builds a two-stage rocket with two radial boosters with the mouse only;
 old presets keep identical stage figures; every refusal has a message and a test.
 
-### Lot 7 — Aerodynamics: wings, fins and control surfaces (0.32.0, planned)
+### Lot 7 — Aerodynamics: wings, fins and control surfaces (0.32.0, delivered)
 
 **Purpose:** make the airframe shape matter. Cruise vehicles get wings that let the air-breathing
 engine work at a lower speed; ballistic vehicles get fins for stability and control surfaces for
 authority, all placed on the same radial nodes and mirrored with `X`.
 
-- Model: one `omega-rules::aero` aggregation (areas, sweep, stability, control authority, surface
-  drag) consumed by the existing 1-D flight integration; no guidance law, no CFD, no per-step geometry.
-- Data: `Wing`, `FinSet` and `ControlSurface` specs, `designs/vehicle.json` schema 4 with migration
-  from schema 3; a design without surfaces keeps byte-identical flight reports.
-- Workshop: aero palette row, flat-box 3D meshes, box picking in `src/picking.rs`, span/chord/sweep in
-  the inspector, leaf-only attachment with a ground-clearance warning.
-- Contracts: stability/control requirements derived from mission family and the cruise range target
-  tuned so wings are the difference between reaching it or not.
-- Full plan, accepted values and open questions: `docs/AERODYNAMICS_PLAN.md`.
+- Done: one `omega-rules::aero` aggregation (areas, sweep, stability, control authority, lift, drag,
+  complexity, reliability, mass, CG/CA) consumed by the existing 1-D flight integration; no guidance
+  law, no CFD, no per-step geometry.
+- Done: `Wing`, `FinSet` and `ControlSurface` specs with planform, profile, stabiliser role, fin
+  layout, control family and light build; `designs/vehicle.json` schema 4 with migration from schema
+  3; a design without surfaces keeps its previous flight figures.
+- Done: aero palette row, plate 3D meshes, oriented-box picking in `src/picking.rs`, span/chord/sweep
+  and design choices in the inspector, leaf-only attachment, CG/CA markers and stable band.
+- Done: five aerodynamics technologies, a soft stability requirement on surface-to-air offers, and
+  flight tests for fin damping, wing lift and control authority.
+- Full plan, accepted values and delivery record: `docs/AERODYNAMICS_PLAN.md`.
 
 **Acceptance:** fins measurably improve stability and altitude settling, wings enable a cruise design
-that the wingless version cannot complete, control surfaces reduce tracking error, old designs fly
-unchanged, schema 3 migrates, and the whole lot is checked in game at 1600×960.
+that the wingless version cannot complete, control surfaces reduce the time to the target, old
+designs fly unchanged, schema 3 migrates, and the whole lot is checked in game at 1600×960.
 
 ### Stable release (1.0.0)
 

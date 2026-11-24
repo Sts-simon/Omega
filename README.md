@@ -32,9 +32,10 @@ workspace folder are ignored.
 
 ### Research Centre
 
-- 13 technologies in five departments (missile families, propulsion and structures, sensors and
-  electronics, onboard computing, design and test tools), each with a credit cost, a duration in
-  days and prerequisites.
+- 18 technologies in six departments (missile families, propulsion and structures, aerodynamics,
+  sensors and electronics, onboard computing, design and test tools), each with a credit cost, a
+  duration in days and prerequisites. Aerodynamics, fin stabilisation, control surfaces, advanced
+  profiles and light aero structures unlock the airframe choices.
 - One research project at a time. Credits are deducted when research starts; the **NEXT DAY**
   button advances the game clock, shown as `DAY n` in the navigation bar. Finishing a project
   grants its capabilities and prints the technology name.
@@ -51,13 +52,14 @@ workspace folder are ignored.
 
 ### Missile workshop
 
-- A staged vehicle built from 13 part types: solid motor, fuel tank, liquid engine, turbofan,
-  pitot tube, barometer, basic radar, active radar, three flight computers, decoupler and mission
-  module. Each part is resizable within validated ranges.
+- A staged vehicle built from 16 part types: solid motor, fuel tank, liquid engine, turbofan,
+  pitot tube, barometer, basic radar, active radar, three flight computers, decoupler, mission
+  module, wing, fin set and control surface. Each part is resizable within validated ranges.
 - **The vehicle is an attachment tree.** A part is mounted on a node of another part (`top`,
   `bottom`, or one of four radial mounts on motors, tanks and modules); the stages are derived from
   that tree, so a decoupler starts a new stage instead of a separate stage editor. The tree is saved
-  as `designs/vehicle.json` schema 3; older stage-list files are migrated when read.
+  as `designs/vehicle.json` schema 4; schema-3 graphs and older stage-list files are migrated when
+  read.
 - **Parts are placed with the mouse.** Drag a palette entry onto any free node shown in the 3D view;
   a plain click still adds above the selected part (or the highest one). Drag an existing part onto
   another node to move its whole subtree, `Delete` removes the selection, `X` cycles radial symmetry
@@ -66,6 +68,13 @@ workspace folder are ignored.
   everywhere else. A second flight computer replaces the first in place, so the single computer
   stays in the last stage. A diameter step between a part and its mount is reported as a warning,
   not refused.
+- **Aerodynamics is a design decision.** A wing, fin set or control surface mounts on a free radial
+  slot, mirrors with `X`, and carries span, chord and (for a wing) sweep plus discrete choices:
+  planform, airfoil profile, stabiliser role, fin layout, control family and standard/light build.
+  The workshop quotes the resulting stability, control authority, lift, drag, complexity,
+  reliability and aerodynamic mass, plus the centre of gravity, the centre of aerodynamics, the
+  stable band and an A/B snapshot. Moving surfaces need a compatible flight computer; an oversized
+  or unstable design is a warning, not a refusal.
 - Presets: two-stage rocket, cruise vehicle, or an empty vehicle. Presets whose parts are not yet
   researched are refused with the missing technologies.
 - Selected part resizing with `-` / `+`: length and diameter (motors, tanks), burn time (solid
@@ -251,7 +260,7 @@ saves/slot_1/
   campaign.json                 credits, research, day (schema 2; schema 1 still loads)
   contracts/missile.json        offers, active contracts, evidence, deliveries (schema 2)
   designs/revisions.json        missile design revisions (schema 3)
-  designs/vehicle.json          missile vehicle (schema 3, schema 1-2 migrated)
+  designs/vehicle.json          missile vehicle (schema 4; schema 3 graphs and 1-2 lists migrate)
   programs/missile.json         missile program
 ```
 
