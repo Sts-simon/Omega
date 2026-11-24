@@ -76,7 +76,15 @@ fn gizmo_amount(cursor: Vec2, start: Vec2, screen_axis: Vec2, mode: TransformMod
         let metres = (cursor - start).dot(screen_axis.normalize_or_zero()) as f64 * 0.02;
         if fine { metres } else { (metres / 0.1).round() * 0.1 }
     } else {
-        let degrees = (cursor.x - start.x) as f64 * 0.5;
+        let start_angle = (start.y - screen_axis.y).atan2(start.x - screen_axis.x);
+        let current_angle = (cursor.y - screen_axis.y).atan2(cursor.x - screen_axis.x);
+        let mut radians = current_angle - start_angle;
+        if radians > std::f32::consts::PI {
+            radians -= std::f32::consts::TAU;
+        } else if radians < -std::f32::consts::PI {
+            radians += std::f32::consts::TAU;
+        }
+        let degrees = radians.to_degrees() as f64;
         if fine { degrees } else { (degrees / 5.0).round() * 5.0 }
     }
 }
@@ -268,14 +276,19 @@ pub(crate) fn workshop_pointer(
                         if let Ok(point) = camera.world_to_viewport(camera_transform, ring_point) {
                             let distance = cursor.distance(point);
                             if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
-                                nearest = Some((axis, Vec2::X, distance));
+                                nearest = Some((axis, center_screen.unwrap_or(cursor), distance));
                             }
                         }
                     }
                 }
             }
             if let Some((axis, screen_axis, _)) = nearest {
-                transform_gizmo.drag = Some((axis, cursor, screen_axis.normalize_or_zero()));
+                let drag_reference = if transform_gizmo.mode == TransformMode::Translate {
+                    screen_axis.normalize_or_zero()
+                } else {
+                    screen_axis
+                };
+                transform_gizmo.drag = Some((axis, cursor, drag_reference));
                 transform_gizmo.before = Some(session.vehicle.clone());
             }
         }
