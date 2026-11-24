@@ -21,6 +21,11 @@ pub const STABLE_BAND_HIGH: f64 = 0.10;
 pub const LIGHT_MASS_FACTOR: f64 = 0.70;
 /// Drag index at which the drag indicator reads 100.
 const DRAG_INDEX_REFERENCE_M2: f64 = 0.60;
+/// Reliability below which a trial can suffer one abstract surface fault (see
+/// [`AeroFigures::surface_fault_chance`]). A sound airframe never draws one.
+pub const SURFACE_FAULT_RELIABILITY: f64 = 60.0;
+/// Fault chance a completely unreliable airframe (the 25 floor) would reach.
+pub const SURFACE_FAULT_MAX_CHANCE: f64 = 0.35;
 
 /// Areal density in kg/m². Thin wing skins, heavier fin sets, heaviest moving surfaces.
 pub const WING_AREAL_DENSITY: f64 = 3.2;
@@ -373,6 +378,17 @@ impl AeroFigures {
 
     pub fn authority_ratio(&self) -> f64 {
         self.control_authority / 100.0
+    }
+
+    /// Seeded chance that this airframe suffers one surface fault during a trial. Only a fragile
+    /// design below [`SURFACE_FAULT_RELIABILITY`] is exposed, and the chance grows linearly as the
+    /// reliability drops; this is the gameplay sink for `reliability` and `complexity`.
+    pub fn surface_fault_chance(&self) -> f64 {
+        if self.surface_count == 0 {
+            return 0.0;
+        }
+        let exposure = (SURFACE_FAULT_RELIABILITY - self.reliability) / SURFACE_FAULT_RELIABILITY;
+        SURFACE_FAULT_MAX_CHANCE * exposure.clamp(0.0, 1.0)
     }
 
     /// The gameplay band in which the aerodynamic centre sits behind the centre of gravity.
@@ -897,6 +913,38 @@ mod tests {
             figures.ca_y_m
         );
         figures
+    }
+
+    #[test]
+    fn a_fragile_airframe_is_exposed_and_a_sound_one_is_not() {
+        let mut sound = sounding_rocket();
+        four_fins(&mut sound);
+        let mut fragile = sounding_rocket();
+        for index in 0..4u8 {
+            mount(
+                &mut fragile,
+                &format!("fin-{index}"),
+                PartSpec::FinSet {
+                    span_m: 0.3,
+                    chord_m: 0.35,
+                    role: StabilizerRole::Rear,
+                    layout: FinLayout::Asymmetric,
+                    light: true,
+                },
+                "booster",
+                NodeId::Radial(index),
+            );
+        }
+        let sound = figures(&sound);
+        let fragile = figures(&fragile);
+        assert_eq!(sound.surface_fault_chance(), 0.0);
+        assert!(fragile.reliability < SURFACE_FAULT_RELIABILITY);
+        assert!(
+            fragile.surface_fault_chance() > 0.0 && fragile.surface_fault_chance() < SURFACE_FAULT_MAX_CHANCE / 2.0,
+            "{}",
+            fragile.surface_fault_chance()
+        );
+        assert_eq!(AeroFigures::default().surface_fault_chance(), 0.0);
     }
 
     #[test]
