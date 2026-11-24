@@ -212,8 +212,7 @@ pub(crate) fn workshop_pointer(
         .map(|ray| (ray.origin, *ray.direction));
     let picked = ray.and_then(|(origin, direction)| picked_part(&session.vehicle, origin, direction));
 
-    // KSP-style tool selection. W = translate, R = rotate; X/Y/Z select an axis in the inspector
-    // workflow, while the coloured handles below can be dragged directly.
+    // KSP-style tool selection. W = translate, R = rotate; the coloured handles select X/Y/Z directly.
     if keys.just_pressed(KeyCode::KeyW) {
         transform_gizmo.mode = TransformMode::Translate;
         transform_gizmo.drag = None;
