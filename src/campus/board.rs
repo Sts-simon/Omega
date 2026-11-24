@@ -1651,6 +1651,26 @@ fn build_missile(
                         9.5,
                         ui_kit::TEXT_DIM,
                     );
+                    if let Some(attach) = part.attach.as_ref() {
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "Move: X {:+.2} | Y {:+.2} | Z {:+.2} m",
+                                attach.offset_x_m, attach.offset_y_m, attach.offset_z_m
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "Rotate: X {:.0}° | Y {:.0}° | Z {:.0}°",
+                                attach.rotation_x_deg, attach.rotation_y_deg, attach.rotation_z_deg
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
                     let needed: Vec<&str> = std::iter::once(part.spec.required_capability())
                         .chain(part.spec.extra_capabilities())
                         .collect();
