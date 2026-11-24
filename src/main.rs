@@ -121,8 +121,8 @@ fn move_camera(
                 .as_deref()
                 .and_then(|id| session.vehicle.poses().into_iter().find(|pose| pose.id == id))
         {
-            rig.target = missile::ANCHOR
-                + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
+            rig.target =
+                missile::ANCHOR + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
             rig.distance = ((pose.radius_m as f32) * missile::VISUAL_SCALE * 4.0 + 8.0).clamp(12.0, 45.0);
             changed = true;
         }
