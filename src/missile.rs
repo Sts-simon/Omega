@@ -1256,6 +1256,9 @@ impl MissileSession {
     pub fn commit_transform(&mut self, before: Vehicle) {
         if self.vehicle != before {
             self.undo.push(before);
+            if self.undo.len() > 50 {
+                self.undo.remove(0);
+            }
             self.redo.clear();
         }
     }
