@@ -147,13 +147,13 @@ mod tests {
 
     #[test]
     fn a_ray_down_the_axis_hits_the_top_cap() {
-        let t = ray_cylinder(Vec3::new(0.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0).unwrap();
+        let t = ray_cylinder(Vec3::new(0.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).unwrap();
         assert!((t - 9.0).abs() < 1e-6, "{t}");
     }
 
     #[test]
     fn a_ray_beside_the_body_misses() {
-        assert!(ray_cylinder(Vec3::new(2.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0).is_none());
+        assert!(ray_cylinder(Vec3::new(2.0, 10.0, 0.0), down(), Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).is_none());
     }
 
     #[test]
@@ -161,7 +161,7 @@ mod tests {
         // Grazing the side from close range but above the cap: passes over the part.
         let origin = Vec3::new(-2.0, 5.0, 0.0);
         let direction = Vec3::new(1.0, 0.0, 0.0);
-        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0).is_none());
+        assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0, Quat::IDENTITY).is_none());
         let origin = Vec3::new(-2.0, 0.5, 0.0);
         assert!(ray_cylinder(origin, direction, Vec3::ZERO, 0.5, 1.0).is_some());
     }
@@ -231,7 +231,7 @@ mod tests {
             PickShape::Box {
                 center: Vec3::new(0.0, 0.0, 2.0),
                 half: Vec3::new(1.0, 0.2, 0.03),
-                yaw: 0.0,
+                rotation: Quat::IDENTITY,
             },
         ];
         let (index, _) = nearest_hit(Vec3::new(0.0, 5.0, 2.0), down(), &shapes).unwrap();
