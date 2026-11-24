@@ -3,6 +3,7 @@
 - Palette de construction filtrable par catégorie : tout, propulsion, structure, aérodynamique, capteurs et avionique. Le filtre est un état d'interface et ne modifie pas le véhicule.
 - Arbre d'assemblage plus lisible : noms de pièces compréhensibles, points d'attache et étage affichés au lieu des identifiants internes.
 - Instructions de construction clarifiées ; commandes de déplacement de sous-ensemble, symétrie, annulation et rétablissement rappelées dans l'atelier.
+- Caméra de construction : F centre la pièce sélectionnée ; Début (Home) cadre automatiquement l'ensemble du véhicule.
 - Interface utilisateur traduite en français : navigation, atelier, contrats, recherche, programmation, essais, boutons, états et principaux messages.
 - Ajout de `README.fr.md`. Les identifiants, fichiers et schémas de sauvegarde restent inchangés.
 - Vérification graphique recommandée à 1600 × 960 et sur une fenêtre plus étroite.

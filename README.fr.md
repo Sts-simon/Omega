@@ -42,10 +42,14 @@ L'atelier reprend plusieurs principes d'ergonomie de KSP :
 | Changer la symétrie | X |
 | Annuler | Ctrl + Z |
 | Rétablir | Ctrl + Y |
+| Centrer la pièce sélectionnée | F |
+| Cadrer tout le véhicule | Début (Home) |
 | Tourner la caméra | Clic droit + glisser |
 | Déplacer la caméra | Clic molette + glisser |
 | Zoomer | Molette |
 | Régler une pièce | Boutons − / + ou molette au-dessus de la pièce |
+
+La touche **F** centre la caméra sur la pièce sélectionnée. **Début (Home)** recadre tout le véhicule, même après un déplacement important de la caméra.
 
 Le filtre de catégories ne modifie pas la conception. Il sert uniquement à réduire la liste des pièces affichées.
 

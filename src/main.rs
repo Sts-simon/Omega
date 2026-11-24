@@ -95,6 +95,7 @@ fn move_camera(
     mouse_scroll: Res<AccumulatedMouseScroll>,
     time: Res<Time>,
     campus: Res<CampusState>,
+    session: Res<missile::MissileSession>,
     ui_buttons: Query<&UiInteraction>,
     mut cameras: Query<(&mut Transform, &mut scene::OrbitCameraRig), With<Camera3d>>,
 ) {
@@ -110,6 +111,49 @@ fn move_camera(
 
     let pointer_over_button = ui_buttons.iter().any(|interaction| *interaction != UiInteraction::None);
     let mut changed = false;
+
+    // KSP-style framing shortcuts: F focuses the selected part, Home frames the whole design.
+    if campus.view == CampusView::Missile && !pointer_over_button {
+        if keys.just_pressed(KeyCode::KeyF) {
+            if let Some(pose) = session
+                .selected
+                .as_deref()
+                .and_then(|id| session.vehicle.poses().into_iter().find(|pose| pose.id == id))
+            {
+                rig.target = missile::ANCHOR
+                    + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32)
+                        * missile::VISUAL_SCALE;
+                rig.distance = ((pose.radius_m as f32) * missile::VISUAL_SCALE * 4.0 + 8.0)
+                    .clamp(12.0, 45.0);
+                changed = true;
+            }
+        }
+        if keys.just_pressed(KeyCode::Home) {
+            let poses = session.vehicle.poses();
+            if poses.is_empty() {
+                rig.target = missile::ANCHOR;
+                rig.distance = 22.0;
+            } else {
+                let mut min = Vec3::splat(f32::INFINITY);
+                let mut max = Vec3::splat(f32::NEG_INFINITY);
+                let mut extent = 0.0_f32;
+                for pose in &poses {
+                    let point = missile::ANCHOR
+                        + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32)
+                            * missile::VISUAL_SCALE;
+                    min = min.min(point);
+                    max = max.max(point);
+                    extent = extent.max(
+                        pose.height_m.max(pose.radius_m * 2.0) as f32 * missile::VISUAL_SCALE,
+                    );
+                }
+                rig.target = (min + max) * 0.5;
+                rig.distance = ((max - min).length() * 1.25 + extent * 2.0 + 8.0)
+                    .clamp(12.0, 115.0);
+            }
+            changed = true;
+        }
+    }
 
     // CAD-like mouse navigation: right drag orbits, middle drag pans, wheel zooms.
     if !pointer_over_button {

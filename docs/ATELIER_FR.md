@@ -16,6 +16,8 @@ L'arbre à droite affiche le nom lisible de chaque pièce, son point d'attache e
 
 ## Contrôles
 
+- **F** : centrer la caméra sur la pièce sélectionnée.
+- **Début (Home)** : cadrer l'ensemble du véhicule.
 - **X** : changer le nombre de copies symétriques.
 - **Suppr** : supprimer la pièce sélectionnée et son sous-ensemble.
 - **Ctrl + Z** : annuler.

@@ -199,33 +199,77 @@ pub fn fr(text: impl Into<String>) -> String {
         "MASS" => "MASSE",
         "THRUST" => "POUSSÉE",
         "METRICS" => "INDICATEURS",
-        "Camera: right drag to orbit | middle drag to pan | wheel to zoom" => "Caméra : clic droit + glisser pour tourner | clic molette + glisser pour déplacer | molette pour zoomer",
+        "Camera: right drag to orbit | middle drag to pan | wheel to zoom" => {
+            "Caméra : clic droit + glisser pour tourner | clic molette + glisser pour déplacer | molette pour zoomer"
+        }
         "This part has no adjustable setting." => "Cette pièce ne possède aucun réglage.",
-        "Click a part in the tree above to inspect, resize or remove it." => "Sélectionnez une pièce dans l'arbre pour l'inspecter, la régler ou la supprimer.",
-        "No parts yet: add one from the palette." => "Aucune pièce : ajoutez-en une depuis la palette.",
+        "Click a part in the tree above to inspect, resize or remove it." => {
+            "Sélectionnez une pièce dans l'arbre pour l'inspecter, la régler ou la supprimer."
+        }
+        "No parts yet: add one from the palette." => {
+            "Aucune pièce : ajoutez-en une depuis la palette."
+        }
         "root" => "racine",
         "root part" => "pièce racine",
-        "No flight computer: add one to be able to program the vehicle." => "Aucun ordinateur de bord : ajoutez-en un pour programmer le véhicule.",
-        "No flight computer: add one in the missile workshop to program this vehicle." => "Aucun ordinateur de bord : ajoutez-en un dans l'atelier pour programmer ce véhicule.",
-        "No active contract. Accept one in the CONTRACT OFFICE to see its requirements here." => "Aucun contrat actif. Acceptez une offre au bureau des contrats pour afficher ses exigences ici.",
-        "No active contract. Accept an offer to open a dossier." => "Aucun contrat actif. Acceptez une offre pour ouvrir un dossier.",
-        "No aerodynamic surfaces. Drag a wing, fin set or control surface onto a radial mount." => "Aucune surface aérodynamique. Faites glisser une aile ou des ailettes vers un point d'attache radial.",
-        "Depth-first from the root. A decoupler starts a new stage." => "Arbre hiérarchique depuis la racine. Un séparateur ouvre un nouvel étage.",
-        "Drag a part onto a glowing node. Wings, fins and control surfaces need a free radial mount (X cycles symmetry). Delete removes, Ctrl+Z undoes." => "Glissez une pièce vers un point d'attache lumineux dans la vue 3D. Les surfaces se montent sur un point radial libre. X change la symétrie ; Suppr supprime ; Ctrl+Z annule ; Ctrl+Y rétablit.",
-        "A fictional missile programme: take a contract, design the vehicle, fly its trial, deliver the plan." => "Programme militaire fictif : acceptez un contrat, concevez un véhicule, réalisez un essai puis livrez le dossier.",
-        "Build a staged vehicle from resizable parts: tanks, motors, engines, sensors and a computer." => "Assemblez un véhicule par étages à partir de pièces réglables, de capteurs et d'équipements.",
-        "Spend credits and days to unlock engines, sensors, computers and missile families." => "Dépensez des crédits et du temps pour débloquer des pièces et des familles de véhicules.",
-        "Compose the onboard program from the blocks the installed hardware unlocks." => "Composez le programme embarqué avec les blocs autorisés par les équipements installés.",
-        "Client offers, requirements, deadlines and payment. Deliver a verified dossier." => "Offres, exigences, échéances et rémunérations. Livrez un dossier vérifié.",
-        "Fly the vehicle and its program: four plots, events, anomalies, seeded batches and A/B comparison." => "Évaluez le véhicule et son programme : graphiques, événements, anomalies et comparaisons.",
-        "The lab is free. Start a technology, then press NEXT DAY to let time pass." => "Le laboratoire est disponible. Lancez une recherche, puis faites avancer le temps.",
-        "No trial yet. Press RUN TRIAL to fly the current vehicle and program." => "Aucun essai. Lancez un essai pour évaluer le véhicule et son programme.",
+        "No flight computer: add one to be able to program the vehicle." => {
+            "Aucun ordinateur de bord : ajoutez-en un pour programmer le véhicule."
+        }
+        "No flight computer: add one in the missile workshop to program this vehicle." => {
+            "Aucun ordinateur de bord : ajoutez-en un dans l'atelier pour programmer ce véhicule."
+        }
+        "No active contract. Accept one in the CONTRACT OFFICE to see its requirements here." => {
+            "Aucun contrat actif. Acceptez une offre au bureau des contrats pour afficher ses exigences ici."
+        }
+        "No active contract. Accept an offer to open a dossier." => {
+            "Aucun contrat actif. Acceptez une offre pour ouvrir un dossier."
+        }
+        "No aerodynamic surfaces. Drag a wing, fin set or control surface onto a radial mount." => {
+            "Aucune surface aérodynamique. Faites glisser une aile ou des ailettes vers un point d'attache radial."
+        }
+        "Depth-first from the root. A decoupler starts a new stage." => {
+            "Arbre hiérarchique depuis la racine. Un séparateur ouvre un nouvel étage."
+        }
+        "Drag a part onto a glowing node. Wings, fins and control surfaces need a free radial mount (X cycles symmetry). Delete removes, Ctrl+Z undoes." => {
+            "Glissez une pièce vers un point d'attache lumineux dans la vue 3D. Les surfaces se montent sur un point radial libre. X change la symétrie ; Suppr supprime ; Ctrl+Z annule ; Ctrl+Y rétablit."
+        }
+        "A fictional missile programme: take a contract, design the vehicle, fly its trial, deliver the plan." => {
+            "Programme militaire fictif : acceptez un contrat, concevez un véhicule, réalisez un essai puis livrez le dossier."
+        }
+        "Build a staged vehicle from resizable parts: tanks, motors, engines, sensors and a computer." => {
+            "Assemblez un véhicule par étages à partir de pièces réglables, de capteurs et d'équipements."
+        }
+        "Spend credits and days to unlock engines, sensors, computers and missile families." => {
+            "Dépensez des crédits et du temps pour débloquer des pièces et des familles de véhicules."
+        }
+        "Compose the onboard program from the blocks the installed hardware unlocks." => {
+            "Composez le programme embarqué avec les blocs autorisés par les équipements installés."
+        }
+        "Client offers, requirements, deadlines and payment. Deliver a verified dossier." => {
+            "Offres, exigences, échéances et rémunérations. Livrez un dossier vérifié."
+        }
+        "Fly the vehicle and its program: four plots, events, anomalies, seeded batches and A/B comparison." => {
+            "Évaluez le véhicule et son programme : graphiques, événements, anomalies et comparaisons."
+        }
+        "The lab is free. Start a technology, then press NEXT DAY to let time pass." => {
+            "Le laboratoire est disponible. Lancez une recherche, puis faites avancer le temps."
+        }
+        "No trial yet. Press RUN TRIAL to fly the current vehicle and program." => {
+            "Aucun essai. Lancez un essai pour évaluer le véhicule et son programme."
+        }
         "Run a trial to see figures." => "Lancez un essai pour afficher les résultats.",
-        "No trial yet. Fly the vehicle and program in TRIALS to record evidence." => "Aucun essai. Évaluez le véhicule dans l'onglet Essais pour enregistrer des preuves.",
+        "No trial yet. Fly the vehicle and program in TRIALS to record evidence." => {
+            "Aucun essai. Évaluez le véhicule dans l'onglet Essais pour enregistrer des preuves."
+        }
         "None yet." => "Aucun pour le moment.",
-        "None. Accept an offer above; the trials you fly afterwards become its evidence." => "Aucun contrat. Acceptez une offre ; vos prochains essais serviront de preuves.",
-        "The program is empty: add blocks to a thread." => "Le programme est vide : ajoutez des blocs à une tâche.",
-        "This vehicle has no flight computer. Add one in the workshop first." => "Ce véhicule n'a pas d'ordinateur de bord. Ajoutez-en un dans l'atelier.",
+        "None. Accept an offer above; the trials you fly afterwards become its evidence." => {
+            "Aucun contrat. Acceptez une offre ; vos prochains essais serviront de preuves."
+        }
+        "The program is empty: add blocks to a thread." => {
+            "Le programme est vide : ajoutez des blocs à une tâche."
+        }
+        "This vehicle has no flight computer. Add one in the workshop first." => {
+            "Ce véhicule n'a pas d'ordinateur de bord. Ajoutez-en un dans l'atelier."
+        }
         "Program cleared" => "Programme effacé",
         "Block removed" => "Bloc supprimé",
         "Nothing to undo" => "Aucune action à annuler",
@@ -242,19 +286,38 @@ pub fn fr(text: impl Into<String>) -> String {
         "Trial done" => "Essai terminé",
         _ => "",
     };
-    if !exact.is_empty() { return exact.to_string(); }
+    if !exact.is_empty() {
+        return exact.to_string();
+    }
     let mut translated = text;
     for (from, to) in [
-        ("STAGE ", "ÉTAGE "), ("Stage ", "Étage "), ("DAY ", "JOUR "), ("Day ", "Jour "),
-        ("Mass ", "Masse "), ("Total mass ", "Masse totale "),
-        ("Needs research: ", "Recherche nécessaire : "), ("Locked: research ", "Verrouillé : recherchez "),
-        ("Preset locked: research ", "Modèle verrouillé : recherchez "), ("Loaded preset: ", "Modèle chargé : "),
-        ("Added ", "Ajouté : "), ("Removed ", "Supprimé : "), ("Moved ", "Déplacé : "),
-        ("to stage ", "vers l'étage "), ("to thread ", "dans la tâche "), ("No such ", "Aucun élément : "),
-        (" | due day ", " | échéance jour "), (" active contracts", " contrats actifs"), (" delivered", " livrés"),
-        (" cr", " crédits"), (" day(s)", " jour(s)"), (" thread(s)", " tâche(s)"), (" block(s)", " bloc(s)"),
+        ("STAGE ", "ÉTAGE "),
+        ("Stage ", "Étage "),
+        ("DAY ", "JOUR "),
+        ("Day ", "Jour "),
+        ("Mass ", "Masse "),
+        ("Total mass ", "Masse totale "),
+        ("Needs research: ", "Recherche nécessaire : "),
+        ("Locked: research ", "Verrouillé : recherchez "),
+        ("Preset locked: research ", "Modèle verrouillé : recherchez "),
+        ("Loaded preset: ", "Modèle chargé : "),
+        ("Added ", "Ajouté : "),
+        ("Removed ", "Supprimé : "),
+        ("Moved ", "Déplacé : "),
+        ("to stage ", "vers l'étage "),
+        ("to thread ", "dans la tâche "),
+        ("No such ", "Aucun élément : "),
+        (" | due day ", " | échéance jour "),
+        (" active contracts", " contrats actifs"),
+        (" delivered", " livrés"),
+        (" cr", " crédits"),
+        (" day(s)", " jour(s)"),
+        (" thread(s)", " tâche(s)"),
+        (" block(s)", " bloc(s)"),
         (" device(s)", " équipement(s)"),
-    ] { translated = translated.replace(from, to); }
+    ] {
+        translated = translated.replace(from, to);
+    }
     translated
 }
 

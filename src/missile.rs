@@ -7,8 +7,8 @@ use crate::save::{self, SaveFile};
 use crate::scene::OrbitCameraRig;
 use bevy::prelude::*;
 use omega_rules::{
-    AirfoilProfile, AvionicsModule, ComputerClass, ControlKind, FinLayout, Part, PartSpec, RadarClass, SensorKind,
-    StabilizerRole, Stage, Vehicle, WingPlanform, PartCategory,
+    AirfoilProfile, AvionicsModule, ComputerClass, ControlKind, FinLayout, Part, PartCategory, PartSpec, RadarClass,
+    SensorKind, StabilizerRole, Stage, Vehicle, WingPlanform,
 };
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -912,7 +912,10 @@ impl MissileSession {
                 "Started an empty vehicle: drag a part from the palette".to_string()
             }
             MissileAction::CycleSymmetry => self.cycle_symmetry(),
-            MissileAction::SetPaletteCategory(category) => { self.palette_category = category; String::new() }
+            MissileAction::SetPaletteCategory(category) => {
+                self.palette_category = category;
+                String::new()
+            }
             MissileAction::Undo => self.undo(),
             MissileAction::Redo => self.redo(),
         }

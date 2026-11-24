@@ -913,13 +913,27 @@ fn part_title(spec: &omega_rules::PartSpec) -> &'static str {
         PartSpec::FuelTank { .. } => "Réservoir",
         PartSpec::LiquidEngine { .. } => "Moteur liquide",
         PartSpec::AirBreathing { .. } => "Propulseur à air",
-        PartSpec::Sensor { kind: SensorKind::Pitot } => "Sonde de pression",
-        PartSpec::Sensor { kind: SensorKind::Barometer } => "Baromètre",
-        PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Basic) } => "Radar simple",
-        PartSpec::Sensor { kind: SensorKind::Radar(RadarClass::Active) } => "Radar actif",
-        PartSpec::Computer { class: ComputerClass::Basic } => "Ordinateur de bord basique",
-        PartSpec::Computer { class: ComputerClass::Standard } => "Ordinateur de bord standard",
-        PartSpec::Computer { class: ComputerClass::Advanced } => "Ordinateur de bord avancé",
+        PartSpec::Sensor {
+            kind: SensorKind::Pitot,
+        } => "Sonde de pression",
+        PartSpec::Sensor {
+            kind: SensorKind::Barometer,
+        } => "Baromètre",
+        PartSpec::Sensor {
+            kind: SensorKind::Radar(RadarClass::Basic),
+        } => "Radar simple",
+        PartSpec::Sensor {
+            kind: SensorKind::Radar(RadarClass::Active),
+        } => "Radar actif",
+        PartSpec::Computer {
+            class: ComputerClass::Basic,
+        } => "Ordinateur de bord basique",
+        PartSpec::Computer {
+            class: ComputerClass::Standard,
+        } => "Ordinateur de bord standard",
+        PartSpec::Computer {
+            class: ComputerClass::Advanced,
+        } => "Ordinateur de bord avancé",
         PartSpec::Decoupler => "Séparateur",
         PartSpec::MissionModule { .. } => "Module de mission",
         PartSpec::Wing { .. } => "Aile",
@@ -1149,7 +1163,7 @@ fn build_missile(
             }
             ui_kit::label(
                 panel,
-                "Glissez une pièce vers un point d'attache lumineux dans la vue 3D. Déplacez une pièce existante pour déplacer tout son sous-ensemble. X change la symétrie ; Suppr supprime ; Ctrl+Z annule ; Ctrl+Y rétablit.",
+                "Glissez une pièce vers un point d'attache lumineux. Déplacez une pièce pour déplacer son sous-ensemble. F centre la pièce sélectionnée ; Début cadre le véhicule. X change la symétrie ; Suppr supprime ; Ctrl+Z annule ; Ctrl+Y rétablit.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
@@ -1583,7 +1597,14 @@ fn build_missile(
                         };
                         ui_kit::button(
                             panel,
-                            format!("{indent}{}  [{node}]  Étage {}", vehicle.part(&entry.id).map(|part| part_title(&part.spec)).unwrap_or_else(|| entry.id.clone()), entry.stage + 1),
+                            format!(
+                                "{indent}{}  [{node}]  Étage {}",
+                                vehicle
+                                    .part(&entry.id)
+                                    .map(|part| part_title(&part.spec))
+                                    .unwrap_or_else(|| entry.id.clone()),
+                                entry.stage + 1
+                            ),
                             UiAction::Missile(MissileAction::Select { id: entry.id.clone() }),
                             tone,
                             Val::Percent(100.0),
