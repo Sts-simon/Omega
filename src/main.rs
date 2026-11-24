@@ -113,7 +113,7 @@ fn move_camera(
     let mut changed = false;
 
     // KSP-style framing shortcuts: F focuses the selected part, Home frames the whole design.
-    if campus.view == CampusView::Missile && !pointer_over_button {
+    if campus.view == CampusView::Missile {
         if keys.just_pressed(KeyCode::KeyF) {
             if let Some(pose) = session
                 .selected
