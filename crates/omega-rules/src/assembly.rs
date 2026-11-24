@@ -293,11 +293,13 @@ fn quaternion_rotate(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
     let uv=cross(u,v); let uuv=cross(u,uv);
     [v[0]+2.0*(q[0]*uv[0]+uuv[0]),v[1]+2.0*(q[0]*uv[1]+uuv[1]),v[2]+2.0*(q[0]*uv[2]+uuv[2])]
 }
-fn quaternion_to_euler_xyz(q: [f64; 4]) -> (f64,f64,f64) {
-    let [w,x,y,z]=q;
-    ( (2.0*(w*x+y*z)).atan2(1.0-2.0*(x*x+y*y)),
-      (2.0*(w*y-z*x)).clamp(-1.0,1.0).asin(),
-      (2.0*(w*z+x*y)).atan2(1.0-2.0*(y*y+z*z)) )
+fn quaternion_to_euler_xyz(q: [f64; 4]) -> (f64, f64, f64) {
+    let [w, x, y, z] = q;
+    (
+        (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y)),
+        (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin(),
+        (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z)),
+    )
 }
 
 impl Vehicle {
@@ -1016,21 +1018,30 @@ impl Vehicle {
     pub fn poses(&self) -> Vec<PartPose> {
         let depths = self.stage_depths();
         let mut poses = Vec::new();
-        let Some(root) = self.root() else { return poses; };
+        let Some(root) = self.root() else {
+            return poses;
+        };
         let (height, radius) = dimensions(&root.spec);
         let identity = [1.0, 0.0, 0.0, 0.0];
         let mut stack = vec![(root.id.clone(), [0.0, height / 2.0, 0.0], identity, height, radius)];
         let mut seen = BTreeSet::new();
         while let Some((id, position, orientation, parent_height, parent_radius)) = stack.pop() {
-            if !seen.insert(id.clone()) { continue; }
-            let Some(part) = self.part(&id) else { continue; };
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let Some(part) = self.part(&id) else {
+                continue;
+            };
             let (height, radius) = dimensions(&part.spec);
             let (rx, ry, rz) = quaternion_to_euler_xyz(orientation);
             poses.push(PartPose {
                 id: id.clone(),
                 stage: depths.get(&id).copied().unwrap_or(0),
-                y_m: position[1], x_m: position[0], z_m: position[2],
-                height_m: height, radius_m: radius,
+                y_m: position[1],
+                x_m: position[0],
+                z_m: position[2],
+                height_m: height,
+                radius_m: radius,
                 rotation_x_deg: rx.to_degrees(),
                 rotation_y_deg: ry.to_degrees(),
                 rotation_z_deg: rz.to_degrees(),
@@ -1054,12 +1065,26 @@ impl Vehicle {
                     local[2] += a.offset_z_m;
                 }
                 let offset = quaternion_rotate(orientation, local);
-                let child_position = [position[0] + offset[0], position[1] + offset[1], position[2] + offset[2]];
-                let local_rotation = attach.map_or(identity, |a| quaternion_from_euler_xyz(
-                    a.rotation_x_deg.to_radians(), a.rotation_y_deg.to_radians(), a.rotation_z_deg.to_radians(),
-                ));
+                let child_position = [
+                    position[0] + offset[0],
+                    position[1] + offset[1],
+                    position[2] + offset[2],
+                ];
+                let local_rotation = attach.map_or(identity, |a| {
+                    quaternion_from_euler_xyz(
+                        a.rotation_x_deg.to_radians(),
+                        a.rotation_y_deg.to_radians(),
+                        a.rotation_z_deg.to_radians(),
+                    )
+                });
                 let child_orientation = quaternion_multiply(orientation, local_rotation);
-                stack.push((child.id.clone(), child_position, child_orientation, child_height, child_radius));
+                stack.push((
+                    child.id.clone(),
+                    child_position,
+                    child_orientation,
+                    child_height,
+                    child_radius,
+                ));
             }
         }
         poses.sort_by(|a, b| a.y_m.total_cmp(&b.y_m));
@@ -1411,7 +1436,10 @@ pub(crate) mod tests {
         let after = vehicle.poses();
         let rotated = after.iter().find(|pose| pose.id == "sustainer").unwrap();
         assert!(rotated.x_m < -0.5, "child should orbit with its parent: {rotated:?}");
-        assert!((rotated.y_m - parent_y).abs() < 1e-9, "a quarter-turn around Z moves the child sideways");
+        assert!(
+            (rotated.y_m - parent_y).abs() < 1e-9,
+            "a quarter-turn around Z moves the child sideways"
+        );
         assert!((rotated.rotation_z_deg - 90.0).abs() < 1e-6);
     }
 
