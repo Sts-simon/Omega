@@ -452,8 +452,8 @@ pub fn figures(vehicle: &Vehicle) -> AeroFigures {
                 wing_area += area;
                 // Deliberately fictional gameplay modifier, not a physical aerodynamic equation.
                 // The workshop's local wing angle has a visible, deterministic effect in trials.
-                let incidence = (part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg).abs() / 30.0)
-                    .clamp(0.0, 1.0);
+                let incidence =
+                    (part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg).abs() / 30.0).clamp(0.0, 1.0);
                 let angle_quality = 1.0 - 0.25 * incidence;
                 lift_area += area * planform_effect(planform).lift * profile_effect(profile).lift * angle_quality;
                 sweep_weighted += sweep_deg * area;
