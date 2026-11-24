@@ -8,7 +8,7 @@ Omega is a fictional, abstract game about completing military-themed design cont
 
 All values and outcomes are game mechanics. The project does not attempt to model real weapons, real targeting, guidance, navigation, seeker logic, warheads or real-world performance. This boundary is deliberate and is not a future feature.
 
-## Current baseline (0.33.0)
+## Current baseline (0.33.1)
 
 The following features are already present in the application:
 
@@ -103,7 +103,7 @@ The recent CI run on the current `main` commit is green. This is a repository ba
 
 **Acceptance:** a tester can install, launch, play, save and update using only the release instructions.
 
-### Lot 6 — Workshop assembly graph (0.31.1, in progress)
+### Lot 6 — Workshop assembly graph (0.31.1, delivered)
 
 **Purpose:** replace the flat stage list with an attachment tree so radial boosters, free placement
 and a real build interaction become possible.
@@ -116,7 +116,8 @@ and a real build interaction become possible.
   drag threshold so a click only selects, `Delete`, linked radial symmetry (`X`, 1 → 2 → 3 → 4),
   undo/redo (50 snapshots, buttons and layout-independent `Ctrl+Z` / `Ctrl+Y`) and the wheel
   adjusting the selected part's main value without zooming the camera.
-- Remaining for this lot: live flight forecast and the active-contract requirement bar.
+- Still open, outside the delivered scope: live flight forecast and the active-contract
+  requirement bar.
 
 **Acceptance:** a new player builds a two-stage rocket with two radial boosters with the mouse only;
 old presets keep identical stage figures; every refusal has a message and a test.

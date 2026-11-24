@@ -1,4 +1,37 @@
-## Unreleased — Post-aerodynamics follow-ups (0.33.0)
+# Changelog
+
+Newest first. A section names the version it ships in; the release workflow publishes an archive
+when a `v<version>` tag matches the version in `Cargo.toml`.
+
+## Unreleased — Audit and consistency fixes (0.33.1)
+- **A refused attachment no longer rewrites the design.** `Vehicle::attach` applied the new edge
+  before checking the stage count, so a refused move left the part in its new place, reported an
+  error, and `move_part` threw away the snapshot it had taken for undo. The edge is now applied to
+  a copy and committed only when the move is legal.
+- **Fixed control surfaces stabilise.** Their table entry promises `stability 1.25` and the design
+  notes say "authority when moving, stability when fixed", but the aggregation never read that
+  field: a fixed surface only moved the centre of aerodynamics. Fixed surfaces now add passive
+  stability like a fin; the moving families are unchanged.
+- **Radial mounts are range-checked.** A hand-written or imported design could use `radial 8` of a
+  four-slot body and still load. `attach` and `node_status` refuse the node, and `validate()`
+  reports it, so the workshop and the import path agree.
+- **`add_to_top` cannot leave an orphan root.** It now goes through `add_attached`, which removes
+  the new part when the mount is refused; the two code paths were also duplicates of each other.
+- **A new slot no longer imports the removed civil files.** The pre-0.22 import copied
+  `assembly.json`, `polygon-sketch.json` and `lab_sequence.json` into the slot even though those
+  schemas were deleted with the civil loop. Only `campaign.json` is imported now: the extra entries
+  were unreadable, and a damaged dead file made every later save fail through `verify_all`.
+- `--import-design` resolves the 0.21 files next to the slot instead of the process working
+  directory.
+- **Version and documentation alignment.** The 0.33.0 and 0.32.0 changelog sections are shipped
+  versions instead of "Unreleased", the duplicate `# Changelog` heading is gone, the roadmap's
+  assembly-graph lot is marked delivered, and package, lockfile, window title, README and roadmap
+  baseline all read 0.33.1.
+- Tests: 274 (81 application, 18 `omega-data`, 104 `omega-rules`, 71 `omega-sim-core`); fmt and
+  clippy clean. Not verified: nothing was checked on screen, and this lot changes rules, save
+  import and documentation only.
+
+## 0.33.0 — Post-aerodynamics follow-ups
 - **The airframe choices now pay.** Reliability and complexity had no gameplay reader: a fragile airframe (below 60 reliability) now draws at most one seeded surface fault per trial, halving control authority and recording an anomaly, while a sound design never does. The light build is therefore a real trade instead of a free mass saving.
 - **Dossiers pay for quality.** Delivery used to credit the offer's fixed fee whatever the score; the fee is now nominal at the 60 % acceptance threshold and rises to +15 % for a perfect dossier, so the added aero requirements and the batch/AB tooling have an economic payoff.
 - **Each family asks its own trait.** Cruise offers add a soft `LIFT ≥ 40`, air-to-air offers a soft `AUTHORITY ≥ 25`, and the existing surface-to-air `STABILITY ≥ 20` stays. Lift and control authority join `MissileTrial` and its evidence, all bound to the design hash.
@@ -11,7 +44,7 @@
 - Version and window title aligned at 0.33.0; the research overview in the README and roadmap now counts 18 technologies in six departments.
 - Tests: 270 (81 application, 18 `omega-data`, 100 `omega-rules`, 71 `omega-sim-core`); fmt and clippy clean. Not verified: the workshop panel and contract card were not re-checked on screen after these changes; the flight, reward, contract and export paths were checked headlessly.
 
-## Unreleased — Aerodynamics: wings, fins and control surfaces (0.32.0)
+## 0.32.0 — Aerodynamics: wings, fins and control surfaces
 - **The airframe is now a design decision.** Three leaf parts mount on radial slots: `Wing` (lift for cruise), `FinSet` (passive stability) and `ControlSurface` (authority when moving, stability when fixed). Each carries span, chord and, for wings, sweep, plus discrete choices: planform (straight, swept, delta, trapezoidal, variable geometry), profile (symmetric, classic, low drag, high lift, experimental), stabiliser role (rear, front, blended, combined), fin layout (symmetric/asymmetric), control family (classic, integrated, combined, fixed) and a standard/light build. All are mirrored with `X` like any other radial part.
 - **One Bevy-free rule module.** `omega-rules::aero` aggregates the tree once into `AeroFigures`: reference, wing, fin and control areas, area-weighted sweep, stability, control authority, lift, drag index, complexity, reliability, aerodynamic mass, surface drag area, CG, CA, margin, band and balance. Every coefficient is one `Effect` table per family in that module; scores normalise against 0.30 m² of surface (0.90 m² for lift, 0.60 m² for drag). The CG is mass-weighted over all parts, the CA is area-weighted over the surfaces only, and the acceptable band puts the CA 2–10 % of the length behind the CG.
 - **Flight uses the figures without a new simulation.** Surface drag area joins the body term, lift lowers the air-breathing minimum speed (90 m/s by up to 45 %, floor 55 %) and the pre-pitch-over gravity loss (up to 35 %), stability damps the seeded drag spread (up to 60 %) and authority/stability raise the altitude-hold rate (up to 50 %). `FlightReport::aero` quotes the summary. A design without surfaces leaves every term at its previous value; seeds stay deterministic.
@@ -22,7 +55,7 @@
 - **`designs/vehicle.json` moves to schema 4.** Schema 3 graphs and the migrated stage lists load with no surfaces and rewrite as 4; a newer schema is refused. Any surface edit changes the design hash, so old trial evidence and dossiers become stale.
 - Tests: 257 (74 application, 18 `omega-data`, 94 `omega-rules`, 71 `omega-sim-core`); fmt and clippy clean. Flight tests pin the no-surface invariants, fin damping, wing lift at 70 m/s and the control-surface settling time; a headless sweep of every planform, profile, role, layout and control family at extreme spans and chords pins every score to 0..100 and keeps the CG/CA pair inside the vehicle, and a contract test checks that the soft stability requirement scores without ever rejecting a dossier.
 
-## Unreleased — Workshop drag interaction (0.31.1, second step)
+## 0.31.1 — Workshop drag interaction (second step)
 - **Parts are built by dragging in 3D.** A camera ray picks the part under the pointer (`src/picking.rs`), the palette entries carry their template, and a drag from the palette to any free node attaches there; the nodes glow while dragging, the nearest one within 28 px turns green and the hovered node gets a ghost cube. Dragging an existing part moves its whole subtree, refused for the root and for cycles. A 5 px threshold keeps a plain click a pure selection, and `Delete` / `Backspace` removes the selection (whole subtree, with a count).
 - **Radial symmetry is linked.** `X` cycles 1 → 2 → 3 → 4; a radial drop creates the copies on consecutive free slots with one shared `symmetry` group id, and an occupied slot cancels the whole drop without leaving copies behind.
 - **Undo/redo covers every edit.** Up to 50 `Vehicle` snapshots in `MissileSession`, reached from the `UNDO` / `REDO` buttons or layout-independent logical `Ctrl+Z` / `Ctrl+Y` (on AZERTY the physical key is `W`, so the physical key code would never match). Presets clear the history.
@@ -32,14 +65,14 @@
 - Verified in game at 1600×960: palette→top and palette→radial drops, a subtree move, delete + undo, redo, `X` with three linked copies (`Added 3 copies to stage 2`), click-select that no longer relocates the part, a single `Ctrl+Z` restoring a three-notch wheel adjustment (1.50 → 1.80 → 1.50 m), `X` ×4 with `Added 4 copies to stage 2`, and Escape cancelling a palette drag with no part added.
 - Tests: 228 (68 application, 18 `omega-data`, 71 `omega-rules`, 71 `omega-sim-core`); fmt and clippy clean.
 
-## Unreleased — Workshop assembly graph (0.31.1, first step)
+## 0.31.1 — Workshop assembly graph (first step)
 - **The missile is now a tree of parts.** `omega-rules::assembly` stores `PlacedPart`s attached to `top`, `bottom` or one of four radial nodes, refuses cycles, occupied nodes, unknown parents, multiple roots, an engine without a tank in its stage and a computer outside the last stage, and reports a diameter step as a warning. Stages are derived: a decoupler (or an explicit separation edge) starts a new one.
 - **`designs/vehicle.json` moves to schema 3.** Old stage-list files are migrated on read (chained bottom to top, separation edges at former stage boundaries) and keep their stage figures; a newer schema is refused with a message. Existing hash-bound evidence therefore goes stale, as expected and by design.
 - The workshop shows the derived stages and part tree, selects parts by id, adds parts above the selected part (or the highest one), replaces the flight computer in place and reuses the same 3D layout with radial offsets. The stage list no longer has "+ STAGE" buttons.
 - Not yet in this step: drag-and-drop, node picking, linked symmetry placement, undo/redo, direct dragging of parameters, live flight forecast and the contract requirement bar. `docs/DECISIONS.md` records the choices and the open interaction values.
 - Tests: 217 (57 application, 18 `omega-data`, 71 `omega-rules`, 71 `omega-sim-core`); fmt and clippy clean.
 
-## Unreleased — Project consistency and maintenance baseline (0.30.0)
+## 0.30.0 — Project consistency and maintenance baseline
 - Align the package version, lockfile, window title, README and current roadmap at 0.30.0.
 - Replace outdated architecture and vision descriptions that still referred to the removed civil loop, legacy editor and pre-missile workflow.
 - Record the current repository baseline: missile-only gameplay loop, versioned save slot, research-gated contracts and the existing CI checks. No gameplay or save-schema change is intended by this maintenance pass.
@@ -128,8 +161,6 @@
 - Added a civil truss study to the in-game research queue (`G`) and opening the latest HTML report in the default browser (`O`).
 - Kept exact JSON solver reports and added result-shape, identifier and finite-value validation before export.
 - The deformed shape is visually amplified and explicitly labeled; exports preserve unamplified SI quantities.
-
-# Changelog
 
 ## 0.26.0 — Missile workshop and working research (0.25 completed)
 - **Missile workshop** (`missile.rs`, `campus/board.rs`): the WORKSHOP tab now builds a staged vehicle in 3D from the parts of `aerolab-rules::vehicle`. Add parts to the active stage, add or remove stages (up to 4), select a part and resize it with +/- buttons (lengths, diameters, solid-motor burn time, engine scale, module mass), remove it, or start from a preset (two-stage rocket, cruise vehicle) or an empty vehicle. The single flight computer always sits in the last stage and follows new stages.

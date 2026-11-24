@@ -1,6 +1,6 @@
 [package]
 name = "omega"
-version = "0.33.0"
+version = "0.33.1"
 edition = "2024"
 description = "A fictional missile-design game built with Rust and Bevy"
 license = "MIT"

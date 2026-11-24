@@ -1,10 +1,10 @@
 # Omega — Missile Design
 
 [![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.33.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.33.0)
+[![Version](https://img.shields.io/badge/version-0.33.1-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.33.1)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-**Version 0.33.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
+**Version 0.33.1** — a fictional missile-design game built with Rust and Bevy. The player accepts
 military-themed contracts, assembles an abstract staged vehicle, edits its onboard program, runs
 reproducible simulated trials and delivers a dossier. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
 research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
@@ -285,10 +285,12 @@ saves/slot_1/
 ```
 
 Writes are atomic (temporary file, fsync, rename) and a damaged file is reported instead of loaded,
-with the previous generation kept as `<name>.bak`. Files from the pre-0.22 layout (`saves/*.json`)
-are imported once without being modified. Earlier saves load: campaign schema 1 keeps its credits,
-contract schema 1 keeps its single active contract, and an assembly-era revision log (schema 1–2)
-opens empty because those snapshots can no longer be restored.
+with the previous generation kept as `<name>.bak`. The pre-0.22 campaign file
+(`saves/campaign.json`) is imported once without being modified; the civil-era files beside it are
+left untouched because their schemas no longer exist and the game cannot read them. Earlier saves
+load: campaign schema 1 keeps its credits, contract schema 1 keeps its single active contract, and
+an assembly-era revision log (schema 1–2) opens empty because those snapshots can no longer be
+restored.
 
 ## Project structure
 

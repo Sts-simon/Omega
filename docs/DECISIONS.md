@@ -155,3 +155,17 @@ The interaction lot kept the values below; each is now covered by code and by a 
   export cannot corrupt a campaign.
 - **Explainability is derived, not stored.** `aero::breakdown` recomputes contributions from the same
   `Effect` tables; warnings carry an optional part id rather than a new warning type in the save.
+
+## 2026-11-24 — Audit fixes after 0.33.0
+
+- **Attachment is transactional.** `Vehicle::attach` applies the edge to a clone and swaps `parts`
+  only once the stage count is legal, so a refused move can no longer leave the design in the new
+  place while reporting an error. The stage rule itself is unchanged: a move that would drop a
+  stage boundary is still refused, now without side effects.
+- **Fixed control surfaces use their stability entry.** The `fixed` row in `aero_effects.json` is the
+  passive trade (stability 1.25, authority 0); the aggregation now reads it into the fin
+  effectiveness term. Moving families keep authority only, so no design changes except one carrying
+  a fixed surface, which gains the stability its entry always claimed.
+- **Legacy import follows the live schema.** Only `campaign.json` survives from the 0.21 layout; the
+  other three files are unreadable by every code path, and importing them left manifest entries
+  whose damage would block every later save.
