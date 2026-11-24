@@ -1601,7 +1601,7 @@ fn build_missile(
                                 "{indent}{}  [{node}]  Étage {}",
                                 vehicle
                                     .part(&entry.id)
-                                    .map(|part| part_title(&part.spec))
+                                    .map(|part| part_title(&part.spec).to_string())
                                     .unwrap_or_else(|| entry.id.clone()),
                                 entry.stage + 1
                             ),
