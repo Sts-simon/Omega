@@ -277,6 +277,29 @@ pub struct PartPose {
     pub rotation_z_deg: f64,
 }
 
+// Quaternion math keeps this rules crate independent from Bevy.
+fn quaternion_multiply(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    let [aw, ax, ay, az] = a; let [bw, bx, by, bz] = b;
+    [aw*bw-ax*bx-ay*by-az*bz, aw*bx+ax*bw+ay*bz-az*by,
+     aw*by-ax*bz+ay*bw+az*bx, aw*bz+ax*by-ay*bx+az*bw]
+}
+fn quaternion_from_euler_xyz(x: f64, y: f64, z: f64) -> [f64; 4] {
+    let (sx,cx)=(x*0.5).sin_cos(); let (sy,cy)=(y*0.5).sin_cos(); let (sz,cz)=(z*0.5).sin_cos();
+    quaternion_multiply(quaternion_multiply([cx,sx,0.0,0.0],[cy,0.0,sy,0.0]),[cz,0.0,0.0,sz])
+}
+fn quaternion_rotate(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
+    let u=[q[1],q[2],q[3]];
+    let cross=|a:[f64;3],b:[f64;3]| [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+    let uv=cross(u,v); let uuv=cross(u,uv);
+    [v[0]+2.0*(q[0]*uv[0]+uuv[0]),v[1]+2.0*(q[0]*uv[1]+uuv[1]),v[2]+2.0*(q[0]*uv[2]+uuv[2])]
+}
+fn quaternion_to_euler_xyz(q: [f64; 4]) -> (f64,f64,f64) {
+    let [w,x,y,z]=q;
+    ( (2.0*(w*x+y*z)).atan2(1.0-2.0*(x*x+y*y)),
+      (2.0*(w*y-z*x)).clamp(-1.0,1.0).asin(),
+      (2.0*(w*z+x*y)).atan2(1.0-2.0*(y*y+z*z)) )
+}
+
 impl Vehicle {
     pub fn from_stages(name: impl Into<String>, stages: Vec<Stage>) -> Self {
         let mut parts = Vec::new();
@@ -988,74 +1011,55 @@ impl Vehicle {
         reports
     }
 
-    /// 3D positions of every part, derived from the attachment tree.
+    /// 3D world poses derived from the attachment tree. Child mounts and offsets are
+    /// transformed by the parent's orientation, so rotating a part carries its full subtree.
     pub fn poses(&self) -> Vec<PartPose> {
         let depths = self.stage_depths();
         let mut poses = Vec::new();
-        let Some(root) = self.root() else {
-            return poses;
-        };
+        let Some(root) = self.root() else { return poses; };
         let (height, radius) = dimensions(&root.spec);
-        let mut stack = vec![(root.id.clone(), (height / 2.0, 0.0, 0.0, height, radius))];
+        let identity = [1.0, 0.0, 0.0, 0.0];
+        let mut stack = vec![(root.id.clone(), [0.0, height / 2.0, 0.0], identity, height, radius)];
         let mut seen = BTreeSet::new();
-        while let Some((id, (y, x, z, parent_height, parent_radius))) = stack.pop() {
-            if !seen.insert(id.clone()) {
-                continue;
-            }
-            let Some(part) = self.part(&id) else {
-                continue;
-            };
+        while let Some((id, position, orientation, parent_height, parent_radius)) = stack.pop() {
+            if !seen.insert(id.clone()) { continue; }
+            let Some(part) = self.part(&id) else { continue; };
             let (height, radius) = dimensions(&part.spec);
+            let (rx, ry, rz) = quaternion_to_euler_xyz(orientation);
             poses.push(PartPose {
                 id: id.clone(),
                 stage: depths.get(&id).copied().unwrap_or(0),
-                y_m: y,
-                x_m: x,
-                z_m: z,
-                height_m: height,
-                radius_m: radius,
-                rotation_x_deg: part.attach.as_ref().map_or(0.0, |a| a.rotation_x_deg),
-                rotation_y_deg: part.attach.as_ref().map_or(0.0, |a| a.rotation_y_deg),
-                rotation_z_deg: part.attach.as_ref().map_or(0.0, |a| a.rotation_z_deg),
+                y_m: position[1], x_m: position[0], z_m: position[2],
+                height_m: height, radius_m: radius,
+                rotation_x_deg: rx.to_degrees(),
+                rotation_y_deg: ry.to_degrees(),
+                rotation_z_deg: rz.to_degrees(),
             });
             for child in self.children(&id) {
                 let (child_height, child_radius) = dimensions(&child.spec);
                 let attach = child.attach.as_ref();
-                let mut pose = match attach.map(|a| a.node) {
-                    Some(NodeId::Top) => (
-                        y + parent_height / 2.0 + child_height / 2.0,
-                        x,
-                        z,
-                        child_height,
-                        child_radius,
-                    ),
-                    Some(NodeId::Bottom) => (
-                        y - parent_height / 2.0 - child_height / 2.0,
-                        x,
-                        z,
-                        child_height,
-                        child_radius,
-                    ),
+                let mut local = match attach.map(|a| a.node) {
+                    Some(NodeId::Top) => [0.0, parent_height / 2.0 + child_height / 2.0, 0.0],
+                    Some(NodeId::Bottom) => [0.0, -parent_height / 2.0 - child_height / 2.0, 0.0],
                     Some(NodeId::Radial(index)) => {
-                        let angle = f64::from(index) * 90.0 + child.attach.as_ref().map_or(0.0, |a| a.angle_deg);
-                        let angle = angle.to_radians();
+                        let angle = (f64::from(index) * 90.0 + attach.map_or(0.0, |a| a.angle_deg)).to_radians();
                         let offset = parent_radius + child_radius;
-                        (
-                            y,
-                            x + angle.cos() * offset,
-                            z + angle.sin() * offset,
-                            child_height,
-                            child_radius,
-                        )
+                        [angle.cos() * offset, 0.0, angle.sin() * offset]
                     }
-                    None => (y, x, z, child_height, child_radius),
+                    None => [0.0, 0.0, 0.0],
                 };
-                if let Some(attach) = attach {
-                    pose.0 += attach.offset_y_m;
-                    pose.1 += attach.offset_x_m;
-                    pose.2 += attach.offset_z_m;
+                if let Some(a) = attach {
+                    local[0] += a.offset_x_m;
+                    local[1] += a.offset_y_m;
+                    local[2] += a.offset_z_m;
                 }
-                stack.push((child.id.clone(), pose));
+                let offset = quaternion_rotate(orientation, local);
+                let child_position = [position[0] + offset[0], position[1] + offset[1], position[2] + offset[2]];
+                let local_rotation = attach.map_or(identity, |a| quaternion_from_euler_xyz(
+                    a.rotation_x_deg.to_radians(), a.rotation_y_deg.to_radians(), a.rotation_z_deg.to_radians(),
+                ));
+                let child_orientation = quaternion_multiply(orientation, local_rotation);
+                stack.push((child.id.clone(), child_position, child_orientation, child_height, child_radius));
             }
         }
         poses.sort_by(|a, b| a.y_m.total_cmp(&b.y_m));
