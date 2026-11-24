@@ -230,17 +230,21 @@ pub(crate) fn workshop_pointer(
         {
             let center = world_of(missile::ANCHOR, pose.x_m, pose.y_m, pose.z_m);
             let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+            let center_screen = camera.world_to_viewport(camera_transform, center).ok();
             let mut nearest: Option<(usize, Vec2, f32)> = None;
             for (axis, direction) in axes.into_iter().enumerate() {
-                if let Ok(point) = camera.world_to_viewport(camera_transform, center + direction * 1.5) {
+                if let (Some(origin), Ok(point)) = (
+                    center_screen,
+                    camera.world_to_viewport(camera_transform, center + direction * 1.5),
+                ) {
                     let distance = cursor.distance(point);
                     if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
-                        nearest = Some((axis, point, distance));
+                        nearest = Some((axis, point - origin, distance));
                     }
                 }
             }
-            if let Some((axis, handle, _)) = nearest {
-                transform_gizmo.drag = Some((axis, cursor, handle));
+            if let Some((axis, screen_axis, _)) = nearest {
+                transform_gizmo.drag = Some((axis, cursor, screen_axis.normalize_or_zero()));
             }
         }
         if transform_gizmo.drag.is_none() {
@@ -317,7 +321,7 @@ pub(crate) fn workshop_pointer(
     {
         let delta = cursor - start;
         let amount = if transform_gizmo.mode == TransformMode::Translate {
-            let screen_axis = (handle - start).normalize_or_zero();
+            let screen_axis = handle.normalize_or_zero();
             let metres = delta.dot(screen_axis) * 0.02;
             if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
                 metres
