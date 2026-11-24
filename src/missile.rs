@@ -1475,6 +1475,9 @@ pub(crate) struct PartBox {
     pub rotation_x_deg: f32,
     pub rotation_y_deg: f32,
     pub rotation_z_deg: f32,
+    /// Wing-only planform and sweep, used by the 3D preview mesh.
+    pub planform: Option<WingPlanform>,
+    pub sweep_deg: f32,
     pub shape: Shape,
     pub color: [f32; 3],
 }
@@ -1537,6 +1540,10 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
             let part = vehicle.part(&pose.id)?;
             let spec = part.spec;
             let (shape, color) = appearance(&spec);
+            let (planform, sweep_deg) = match spec {
+                PartSpec::Wing { planform, sweep_deg, .. } => (Some(planform), sweep_deg as f32),
+                _ => (None, 0.0),
+            };
             let angle = part.attach.as_ref().map_or(0.0, |attach| match attach.node {
                 omega_rules::NodeId::Radial(index) => f64::from(index) * 90.0 + attach.angle_deg,
                 _ => attach.angle_deg,
@@ -1557,6 +1564,8 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
                 rotation_x_deg: pose.rotation_x_deg as f32,
                 rotation_y_deg: pose.rotation_y_deg as f32,
                 rotation_z_deg: pose.rotation_z_deg as f32,
+                planform,
+                sweep_deg,
                 shape,
                 color,
             })
@@ -1641,25 +1650,47 @@ pub(crate) fn sync_missile_visuals(
                 ..default()
             });
             let mid = b.y_bottom + b.height / 2.0;
-            let (mesh, _shape_rotation) = match b.shape {
-                Shape::Nozzle => (meshes.add(Cone::new(b.radius, b.height)), Quat::IDENTITY),
-                Shape::Body | Shape::Sensor | Shape::Disc => {
-                    (meshes.add(Cylinder::new(b.radius, b.height)), Quat::IDENTITY)
+            let rotation = Quat::from_euler(
+                EulerRot::XYZ,
+                b.rotation_x_deg.to_radians(),
+                (b.rotation_y_deg - b.angle).to_radians(),
+                b.rotation_z_deg.to_radians(),
+            );
+            if let Some(planform) = b.planform {
+                // Eight short sections give the preview a readable stepped planform without
+                // introducing a heavyweight mesh-generation dependency.
+                const SEGMENTS: usize = 8;
+                let segment_span = b.span.max(0.05) / SEGMENTS as f32;
+                for index in 0..SEGMENTS {
+                    let t = (index as f32 + 0.5) / SEGMENTS as f32;
+                    let taper = match planform {
+                        WingPlanform::Straight | WingPlanform::Swept => 1.0,
+                        WingPlanform::Delta => 1.0 - 0.92 * t,
+                        WingPlanform::Trapezoidal => 1.0 - 0.45 * t,
+                        WingPlanform::VariableGeometry => 1.0 - 0.28 * t,
+                    };
+                    let chord = (b.height * taper).max(0.025);
+                    let sweep_offset = (b.sweep_deg / 60.0) * b.height * 0.45 * t;
+                    let span_offset = -b.span * 0.5 + segment_span * (index as f32 + 0.5);
+                    let chord_offset = (b.height - chord) * 0.5 - sweep_offset;
+                    root.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(segment_span * 1.03, chord, 0.06))),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_xyz(b.x + span_offset, mid + chord_offset, b.z)
+                            .with_rotation(rotation),
+                    ));
                 }
-                Shape::Surface => (
-                    meshes.add(Cuboid::new(b.span.max(0.05), b.height.max(0.02), 0.06)),
-                    Quat::from_rotation_y(-b.angle.to_radians()),
-                ),
+                continue;
+            }
+            let mesh = match b.shape {
+                Shape::Nozzle => meshes.add(Cone::new(b.radius, b.height)),
+                Shape::Body | Shape::Sensor | Shape::Disc => meshes.add(Cylinder::new(b.radius, b.height)),
+                Shape::Surface => meshes.add(Cuboid::new(b.span.max(0.05), b.height.max(0.02), 0.06)),
             };
             root.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_xyz(b.x, mid, b.z).with_rotation(Quat::from_euler(
-                    EulerRot::XYZ,
-                    b.rotation_x_deg.to_radians(),
-                    (b.rotation_y_deg - b.angle).to_radians(),
-                    b.rotation_z_deg.to_radians(),
-                )),
+                Transform::from_xyz(b.x, mid, b.z).with_rotation(rotation),
             ));
         }
         if !boxes.is_empty() {
