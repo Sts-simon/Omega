@@ -363,6 +363,38 @@ pub(crate) fn workshop_pointer(
     }
 }
 
+/// Show free attachment points on the selected body even when no drag is active.
+/// This makes valid mounting locations discoverable instead of hiding them until a drag starts.
+pub(crate) fn draw_attachment_markers(
+    session: Res<MissileSession>,
+    campus: Res<CampusState>,
+    mut gizmos: Gizmos,
+) {
+    if campus.view != CampusView::Missile {
+        return;
+    }
+    let Some(selected) = session.selected.as_deref() else {
+        return;
+    };
+    let Some(part) = session.vehicle.part(selected) else {
+        return;
+    };
+    if part.spec.is_aero() {
+        return;
+    }
+    for node in free_nodes(&session.vehicle, missile::ANCHOR)
+        .into_iter()
+        .filter(|node| node.parent == selected)
+    {
+        let color = match node.node {
+            NodeId::Top => Color::srgb(0.35, 0.90, 0.62),
+            NodeId::Bottom => Color::srgb(0.95, 0.70, 0.30),
+            NodeId::Radial(_) => Color::srgb(0.36, 0.84, 0.94),
+        };
+        gizmos.sphere(Isometry3d::from_translation(node.world), 0.13, color);
+    }
+}
+
 /// Centre-of-gravity and centre-of-aerodynamics markers plus the acceptable middle band. Drawn
 /// only in the workshop, and only when the design has at least one aerodynamic surface.
 pub(crate) fn draw_aero_markers(session: Res<MissileSession>, campus: Res<CampusState>, mut gizmos: Gizmos) {
