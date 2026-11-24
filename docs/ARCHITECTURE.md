@@ -120,6 +120,26 @@ the 3D layout built from `Vehicle::poses()` and the revision diff. Save files ca
 `schema_version: 4`; deserialization accepts a schema-3 graph or the old stage list and rewrites it as
 4, and refuses a newer schema with an error instead of guessing.
 
+## Workshop screen (0.34.0)
+
+The workshop is one screen with four panels and one 3D view: a category-grouped palette, an
+indented assembly tree, a selected-part inspector and a validation panel, plus the middle column
+with the aerodynamic sheet, the contract check and the stage figures.
+
+Every panel reads a rule, none owns one:
+
+- the palette order comes from `PartCategory::ALL` and `PartSpec::category()`;
+- the tree comes from `Vehicle::tree_entries()` (depth-first, parent, node, derived stage);
+- errors and warnings come from `Vehicle::issues()` (`IssueSeverity`, message, optional part id),
+  with `validate()` kept as the error-only string view;
+- the contract rows come from `omega_rules::compliance::contract_preview`, which reuses
+  `ContractOffer::missile_requirements()` and only predicts the figures the design determines
+  (launch mass, stability, lift, authority), marking the rest `TRIAL`;
+- the figures, stage reports and selected-surface contribution keep their existing owners.
+
+Selecting a validation row or an aero warning dispatches `MissileAction::Select`, so every panel
+feeds the same session and selection state.
+
 ## Aerodynamics (0.32.0)
 
 `crates/omega-rules/src/aero.rs` is Bevy-free and owns every aerodynamic rule. Three leaf parts

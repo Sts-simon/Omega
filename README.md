@@ -1,10 +1,10 @@
 # Omega — Missile Design
 
 [![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.33.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.33.0)
+[![Version](https://img.shields.io/badge/version-0.34.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.34.0)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-**Version 0.33.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
+**Version 0.34.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
 military-themed contracts, assembles an abstract staged vehicle, edits its onboard program, runs
 reproducible simulated trials and delivers a dossier. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
 research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
@@ -60,6 +60,13 @@ workspace folder are ignored.
   that tree, so a decoupler starts a new stage instead of a separate stage editor. The tree is saved
   as `designs/vehicle.json` schema 4; schema-3 graphs and older stage-list files are migrated when
   read.
+- **The workshop reads as one screen.** The palette groups parts under the rules' own categories
+  (propulsion, airframe, aerodynamic surfaces, sensors, avionics); the right column shows the
+  assembly as an indented tree (node, stage, click to select), the selected part's attachment,
+  stage, dimensions, category and missing research, and a validation panel that lists errors and
+  warnings as shortcuts to the part at fault (the first six inline, the rest counted). A contract check panel compares the design on paper
+  with the selected active contract and marks each figure `MET`, `CLOSE`, `MISSED` or `TRIAL` when
+  only a flight can prove it.
 - **Parts are placed with the mouse.** Drag a palette entry onto any free node shown in the 3D view;
   a plain click still adds above the selected part (or the highest one). Drag an existing part onto
   another node to move its whole subtree, `Delete` removes the selection, `X` cycles radial symmetry
