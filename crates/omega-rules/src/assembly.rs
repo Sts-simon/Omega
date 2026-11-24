@@ -403,8 +403,20 @@ impl Vehicle {
             return Err(format!("that node is already used by {taken}"));
         }
         match node {
-            NodeId::Radial(_) if radial_slots(&parent_part.spec) == 0 => Err(format!("{} has no radial mount", parent)),
-            NodeId::Radial(_) => Ok(()),
+            NodeId::Radial(index) => {
+                let slots = radial_slots(&parent_part.spec);
+                if slots == 0 {
+                    Err(format!("{} has no radial mount", parent))
+                } else if index >= slots {
+                    Err(format!(
+                        "{} has {slots} radial mount(s): radial {} does not exist",
+                        parent,
+                        index + 1
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
             NodeId::Top | NodeId::Bottom => Ok(()),
         }
     }
@@ -424,22 +436,23 @@ impl Vehicle {
         }
         let spec = self.part(child).map(|p| p.spec).ok_or("missing part")?;
         self.node_status(parent, node, &spec)?;
-        let depths_before = self.stage_count();
-        let part = self.part_mut(child).ok_or("missing part")?;
+        // Apply the edge on a copy first: a refused move must leave the design exactly as it was,
+        // with its previous attachment, its stages and its figures intact.
+        let mut candidate = self.clone();
+        let part = candidate.part_mut(child).ok_or("missing part")?;
         part.attach = Some(Attach {
             parent: parent.to_string(),
             node,
             angle_deg,
             separation: false,
         });
-        if self.stage_count() > MAX_STAGES {
-            let part = self.part_mut(child).ok_or("missing part")?;
-            part.attach = None;
+        if candidate.stage_count() > MAX_STAGES {
             return Err(format!("a vehicle can have at most {MAX_STAGES} stages"));
         }
-        if self.stage_count() < depths_before {
-            return Err("that attachment would fold the vehicle onto itself".to_string());
+        if candidate.stage_count() < self.stage_count() {
+            return Err("that attachment would remove a stage: keep the decoupler or separation edge".to_string());
         }
+        self.parts = candidate.parts;
         Ok(())
     }
 
@@ -510,6 +523,17 @@ impl Vehicle {
                         attach.parent,
                         attach.node.label()
                     ));
+                }
+                if let (NodeId::Radial(index), Some(parent)) = (attach.node, self.part(&attach.parent)) {
+                    let slots = radial_slots(&parent.spec);
+                    if index >= slots {
+                        issues.push(format!(
+                            "{} uses radial {} of {}, which has {slots} radial mount(s)",
+                            part.id,
+                            index + 1,
+                            parent.id
+                        ));
+                    }
                 }
             }
             if let Err(error) = part.spec.validate() {
@@ -862,16 +886,19 @@ impl Vehicle {
     /// Add a part above the current stack. The first part of an empty design becomes the root.
     pub fn add_to_top(&mut self, id: impl Into<String>, spec: PartSpec) -> Result<(), String> {
         let id = id.into();
-        let parent = self.topmost_id();
-        self.parts.push(PlacedPart {
-            id: id.clone(),
-            spec,
-            attach: None,
-            symmetry: None,
-        });
-        match parent {
-            Some(top) if top != id => self.attach(&id, &top, NodeId::Top, 0.0),
-            _ => Ok(()),
+        match self.topmost_id() {
+            // `add_attached` removes the new part again when the mount is refused, so a failed add
+            // never leaves a second root behind.
+            Some(top) => self.add_attached(id, spec, &top, NodeId::Top),
+            None => {
+                self.parts.push(PlacedPart {
+                    id,
+                    spec,
+                    attach: None,
+                    symmetry: None,
+                });
+                Ok(())
+            }
         }
     }
 
@@ -1115,6 +1142,66 @@ pub(crate) mod tests {
         assert_eq!(removed.len(), 4, "{removed:?}");
         assert_eq!(vehicle.parts.len(), 2);
         assert!(vehicle.validate().is_err(), "the computer is gone");
+    }
+
+    #[test]
+    fn a_refused_attachment_leaves_the_design_untouched() {
+        let mut vehicle = sounding_rocket();
+        let before = vehicle.clone();
+        // Moving the sustainer onto the booster would drop the stage boundary the decoupler makes.
+        let error = vehicle
+            .attach("sustainer", "booster", NodeId::Radial(0), 0.0)
+            .unwrap_err();
+        assert!(error.contains("stage"), "{error}");
+        assert_eq!(vehicle, before, "a refused move must not rewrite the attachment tree");
+        assert_eq!(vehicle.stage_count(), 2);
+    }
+
+    #[test]
+    fn a_radial_node_beyond_the_parents_slots_is_refused_and_reported() {
+        let mut vehicle = sounding_rocket();
+        let error = vehicle.attach("module", "booster", NodeId::Radial(7), 0.0).unwrap_err();
+        assert!(error.contains("radial 8"), "{error}");
+        assert_eq!(vehicle.parts.len(), 6, "the refused part stays where it was");
+
+        let mut crafted = sounding_rocket();
+        crafted.parts.push(PlacedPart {
+            id: "stray".into(),
+            spec: PartSpec::Decoupler,
+            attach: Some(Attach {
+                parent: "booster".into(),
+                node: NodeId::Radial(9),
+                angle_deg: 0.0,
+                separation: false,
+            }),
+            symmetry: None,
+        });
+        let issues = crafted.validate().unwrap_err().join(" | ");
+        assert!(issues.contains("radial 10"), "{issues}");
+    }
+
+    #[test]
+    fn adding_above_the_stack_keeps_a_single_root() {
+        let mut empty = Vehicle::default();
+        empty
+            .add_to_top(
+                "motor",
+                PartSpec::SolidMotor {
+                    length_m: 2.0,
+                    diameter_m: 0.4,
+                    burn_time_s: 20.0,
+                },
+            )
+            .unwrap();
+        assert_eq!(empty.root_id(), Some("motor"));
+
+        let mut vehicle = sounding_rocket();
+        vehicle
+            .add_to_top("extra", PartSpec::MissionModule { mass_kg: 10.0 })
+            .unwrap();
+        assert_eq!(vehicle.parts.len(), 7);
+        assert_eq!(vehicle.parts.iter().filter(|part| part.attach.is_none()).count(), 1);
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
     }
 
     #[test]

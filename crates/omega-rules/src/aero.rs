@@ -469,9 +469,14 @@ pub fn figures(vehicle: &Vehicle) -> AeroFigures {
                     asymmetric = true;
                 }
             }
-            PartSpec::ControlSurface { .. } => {
+            PartSpec::ControlSurface { kind, .. } => {
                 control_area += area;
                 moving_area += area * effect.authority;
+                // A fixed surface stabilises like a fin, as its table entry and the design notes
+                // say; the moving kinds trade that passive effect for authority instead.
+                if !kind.is_moving() {
+                    fin_effective += area * effect.stability;
+                }
                 drag_area += area * effect.drag;
                 let weight = area * 0.25;
                 ca_weight += weight;
@@ -812,6 +817,30 @@ mod tests {
         assert!(figures.stability > 0.0);
         assert_eq!(figures.control_authority, 0.0);
         assert!(figures.surface_drag_area_m2 > 0.0);
+    }
+
+    #[test]
+    fn a_fixed_surface_stabilises_where_a_moving_one_only_adds_authority() {
+        let mut fixed = sounding_rocket();
+        mount(
+            &mut fixed,
+            "ctrl",
+            control(0.4, 0.4, ControlKind::Fixed),
+            "booster",
+            NodeId::Radial(0),
+        );
+        let mut moving = fixed.clone();
+        moving.replace_part("ctrl", control(0.4, 0.4, ControlKind::Classic));
+        let fixed = figures(&fixed);
+        let moving = figures(&moving);
+        assert!(
+            fixed.stability > moving.stability + 10.0,
+            "fixed {} vs moving {}",
+            fixed.stability,
+            moving.stability
+        );
+        assert_eq!(fixed.control_authority, 0.0);
+        assert!(moving.control_authority > 0.0);
     }
 
     #[test]
