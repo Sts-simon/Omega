@@ -1,10 +1,10 @@
 # Omega — Missile Design
 
 [![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.34.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.34.0)
+[![Version](https://img.shields.io/badge/version-0.35.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.35.0)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-**Version 0.34.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
+**Version 0.35.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
 military-themed contracts, assembles an abstract staged vehicle, edits its onboard program, runs
 reproducible simulated trials and delivers a dossier. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
 research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
@@ -32,10 +32,11 @@ workspace folder are ignored.
 
 ### Research Centre
 
-- 18 technologies in six departments (missile families, propulsion and structures, aerodynamics,
+- 20 technologies in six departments (missile families, propulsion and structures, aerodynamics,
   sensors and electronics, onboard computing, design and test tools), each with a credit cost, a
   duration in days and prerequisites. Aerodynamics, fin stabilisation, control surfaces, advanced
-  profiles and light aero structures unlock the airframe choices.
+  profiles and light aero structures unlock the airframe choices; flight control electronics and
+  navigation and datalink unlock the mission modules.
 - One research project at a time. Credits are deducted when research starts; the **NEXT DAY**
   button advances the game clock, shown as `DAY n` in the navigation bar. Finishing a project
   grants its capabilities and prints the technology name.
@@ -52,14 +53,15 @@ workspace folder are ignored.
 
 ### Missile workshop
 
-- A staged vehicle built from 16 part types: solid motor, fuel tank, liquid engine, turbofan,
-  pitot tube, barometer, basic radar, active radar, three flight computers, decoupler, mission
-  module, wing, fin set and control surface. Each part is resizable within validated ranges.
+- A staged vehicle built from 21 part types: solid motor, fuel tank, liquid engine, turbofan,
+  pitot tube, barometer, basic radar, active radar, three flight computers, control augment,
+  inertial platform, datalink, power cell, self-test suite, decoupler, mission module, wing, fin
+  set and control surface. Each part is resizable within validated ranges.
 - **The vehicle is an attachment tree.** A part is mounted on a node of another part (`top`,
   `bottom`, or one of four radial mounts on motors, tanks and modules); the stages are derived from
   that tree, so a decoupler starts a new stage instead of a separate stage editor. The tree is saved
-  as `designs/vehicle.json` schema 4; schema-3 graphs and older stage-list files are migrated when
-  read.
+  as `designs/vehicle.json` schema 5; schema 3-4 graphs and older stage-list files are migrated
+  when read.
 - **The workshop reads as one screen.** The palette groups parts under the rules' own categories
   (propulsion, airframe, aerodynamic surfaces, sensors, avionics); the right column shows the
   assembly as an indented tree (node, stage, click to select), the selected part's attachment,
@@ -67,6 +69,15 @@ workspace folder are ignored.
   warnings as shortcuts to the part at fault (the first six inline, the rest counted). A contract check panel compares the design on paper
   with the selected active contract and marks each figure `MET`, `CLOSE`, `MISSED` or `TRIAL` when
   only a flight can prove it.
+- **Mission electronics are a stack, not decoration.** Five modules cover control, navigation,
+  communication, power and diagnostics: a control augment adds authority, a navigation platform
+  and a datalink raise the lock chance, a power cell feeds the mission bus and a self-test suite
+  halves the airframe fault exposure. The rules refuse a module without a cell, a datalink without
+  navigation, a control augment on a basic computer and a second copy of any non-power module;
+  they warn about thin power headroom and modules that would be dropped early. The selected-part
+  panel quotes each module's cost, draw, complexity, effect and dependency, and the stage panel
+  summarises devices, power margin and cost. Effects reach the trial through the flight report
+  (`avionics`, `surface_fault`), so a saved design and its evidence stay hash-bound.
 - **Parts are placed with the mouse.** Drag a palette entry onto any free node shown in the 3D view;
   a plain click still adds above the selected part (or the highest one). Drag an existing part onto
   another node to move its whole subtree, `Delete` removes the selection, `X` cycles radial symmetry
@@ -273,7 +284,7 @@ omega --aero-report                          # render the effect tables as Markd
 ```
 
 `--import-design` refuses a design that does not validate and never writes a partial save. The design
-file is the schema-4 vehicle itself, so an export from an older build imports after the normal
+file is the schema-5 vehicle itself, so an export from an older build imports after the normal
 migration. The complete contract loop still needs the window; these commands cover the flight,
 comparison, export and balance parts.
 
@@ -287,7 +298,7 @@ saves/slot_1/
   campaign.json                 credits, research, day (schema 2; schema 1 still loads)
   contracts/missile.json        offers, active contracts, evidence, deliveries (schema 2)
   designs/revisions.json        missile design revisions (schema 3)
-  designs/vehicle.json          missile vehicle (schema 4; schema 3 graphs and 1-2 lists migrate)
+  designs/vehicle.json          missile vehicle (schema 5; schema 3-4 graphs and 1-2 lists migrate)
   programs/missile.json         missile program
 ```
 
