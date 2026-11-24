@@ -26,6 +26,9 @@ pub struct FlightConfig {
     pub max_time_s: f64,
     pub dt_s: f64,
     pub seed: u64,
+    /// Record every executed block for the program debugger. Off by default so a batch run does
+    /// not allocate a trace it never shows.
+    pub trace: bool,
 }
 
 impl Default for FlightConfig {
@@ -35,6 +38,7 @@ impl Default for FlightConfig {
             max_time_s: 600.0,
             dt_s: 0.1,
             seed: 1,
+            trace: false,
         }
     }
 }
@@ -69,6 +73,8 @@ pub struct FlightReport {
     pub avionics: crate::avionics::AvionicsSummary,
     /// Whether the seeded airframe fault fired in this run.
     pub surface_fault: bool,
+    /// Blocks the run executed, when the configuration asked for a trace.
+    pub trace: Vec<crate::program::BlockTrace>,
     /// Thrust-to-weight ratio when the first stage was ignited.
     pub first_ignition_twr: Option<f64>,
     pub lifted_off: bool,
@@ -141,6 +147,8 @@ fn air_density(altitude_m: f64) -> f64 {
 struct ThreadState {
     pc: usize,
     wait_until: f64,
+    /// When the current condition block started waiting, so its timeout is measured from there.
+    waiting_since: Option<f64>,
 }
 
 pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> Result<FlightReport, Vec<String>> {
@@ -208,8 +216,16 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
     let mut threads: Vec<ThreadState> = program
         .threads
         .iter()
-        .map(|_| ThreadState { pc: 0, wait_until: 0.0 })
+        .map(|_| ThreadState {
+            pc: 0,
+            wait_until: 0.0,
+            waiting_since: None,
+        })
         .collect();
+    // Shared program state: four flags and one mode register, exactly what the editor exposes.
+    let mut flags = [false; crate::program::FLAGS];
+    let mut mode: u8 = 0;
+    let mut trace: Vec<crate::program::BlockTrace> = Vec::new();
 
     let mut t = 0.0;
     let mut path = 0.0;
@@ -247,12 +263,53 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         // --- program ---
         for thread_index in 0..threads.len() {
             loop {
-                let thread = &threads[thread_index];
-                if t < thread.wait_until || thread.pc >= program.threads[thread_index].len() {
+                if t < threads[thread_index].wait_until
+                    || threads[thread_index].pc >= program.threads[thread_index].len()
+                {
                     break;
                 }
-                let block = program.threads[thread_index][thread.pc];
+                let pc = threads[thread_index].pc;
+                let block = program.threads[thread_index][pc];
+                // Inputs and conditions are gates: they stay on the same block until met, then
+                // report their timeout and are skipped.
+                let met = match block {
+                    Block::WaitSpeed { speed_ms, .. } => speed >= speed_ms,
+                    Block::WaitPressure { hpa, .. } => altitude >= -SCALE_HEIGHT_M * (hpa / SEA_LEVEL_HPA).ln(),
+                    Block::WaitFlag { flag, value, .. } => flags[usize::from(flag)] == value,
+                    Block::WaitMode { mode: wanted, .. } => mode == wanted,
+                    _ => true,
+                };
+                let mut timed_out = false;
+                if !met {
+                    let timeout = match block {
+                        Block::WaitSpeed { timeout_s, .. }
+                        | Block::WaitPressure { timeout_s, .. }
+                        | Block::WaitFlag { timeout_s, .. }
+                        | Block::WaitMode { timeout_s, .. } => timeout_s,
+                        _ => 0.0,
+                    };
+                    let since = *threads[thread_index].waiting_since.get_or_insert(t);
+                    if t - since < timeout {
+                        break;
+                    }
+                    timed_out = true;
+                    anomalies.push(format!(
+                        "t={t:.1}s: thread {}: '{}' timed out after {timeout:.0} s",
+                        thread_index + 1,
+                        block.label()
+                    ));
+                }
                 threads[thread_index].pc += 1;
+                threads[thread_index].waiting_since = None;
+                if config.trace && trace.len() < 4_096 {
+                    trace.push(crate::program::BlockTrace {
+                        t_s: t,
+                        thread: thread_index,
+                        block: pc,
+                        label: block.label(),
+                        timed_out,
+                    });
+                }
                 match block {
                     Block::Wait { seconds } => {
                         threads[thread_index].wait_until = t + seconds;
@@ -315,6 +372,15 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                         altitude_target = Some(-SCALE_HEIGHT_M * (hpa / SEA_LEVEL_HPA).ln());
                         events.push((t, format!("Hold {hpa:.0} hPa")));
                     }
+                    // Gates already decided above; executing them is a no-op.
+                    Block::WaitSpeed { .. }
+                    | Block::WaitPressure { .. }
+                    | Block::WaitFlag { .. }
+                    | Block::WaitMode { .. } => {}
+                    Block::ToggleFlag { flag } => flags[usize::from(flag)] = !flags[usize::from(flag)],
+                    Block::SetFlag { flag, value } => flags[usize::from(flag)] = value,
+                    Block::SetMode { mode: selected } => mode = selected,
+                    Block::Mark { mark } => events.push((t, format!("Mark #{mark}"))),
                     Block::LockTarget => {
                         let lowest = attached.iter().position(|a| *a).unwrap_or(stage_count);
                         let radar = vehicle.best_radar(lowest);
@@ -505,6 +571,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         aero: aero.summary(),
         avionics: avionics.summary(),
         surface_fault,
+        trace,
         first_ignition_twr,
         lifted_off,
         max_speed_ms: max_speed,
@@ -878,6 +945,62 @@ mod tests {
             changed |= base.surface_fault && !safe.surface_fault;
         }
         assert!(changed, "a seed must exercise the self-test suite");
+    }
+
+    #[test]
+    fn flags_modes_marks_and_condition_timeouts_run_and_are_traced() {
+        let vehicle = sounding_rocket();
+        let program = Program::single(vec![
+            Block::SetMode { mode: 2 },
+            Block::SetFlag { flag: 1, value: true },
+            Block::WaitMode {
+                mode: 2,
+                timeout_s: 1.0,
+            },
+            Block::WaitFlag {
+                flag: 1,
+                value: true,
+                timeout_s: 1.0,
+            },
+            Block::WaitFlag {
+                flag: 2,
+                value: true,
+                timeout_s: 0.5,
+            },
+            Block::Mark { mark: 3 },
+            Block::Wait { seconds: 1.0 },
+        ]);
+        let config = FlightConfig {
+            trace: true,
+            max_time_s: 10.0,
+            ..FlightConfig::default()
+        };
+        let report = simulate(&vehicle, &program, config).unwrap();
+        let labels: Vec<&str> = report.trace.iter().map(|entry| entry.label.as_str()).collect();
+        assert!(labels.contains(&"Set mode M2"), "{labels:?}");
+        assert!(labels.contains(&"Mark #3"), "{labels:?}");
+        let timed_out: Vec<_> = report.trace.iter().filter(|entry| entry.timed_out).collect();
+        assert_eq!(timed_out.len(), 1, "{:?}", report.trace);
+        assert_eq!(timed_out[0].block, 4);
+        assert!(
+            report.anomalies.iter().any(|anomaly| anomaly.contains("timed out")),
+            "{:?}",
+            report.anomalies
+        );
+        assert!(report.trace.iter().all(|entry| entry.t_s >= 0.0));
+
+        // Without the flag the trace stays empty, so a batch run pays nothing for it.
+        let quiet = simulate(
+            &vehicle,
+            &program,
+            FlightConfig {
+                trace: false,
+                max_time_s: 10.0,
+                ..FlightConfig::default()
+            },
+        )
+        .unwrap();
+        assert!(quiet.trace.is_empty());
     }
 
     #[test]

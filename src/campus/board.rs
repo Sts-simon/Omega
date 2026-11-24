@@ -6,7 +6,7 @@ use super::*;
 use crate::interface::{UiAction, UiActionButton};
 use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
 use crate::procurement::{self, EvidenceStatus, Procurement};
-use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable};
+use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable, issue_counts};
 use crate::revisions::RevisionLog;
 use crate::trials::{self, TrialAction, TrialSession};
 use crate::ui_kit::{self, ButtonTone, NavStatus};
@@ -1778,35 +1778,44 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
         left.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "MISSILE PROGRAM", 15.0, ui_kit::ACCENT);
             ui_kit::label(panel, vehicle.name.clone(), 10.5, ui_kit::TEXT_DIM);
-            heading(panel, "ADD BLOCK");
-            let rows: [&[BlockKind]; 4] = [
-                &BlockKind::ALL[0..2],
-                &BlockKind::ALL[2..4],
-                &BlockKind::ALL[4..6],
-                &BlockKind::ALL[6..7],
-            ];
-            for row in rows {
-                panel
-                    .spawn(Node {
-                        width: Val::Percent(100.0),
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    })
-                    .with_children(|r| {
-                        for kind in row {
-                            let tone = if kind.available(vehicle) {
-                                ButtonTone::Secondary
-                            } else {
-                                ButtonTone::Disabled
-                            };
-                            ui_kit::button_row_item(
-                                r,
-                                kind.label(),
-                                UiAction::Program(ProgramAction::Append(*kind)),
-                                tone,
-                            );
-                        }
-                    });
+            heading(panel, "BLOCK LIBRARY");
+            // The palette follows the rules' categories, so a new block family lands in the right
+            // section without editing this board.
+            for category in omega_rules::BlockCategory::ALL {
+                let kinds: Vec<BlockKind> = BlockKind::ALL
+                    .iter()
+                    .copied()
+                    .filter(|kind| kind.category() == category)
+                    .collect();
+                if kinds.is_empty() {
+                    continue;
+                }
+                heading(panel, category.label());
+                for row in kinds.chunks(2) {
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|r| {
+                            for kind in row {
+                                let tone = if kind.available(vehicle) {
+                                    ButtonTone::Secondary
+                                } else {
+                                    ButtonTone::Disabled
+                                };
+                                // A selected block is the insertion point; with nothing selected
+                                // the library appends to the thread.
+                                let action = if session.block.is_some() {
+                                    ProgramAction::Insert(*kind)
+                                } else {
+                                    ProgramAction::Append(*kind)
+                                };
+                                ui_kit::button_row_item(r, kind.label(), UiAction::Program(action), tone);
+                            }
+                        });
+                }
             }
             ui_kit::label(
                 panel,
@@ -1899,12 +1908,28 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                     if blocks.is_empty() {
                         ui_kit::label(
                             list,
-                            "Empty thread. Add a block from the palette.",
+                            "Empty thread. Add a block from the library.",
                             10.5,
                             ui_kit::TEXT_DIM,
                         );
+                    } else {
+                        ui_kit::label(list, "thread start", 9.0, ui_kit::TEXT_DIM);
                     }
                     for (index, block) in blocks.iter().enumerate() {
+                        if index > 0 {
+                            // The connection between the previous block and this one. Editing the
+                            // chain (move, insert, duplicate) is the only way to change it, and the
+                            // rules reject a link that cannot follow its predecessor.
+                            list.spawn((
+                                Node {
+                                    width: Val::Px(2.0),
+                                    height: Val::Px(7.0),
+                                    margin: UiRect::left(Val::Px(14.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(ui_kit::TEXT_DIM),
+                            ));
+                        }
                         let tone = if session.block == Some(index) {
                             ButtonTone::Primary
                         } else {
@@ -1933,6 +1958,12 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                 ),
                 Some(block) => {
                     ui_kit::label(panel, block.label(), 13.0, ui_kit::TEXT);
+                    ui_kit::label(
+                        panel,
+                        format!("{} | {}", block.category().label(), block.description()),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
                     if adjustable(block) {
                         panel
                             .spawn(Node {
@@ -1989,6 +2020,26 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                                 ButtonTone::Danger,
                             );
                         });
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            ui_kit::button_row_item(
+                                row,
+                                "FLIP VALUE",
+                                UiAction::Program(ProgramAction::Flip),
+                                ButtonTone::Ghost,
+                            );
+                            ui_kit::button_row_item(
+                                row,
+                                "DUPLICATE",
+                                UiAction::Program(ProgramAction::Duplicate),
+                                ButtonTone::Secondary,
+                            );
+                        });
                 }
             }
         });
@@ -2002,7 +2053,9 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
         ..default()
     })
     .with_children(|right| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        node.max_height = Val::Percent(55.0);
+        node.overflow = Overflow::clip_y();
         right.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "FLIGHT COMPUTER", 12.0, ui_kit::ACCENT);
             match (vehicle.computer(), session.limits(vehicle)) {
@@ -2041,17 +2094,58 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                 ),
             }
             heading(panel, "VALIDATION");
-            if issues.is_empty() {
-                panel
-                    .spawn(Node::default())
-                    .with_children(|c| ui_kit::chip(c, "PROGRAM VALID", ui_kit::GOOD));
-            } else {
-                for issue in issues.iter().take(6) {
-                    ui_kit::label(panel, format!("- {issue}"), 10.0, ui_kit::BAD);
-                }
-                if issues.len() > 6 {
-                    ui_kit::label(panel, format!("+{} more issue(s)", issues.len() - 6), 10.0, ui_kit::BAD);
-                }
+            let (errors, warnings) = issue_counts(&issues);
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    ..default()
+                })
+                .with_children(|row| {
+                    if errors == 0 {
+                        ui_kit::chip(row, "PROGRAM VALID", ui_kit::GOOD);
+                    } else {
+                        ui_kit::chip(
+                            row,
+                            if errors == 1 {
+                                "1 ERROR".to_string()
+                            } else {
+                                format!("{errors} ERRORS")
+                            },
+                            ui_kit::BAD,
+                        );
+                    }
+                    if warnings > 0 {
+                        ui_kit::chip(
+                            row,
+                            if warnings == 1 {
+                                "1 WARNING".to_string()
+                            } else {
+                                format!("{warnings} WARNINGS")
+                            },
+                            ui_kit::WARN,
+                        );
+                    }
+                });
+            for issue in issues.iter().take(6) {
+                let prefix = match issue.severity {
+                    omega_rules::IssueSeverity::Error => "ERROR",
+                    omega_rules::IssueSeverity::Warning => "WARN",
+                };
+                let color = match issue.severity {
+                    omega_rules::IssueSeverity::Error => ui_kit::BAD,
+                    omega_rules::IssueSeverity::Warning => ui_kit::WARN,
+                };
+                ui_kit::label(panel, format!("{prefix}  {}", issue.message), 9.5, color);
+            }
+            if issues.len() > 6 {
+                ui_kit::label(
+                    panel,
+                    format!("+{} more issue(s)", issues.len() - 6),
+                    9.5,
+                    ui_kit::TEXT_DIM,
+                );
             }
             if let Ok(hash) = session.content_hash() {
                 let short: String = hash.as_str().chars().take(16).collect();
@@ -2059,10 +2153,125 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
             }
             ui_kit::label(
                 panel,
-                "Saved to programs/missile.json on every change.",
+                "Saved to programs/missile.json on every change; saved copies live in programs/library.json.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
+        });
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        node.flex_grow = 1.0;
+        node.min_height = Val::Px(0.0);
+        node.height = Val::Auto;
+        node.overflow = Overflow::clip_y();
+        right.spawn((node, bg, interaction)).with_children(|panel| {
+            heading(panel, "SAVED PROGRAMS");
+            ui_kit::button(
+                panel,
+                "SAVE COPY",
+                UiAction::Program(ProgramAction::SaveCopy),
+                ButtonTone::Secondary,
+                Val::Percent(100.0),
+            );
+            if session.library.programs.is_empty() {
+                ui_kit::label(
+                    panel,
+                    "No saved program yet. A copy can be loaded on any vehicle; the rules check its hardware.",
+                    9.5,
+                    ui_kit::TEXT_DIM,
+                );
+            }
+            for (index, saved) in session.library.programs.iter().take(4).enumerate() {
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        ui_kit::button_row_item(
+                            row,
+                            format!("LOAD {}", saved.name),
+                            UiAction::Program(ProgramAction::LoadSaved(index)),
+                            ButtonTone::Ghost,
+                        );
+                        ui_kit::button_row_item(
+                            row,
+                            "X",
+                            UiAction::Program(ProgramAction::DeleteSaved(index)),
+                            ButtonTone::Danger,
+                        );
+                    });
+            }
+            if session.library.programs.len() > 4 {
+                ui_kit::label(
+                    panel,
+                    format!("+{} more saved program(s)", session.library.programs.len() - 4),
+                    9.0,
+                    ui_kit::TEXT_DIM,
+                );
+            }
+            heading(panel, "DEBUGGER");
+            ui_kit::button(
+                panel,
+                "RUN TRACE",
+                UiAction::Program(ProgramAction::Debug),
+                ButtonTone::Secondary,
+                Val::Percent(100.0),
+            );
+            match &session.debug {
+                Some(report) => {
+                    let timeouts = report.trace.iter().filter(|entry| entry.timed_out).count();
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "{} blocks executed | {} events | {} timeout(s)",
+                            report.trace.len(),
+                            report.events.len(),
+                            timeouts
+                        ),
+                        9.5,
+                        ui_kit::TEXT,
+                    );
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "{:.1} s flight | {:.0} m/s max | {} anomalie(s)",
+                            report.flight_time_s,
+                            report.max_speed_ms,
+                            report.anomalies.len()
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                    for entry in report.trace.iter().take(6) {
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "{:.1}s T{} #{} {}",
+                                entry.t_s,
+                                entry.thread + 1,
+                                entry.block + 1,
+                                entry.label
+                            ),
+                            9.0,
+                            if entry.timed_out {
+                                ui_kit::WARN
+                            } else {
+                                ui_kit::TEXT_DIM
+                            },
+                        );
+                    }
+                    for anomaly in report.anomalies.iter().take(2) {
+                        ui_kit::label(panel, format!("! {anomaly}"), 9.0, ui_kit::BAD);
+                    }
+                }
+                None => ui_kit::label(
+                    panel,
+                    "Run a trace to fly this program once and list the blocks it executed, with their times.",
+                    9.5,
+                    ui_kit::TEXT_DIM,
+                ),
+            }
         });
     });
 }
@@ -2962,6 +3171,13 @@ pub(crate) fn handle_extra_actions(
                     if let Err(error) = program_editor::persist(&program) {
                         warn!("Could not save the missile program: {error}");
                         campus.message = format!("Could not save the missile program: {error}");
+                    }
+                    if program.library_dirty {
+                        if let Err(error) = program_editor::persist_library(&program) {
+                            warn!("Could not save the program library: {error}");
+                            campus.message = format!("Could not save the program library: {error}");
+                        }
+                        program.library_dirty = false;
                     }
                 }
                 Err(message) => campus.message = message,

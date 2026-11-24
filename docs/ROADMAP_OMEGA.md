@@ -8,13 +8,13 @@ Omega is a fictional, abstract game about completing military-themed design cont
 
 All values and outcomes are game mechanics. The project does not attempt to model real weapons, real targeting, guidance, navigation, seeker logic, warheads or real-world performance. This boundary is deliberate and is not a future feature.
 
-## Current baseline (0.35.0)
+## Current baseline (0.36.0)
 
 The following features are already present in the application:
 
 - **Research:** 20 technologies across six departments, credit costs, prerequisites, a day clock and capability grants.
 - **Workshop:** attachment-tree vehicle editor with a category-grouped palette, an indented assembly tree, a selected-part inspector, one validation panel (errors and warnings, each linked to its part) and a contract check against the selected active contract; 21 part types including wings, fin sets, control surfaces and five mission electronics modules, one to four derived stages, presets, editable parameters and design choices, derived game statistics and persistence.
-- **Program editor:** parallel threads, seven abstract block types, hardware and computer-limit validation, editing, persistence and content hashing.
+- **Program editor:** parallel threads of 15 generic blocks in eight categories (inputs, conditions, logic, states, timers, outputs, modes, diagnostics), drawn as connected chains, with hardware and computer-limit validation, separate errors and warnings, four flags and a mode register, a named program library, a seeded trace debugger, editing, persistence and content hashing.
 - **Trials:** repeatable seeded runs, four result plots, event timeline, anomaly summaries, batch runs of 10/100/1,000 seeds, progress reporting and A/B comparison.
 - **Contracts:** mission and vehicle families, research-gated offers, active-contract limits, deadlines, hash-bound evidence dossiers and delivery rewards.
 - **Persistence:** versioned save slot, manifest, per-file hashes, atomic writes, backup copies and legacy campaign import.

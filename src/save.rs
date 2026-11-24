@@ -17,6 +17,7 @@ const GAME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum SaveFile {
     Campaign,
     MissileProgram,
+    ProgramLibrary,
     Revisions,
     Vehicle,
     Procurement,
@@ -27,6 +28,7 @@ impl SaveFile {
         match self {
             Self::Campaign => "campaign.json",
             Self::MissileProgram => "programs/missile.json",
+            Self::ProgramLibrary => "programs/library.json",
             Self::Revisions => "designs/revisions.json",
             Self::Vehicle => "designs/vehicle.json",
             Self::Procurement => "contracts/missile.json",
