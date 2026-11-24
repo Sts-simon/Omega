@@ -710,6 +710,54 @@ mod tests {
     }
 
     #[test]
+    fn a_stable_airframe_earns_the_soft_stability_score_without_blocking_the_contract() {
+        let offer = offer_for(MissionFamily::SurfaceToAir, VehicleFamily::ShortRange);
+        let vehicle = ContentHash::of_bytes(b"vehicle");
+        let program = ContentHash::of_bytes(b"program");
+        let mut stable = report(20_000.0, 400.0, 250.0, true);
+        stable.aero.stability = 63.0;
+        let mut unstable = stable.clone();
+        unstable.aero.stability = 0.0;
+        let dossier =
+            |flight: &FlightReport| offer.missile_dossier(&[trial(&vehicle, &program, flight)], &vehicle, &program);
+        let stable = dossier(&stable);
+        let unstable = dossier(&unstable);
+        assert!(
+            matches!(stable.decision, DossierDecision::Accepted { .. }),
+            "{:?}",
+            stable.decision
+        );
+        assert!(
+            matches!(unstable.decision, DossierDecision::Accepted { .. }),
+            "a soft requirement must not reject: {:?}",
+            unstable.decision
+        );
+        let row = |dossier: &Dossier| {
+            dossier
+                .matrix
+                .iter()
+                .find(|row| row.requirement_id == "STABILITY")
+                .expect("the dossier lists stability")
+                .clone()
+        };
+        assert!(!row(&stable).hard);
+        assert!(matches!(
+            row(&stable).status,
+            crate::requirement::RequirementStatus::Verified { .. }
+        ));
+        assert!(matches!(
+            row(&unstable).status,
+            crate::requirement::RequirementStatus::Failed { .. }
+        ));
+        assert!(
+            (stable.score - unstable.score - 0.05).abs() < 1e-9,
+            "{} vs {}",
+            stable.score,
+            unstable.score
+        );
+    }
+
+    #[test]
     fn air_to_air_contracts_require_a_target_lock() {
         let offer = offer_for(MissionFamily::AirToAir, VehicleFamily::ShortRange);
         let lock = offer

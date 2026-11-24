@@ -3,8 +3,9 @@
 //! explicit separation edge, starts a new stage), so the same design can be built as a stack, with
 //! radial boosters, or as a branching vehicle.
 //!
-//! The stored design is versioned (`vehicle.json` schema 3). Schema 1-2 files (a list of stages)
-//! are migrated when read; a newer schema is refused instead of being silently reinterpreted.
+//! The stored design is versioned (`vehicle.json` schema 4). Schema 1-2 files (a list of stages)
+//! are migrated when read, schema-3 graphs load with no aerodynamic surfaces, and a newer schema is
+//! refused instead of being silently reinterpreted.
 //! All values remain abstract gameplay figures; see `docs/VISION_MISSILES.md`.
 
 use crate::vehicle::{ComputerClass, G0, Part, PartSpec, RadarClass, RadarSpec, SensorKind, Stage, StageReport};

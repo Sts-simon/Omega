@@ -840,6 +840,157 @@ mod tests {
         assert_eq!(required_computer(ControlKind::Fixed), None);
     }
 
+    /// Every score is finite, inside 0..100, and the CG/CA pair stays inside the vehicle.
+    fn assert_bounded(vehicle: &Vehicle) -> AeroFigures {
+        let figures = figures(vehicle);
+        for (name, value) in [
+            ("reference_area", figures.reference_area_m2),
+            ("wing_area", figures.wing_area_m2),
+            ("fin_area", figures.fin_area_m2),
+            ("control_area", figures.control_area_m2),
+            ("mean_sweep", figures.mean_sweep_deg),
+            ("mass", figures.mass_kg),
+            ("drag_area", figures.surface_drag_area_m2),
+            ("cg_y", figures.cg_y_m),
+            ("ca_y", figures.ca_y_m),
+            ("margin", figures.margin_m),
+            ("length", figures.length_m),
+        ] {
+            assert!(value.is_finite(), "{name} is not finite: {value}");
+        }
+        for (name, score) in [
+            ("stability", figures.stability),
+            ("authority", figures.control_authority),
+            ("lift", figures.lift),
+            ("drag", figures.drag_index),
+            ("complexity", figures.complexity),
+            ("reliability", figures.reliability),
+            ("balance", figures.balance),
+        ] {
+            assert!(
+                (0.0..=100.0).contains(&score),
+                "{name} left its scale: {score} for {:?}",
+                vehicle.parts.last().map(|part| part.spec)
+            );
+        }
+        assert!(figures.mass_kg >= 0.0 && figures.wing_area_m2 >= 0.0);
+        assert!(figures.length_m > 0.0);
+        let (low, high) = figures.stable_band_m();
+        assert!(low < high, "the stable band is empty: {low}..{high}");
+        let poses = vehicle.poses();
+        let bottom = poses
+            .iter()
+            .map(|pose| pose.y_m - pose.height_m / 2.0)
+            .fold(f64::INFINITY, f64::min);
+        let top = poses
+            .iter()
+            .map(|pose| pose.y_m + pose.height_m / 2.0)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            (bottom..=top).contains(&figures.cg_y_m),
+            "cg {} outside {bottom}..{top}",
+            figures.cg_y_m
+        );
+        assert!(
+            (bottom..=top).contains(&figures.ca_y_m),
+            "ca {} outside {bottom}..{top}",
+            figures.ca_y_m
+        );
+        figures
+    }
+
+    #[test]
+    fn every_design_choice_and_extreme_dimension_stays_bounded() {
+        let planforms = [
+            WingPlanform::Straight,
+            WingPlanform::Swept,
+            WingPlanform::Delta,
+            WingPlanform::Trapezoidal,
+            WingPlanform::VariableGeometry,
+        ];
+        let profiles = [
+            AirfoilProfile::Symmetric,
+            AirfoilProfile::Classic,
+            AirfoilProfile::LowDrag,
+            AirfoilProfile::HighLift,
+            AirfoilProfile::Experimental,
+        ];
+        for planform in planforms {
+            for profile in profiles {
+                for sweep in [0.0, 30.0, 60.0] {
+                    for (span, chord) in [(0.2, 0.1), (1.0, 0.4), (4.0, 2.0)] {
+                        for light in [false, true] {
+                            let mut vehicle = sounding_rocket();
+                            mount(
+                                &mut vehicle,
+                                "surface",
+                                PartSpec::Wing {
+                                    span_m: span,
+                                    chord_m: chord,
+                                    sweep_deg: sweep,
+                                    planform,
+                                    profile,
+                                    light,
+                                },
+                                "booster",
+                                NodeId::Radial(0),
+                            );
+                            let sheet = assert_bounded(&vehicle);
+                            assert!(sheet.mass_kg > 0.0);
+                            assert_eq!(sheet, figures(&vehicle), "the sheet is deterministic");
+                        }
+                    }
+                }
+            }
+        }
+
+        for role in [
+            StabilizerRole::Rear,
+            StabilizerRole::Front,
+            StabilizerRole::Blended,
+            StabilizerRole::Combined,
+        ] {
+            for layout in [FinLayout::Symmetric, FinLayout::Asymmetric] {
+                for kind in [
+                    ControlKind::Classic,
+                    ControlKind::Integrated,
+                    ControlKind::Combined,
+                    ControlKind::Fixed,
+                ] {
+                    for light in [false, true] {
+                        let mut vehicle = sounding_rocket();
+                        mount(
+                            &mut vehicle,
+                            "fin",
+                            PartSpec::FinSet {
+                                span_m: 4.0,
+                                chord_m: 2.0,
+                                role,
+                                layout,
+                                light,
+                            },
+                            "booster",
+                            NodeId::Radial(0),
+                        );
+                        mount(
+                            &mut vehicle,
+                            "control",
+                            PartSpec::ControlSurface {
+                                span_m: 4.0,
+                                chord_m: 2.0,
+                                kind,
+                                light,
+                            },
+                            "booster",
+                            NodeId::Radial(1),
+                        );
+                        assert_bounded(&vehicle);
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_areal_mass_scales_with_area_and_shape() {
         let small = PartSpec::Wing {
