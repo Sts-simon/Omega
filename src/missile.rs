@@ -2235,6 +2235,33 @@ mod tests {
     }
 
     #[test]
+    fn wing_angle_is_editable_undoable_and_changes_gameplay_figures() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.add_at(
+            PartTemplate::Wing,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let wing = session.selected.clone().unwrap();
+        let before = session.vehicle.aero();
+
+        let message = session.apply(MissileAction::CycleAero(AeroChoice::Angle), &owned);
+        assert!(message.contains("+5°"), "{message}");
+        let attach = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert_eq!(attach.rotation_x_deg, 5.0);
+        let after = session.vehicle.aero();
+        assert!(after.lift < before.lift);
+        assert!(after.drag_index > before.drag_index);
+
+        assert_eq!(choice_value_for_part(session.vehicle.part(&wing).unwrap(), AeroChoice::Angle), "+5°");
+        session.undo();
+        let restored = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert_eq!(restored.rotation_x_deg, 0.0);
+        assert_eq!(session.vehicle.aero(), before);
+    }
+
+    #[test]
     fn the_aero_comparison_keeps_the_previous_configuration() {
         let mut session = MissileSession::new_default();
         assert!(session.comparison.is_none());
