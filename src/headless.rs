@@ -99,13 +99,15 @@ fn run_trial(args: &[String]) -> Result<String, String> {
 fn trial_json(vehicle_bytes: &[u8], program_bytes: &[u8], config: FlightConfig) -> Result<String, String> {
     let vehicle: Vehicle = serde_json::from_slice(vehicle_bytes).map_err(|error| format!("design: {error}"))?;
     let program: Program = serde_json::from_slice(program_bytes).map_err(|error| format!("program: {error}"))?;
+    let flight = flight_json(&vehicle, &program, config)?;
+    let anomalies = flight["anomalies"].clone();
     let json = serde_json::json!({
         "design": vehicle.name,
         "seed": config.seed,
         "launch": launch_label(config.launch),
         "aero": figures_json(&vehicle),
-        "flight": flight_json(&vehicle, &program, config)?,
-        "anomalies": simulate(&vehicle, &program, config).map_err(|issues| issues.join("; "))?.anomalies,
+        "flight": flight,
+        "anomalies": anomalies,
     });
     serde_json::to_string_pretty(&json).map_err(|error| error.to_string())
 }
