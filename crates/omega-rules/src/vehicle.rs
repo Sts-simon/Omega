@@ -6,7 +6,6 @@
 //! to any real system and the module contains no guidance, targeting or warhead modelling.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 pub const G0: f64 = 9.80665;
 
@@ -34,6 +33,15 @@ pub enum ComputerClass {
 }
 
 impl ComputerClass {
+    /// Ordering used by compatibility rules (a control surface needs a class at least this good).
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::Basic => 0,
+            Self::Standard => 1,
+            Self::Advanced => 2,
+        }
+    }
+
     /// Parallel program threads the computer can run.
     pub fn threads(self) -> usize {
         match self {
@@ -49,6 +57,184 @@ impl ComputerClass {
             Self::Basic => 8,
             Self::Standard => 16,
             Self::Advanced => 32,
+        }
+    }
+}
+
+/// Wing planform, an abstract gameplay shape. Each one trades lift, drag, stability, authority,
+/// complexity, reliability and mass; the numbers live in `crate::aero`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WingPlanform {
+    Straight,
+    Swept,
+    Delta,
+    Trapezoidal,
+    VariableGeometry,
+}
+
+impl WingPlanform {
+    pub const ALL: [Self; 5] = [
+        Self::Straight,
+        Self::Swept,
+        Self::Delta,
+        Self::Trapezoidal,
+        Self::VariableGeometry,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Straight => "STRAIGHT",
+            Self::Swept => "SWEPT",
+            Self::Delta => "DELTA",
+            Self::Trapezoidal => "TRAPEZOIDAL",
+            Self::VariableGeometry => "VARIABLE GEOMETRY",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Straight => Self::Swept,
+            Self::Swept => Self::Delta,
+            Self::Delta => Self::Trapezoidal,
+            Self::Trapezoidal => Self::VariableGeometry,
+            Self::VariableGeometry => Self::Straight,
+        }
+    }
+}
+
+/// Fictional wing section. No real lift/drag tables: each profile is a fixed set of game effects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AirfoilProfile {
+    Symmetric,
+    Classic,
+    LowDrag,
+    HighLift,
+    Experimental,
+}
+
+impl AirfoilProfile {
+    pub const ALL: [Self; 5] = [
+        Self::Symmetric,
+        Self::Classic,
+        Self::LowDrag,
+        Self::HighLift,
+        Self::Experimental,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Symmetric => "SYMMETRIC",
+            Self::Classic => "CLASSIC",
+            Self::LowDrag => "LOW DRAG",
+            Self::HighLift => "HIGH LIFT",
+            Self::Experimental => "EXPERIMENTAL",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Symmetric => Self::Classic,
+            Self::Classic => Self::LowDrag,
+            Self::LowDrag => Self::HighLift,
+            Self::HighLift => Self::Experimental,
+            Self::Experimental => Self::Symmetric,
+        }
+    }
+}
+
+/// Where a fin set sits on the airframe. The attachment node still decides the physical mount;
+/// this is the design intent the rules read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StabilizerRole {
+    Rear,
+    Front,
+    Blended,
+    Combined,
+}
+
+impl StabilizerRole {
+    pub const ALL: [Self; 4] = [Self::Rear, Self::Front, Self::Blended, Self::Combined];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rear => "REAR",
+            Self::Front => "FRONT",
+            Self::Blended => "BLENDED",
+            Self::Combined => "COMBINED",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Rear => Self::Front,
+            Self::Front => Self::Blended,
+            Self::Blended => Self::Combined,
+            Self::Combined => Self::Rear,
+        }
+    }
+}
+
+/// Symmetric is the normal fin set; an asymmetric set is an experimental trade of stability for
+/// authority and needs the advanced aerodynamics research.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinLayout {
+    Symmetric,
+    Asymmetric,
+}
+
+impl FinLayout {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Symmetric => "SYMMETRIC",
+            Self::Asymmetric => "ASYMMETRIC",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Symmetric => Self::Asymmetric,
+            Self::Asymmetric => Self::Symmetric,
+        }
+    }
+}
+
+/// Abstract control-surface family. `Fixed` adds passive stability only; the moving kinds need a
+/// compatible flight computer and give control authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlKind {
+    Classic,
+    Integrated,
+    Combined,
+    Fixed,
+}
+
+impl ControlKind {
+    pub const ALL: [Self; 4] = [Self::Classic, Self::Integrated, Self::Combined, Self::Fixed];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "CLASSIC",
+            Self::Integrated => "INTEGRATED",
+            Self::Combined => "COMBINED",
+            Self::Fixed => "FIXED",
+        }
+    }
+
+    pub fn is_moving(self) -> bool {
+        !matches!(self, Self::Fixed)
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Classic => Self::Integrated,
+            Self::Integrated => Self::Combined,
+            Self::Combined => Self::Fixed,
+            Self::Fixed => Self::Classic,
         }
     }
 }
@@ -84,6 +270,32 @@ pub enum PartSpec {
     /// Abstract mission module: only mass matters here.
     MissionModule {
         mass_kg: f64,
+    },
+    /// Lifting surface for cruise flight. `light` selects the light-structure build once its
+    /// research is done: less mass, more complexity and less reliability.
+    Wing {
+        span_m: f64,
+        chord_m: f64,
+        sweep_deg: f64,
+        planform: WingPlanform,
+        profile: AirfoilProfile,
+        light: bool,
+    },
+    /// Passive stabiliser. `role` is the designer's declared configuration; the mount node still
+    /// decides where the set physically sits.
+    FinSet {
+        span_m: f64,
+        chord_m: f64,
+        role: StabilizerRole,
+        layout: FinLayout,
+        light: bool,
+    },
+    /// Control surface: authority when moving, stability when fixed.
+    ControlSurface {
+        span_m: f64,
+        chord_m: f64,
+        kind: ControlKind,
+        light: bool,
     },
 }
 
@@ -138,8 +350,62 @@ impl PartSpec {
             }
             Self::LiquidEngine { scale } | Self::AirBreathing { scale } => in_range("engine scale", scale, 0.3, 3.0),
             Self::MissionModule { mass_kg } => in_range("module mass (kg)", mass_kg, 1.0, 300.0),
+            Self::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                ..
+            } => {
+                in_range("surface span (m)", span_m, 0.2, 4.0)?;
+                in_range("surface chord (m)", chord_m, 0.1, 2.0)?;
+                in_range("wing sweep (deg)", sweep_deg, 0.0, 60.0)
+            }
+            Self::FinSet { span_m, chord_m, .. } | Self::ControlSurface { span_m, chord_m, .. } => {
+                in_range("surface span (m)", span_m, 0.2, 4.0)?;
+                in_range("surface chord (m)", chord_m, 0.1, 2.0)
+            }
             Self::Sensor { .. } | Self::Computer { .. } | Self::Decoupler => Ok(()),
         }
+    }
+
+    /// True for the aerodynamic surfaces, which are always leaf parts on a radial mount.
+    pub fn is_aero(&self) -> bool {
+        matches!(
+            self,
+            Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. }
+        )
+    }
+
+    /// Research beyond the part itself: advanced shapes and the light-structure build.
+    pub fn extra_capabilities(&self) -> Vec<&'static str> {
+        let mut needed = Vec::new();
+        match *self {
+            Self::Wing {
+                planform,
+                profile,
+                light,
+                ..
+            } => {
+                if matches!(planform, WingPlanform::VariableGeometry) || matches!(profile, AirfoilProfile::Experimental)
+                {
+                    needed.push("aero:advanced_profiles");
+                }
+                if light {
+                    needed.push("aero:light_structures");
+                }
+            }
+            Self::FinSet { layout, light, .. } => {
+                if matches!(layout, FinLayout::Asymmetric) {
+                    needed.push("aero:advanced_profiles");
+                }
+                if light {
+                    needed.push("aero:light_structures");
+                }
+            }
+            Self::ControlSurface { light: true, .. } => needed.push("aero:light_structures"),
+            _ => {}
+        }
+        needed
     }
 
     pub fn stats(&self) -> PartStats {
@@ -207,6 +473,10 @@ impl PartSpec {
                 dry_mass_kg: mass_kg,
                 ..PartStats::default()
             },
+            Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. } => PartStats {
+                dry_mass_kg: crate::aero::surface_mass_kg(self).unwrap_or(0.0),
+                ..PartStats::default()
+            },
         }
     }
 
@@ -240,6 +510,19 @@ impl PartSpec {
             } => "computer:advanced",
             Self::Decoupler => "part:decoupler",
             Self::MissionModule { .. } => "part:mission_module",
+            Self::Wing { .. } => "part:wing",
+            Self::FinSet { .. } => "part:fin",
+            Self::ControlSurface { .. } => "part:control_surface",
+        }
+    }
+
+    /// Display label for a part family, shared by the palette and the inspector.
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            Self::Wing { .. } => "WING",
+            Self::FinSet { .. } => "FIN SET",
+            Self::ControlSurface { .. } => "CONTROL",
+            _ => "PART",
         }
     }
 }
@@ -256,12 +539,6 @@ pub struct Stage {
 }
 
 /// Stages in firing order: `stages[0]` is the first to burn and the first to be dropped.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Vehicle {
-    pub name: String,
-    pub stages: Vec<Stage>,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct StageReport {
     pub index: usize,
@@ -299,234 +576,9 @@ impl RadarClass {
     }
 }
 
-impl Vehicle {
-    pub fn validate(&self) -> Result<(), Vec<String>> {
-        let mut issues = Vec::new();
-        if self.stages.is_empty() {
-            issues.push("the vehicle has no stages".to_string());
-        }
-        let mut ids = BTreeSet::new();
-        for (index, stage) in self.stages.iter().enumerate() {
-            let has_tank = stage.parts.iter().any(|p| matches!(p.spec, PartSpec::FuelTank { .. }));
-            for part in &stage.parts {
-                if !ids.insert(part.id.as_str()) {
-                    issues.push(format!("duplicate part id '{}'", part.id));
-                }
-                if let Err(error) = part.spec.validate() {
-                    issues.push(format!("{} (stage {}): {error}", part.id, index + 1));
-                }
-                if matches!(part.spec, PartSpec::LiquidEngine { .. } | PartSpec::AirBreathing { .. }) && !has_tank {
-                    issues.push(format!(
-                        "{} (stage {}): needs a fuel tank in the same stage",
-                        part.id,
-                        index + 1
-                    ));
-                }
-            }
-        }
-        let computers: Vec<(usize, &Part)> = self
-            .stages
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| {
-                s.parts
-                    .iter()
-                    .filter(|p| matches!(p.spec, PartSpec::Computer { .. }))
-                    .map(move |p| (i, p))
-            })
-            .collect();
-        match computers.as_slice() {
-            [] => issues.push("the vehicle needs a flight computer".to_string()),
-            [(index, part)] => {
-                if *index + 1 != self.stages.len() {
-                    issues.push(format!(
-                        "{} would be dropped with stage {}: put the computer in the last stage",
-                        part.id,
-                        index + 1
-                    ));
-                }
-            }
-            _ => issues.push("only one flight computer is allowed".to_string()),
-        }
-        if issues.is_empty() { Ok(()) } else { Err(issues) }
-    }
-
-    pub fn parts(&self) -> impl Iterator<Item = (usize, &Part)> {
-        self.stages
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| s.parts.iter().map(move |p| (i, p)))
-    }
-
-    pub fn computer(&self) -> Option<ComputerClass> {
-        self.parts().find_map(|(_, p)| match p.spec {
-            PartSpec::Computer { class } => Some(class),
-            _ => None,
-        })
-    }
-
-    /// Best radar installed, if any.
-    pub fn best_radar(&self, min_stage: usize) -> Option<RadarSpec> {
-        self.parts()
-            .filter(|(stage, _)| *stage >= min_stage)
-            .filter_map(|(_, p)| match p.spec {
-                PartSpec::Sensor {
-                    kind: SensorKind::Radar(class),
-                } => Some(class.spec()),
-                _ => None,
-            })
-            .max_by(|a, b| a.base_lock_probability.total_cmp(&b.base_lock_probability))
-    }
-
-    /// Programming blocks the installed hardware allows (see `program::BlockKind`).
-    pub fn available_blocks(&self) -> BTreeSet<&'static str> {
-        let mut blocks: BTreeSet<&'static str> = ["wait", "ignite_stage", "set_throttle"].into_iter().collect();
-        if self.stages.len() >= 2 {
-            blocks.insert("separate_stage");
-        }
-        for (_, part) in self.parts() {
-            if let PartSpec::Sensor { kind } = part.spec {
-                match kind {
-                    SensorKind::Pitot => blocks.insert("hold_speed"),
-                    SensorKind::Barometer => blocks.insert("hold_pressure"),
-                    SensorKind::Radar(_) => blocks.insert("lock_target"),
-                };
-            }
-        }
-        blocks
-    }
-
-    /// Research capabilities this design needs that are not owned yet.
-    pub fn missing_research(&self, owned: &BTreeSet<String>) -> Vec<String> {
-        let needed: BTreeSet<&str> = self.parts().map(|(_, p)| p.spec.required_capability()).collect();
-        needed
-            .into_iter()
-            .filter(|c| !owned.contains(*c))
-            .map(str::to_string)
-            .collect()
-    }
-
-    pub fn max_diameter_m(&self) -> f64 {
-        self.parts().map(|(_, p)| p.spec.stats().diameter_m).fold(0.0, f64::max)
-    }
-
-    fn stage_wet_mass(stage: &Stage) -> f64 {
-        stage
-            .parts
-            .iter()
-            .map(|p| {
-                let s = p.spec.stats();
-                s.dry_mass_kg + s.propellant_kg
-            })
-            .sum()
-    }
-
-    pub fn total_wet_mass_kg(&self) -> f64 {
-        self.stages.iter().map(Self::stage_wet_mass).sum()
-    }
-
-    pub fn stage_reports(&self) -> Vec<StageReport> {
-        let mut reports = Vec::new();
-        for (index, stage) in self.stages.iter().enumerate() {
-            let above: f64 = self.stages[index + 1..].iter().map(Self::stage_wet_mass).sum();
-            let wet = Self::stage_wet_mass(stage);
-            let ignition_mass = wet + above;
-            let mut thrust = 0.0;
-            let mut propellant = 0.0;
-            let mut mass_flow_weight = 0.0;
-            let mut burn_time: Option<f64> = None;
-            for part in &stage.parts {
-                let s = part.spec.stats();
-                thrust += s.thrust_n;
-                propellant += s.propellant_kg;
-                if s.thrust_n > 0.0 && s.isp_s > 0.0 {
-                    mass_flow_weight += s.thrust_n / (s.isp_s * G0);
-                }
-                if let Some(bt) = s.burn_time_s {
-                    burn_time = Some(burn_time.map_or(bt, |b: f64| b.max(bt)));
-                }
-            }
-            let isp = if mass_flow_weight > 0.0 {
-                thrust / (mass_flow_weight * G0)
-            } else {
-                0.0
-            };
-            let burnout_mass = (ignition_mass - propellant).max(1e-9);
-            let delta_v = if isp > 0.0 {
-                isp * G0 * (ignition_mass / burnout_mass).ln()
-            } else {
-                0.0
-            };
-            reports.push(StageReport {
-                index,
-                stage_wet_mass_kg: wet,
-                ignition_mass_kg: ignition_mass,
-                thrust_n: thrust,
-                burn_time_s: burn_time,
-                twr_at_ignition: thrust / (ignition_mass * G0),
-                delta_v_ms: delta_v,
-            });
-        }
-        reports
-    }
-}
-
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-
-    pub fn part(id: &str, spec: PartSpec) -> Part {
-        Part {
-            id: id.to_string(),
-            spec,
-        }
-    }
-
-    pub fn sounding_rocket() -> Vehicle {
-        Vehicle {
-            name: "Test rocket".into(),
-            stages: vec![
-                Stage {
-                    parts: vec![
-                        part(
-                            "booster",
-                            PartSpec::SolidMotor {
-                                length_m: 2.0,
-                                diameter_m: 0.4,
-                                burn_time_s: 20.0,
-                            },
-                        ),
-                        part("dec1", PartSpec::Decoupler),
-                    ],
-                },
-                Stage {
-                    parts: vec![
-                        part(
-                            "sustainer",
-                            PartSpec::SolidMotor {
-                                length_m: 1.0,
-                                diameter_m: 0.3,
-                                burn_time_s: 25.0,
-                            },
-                        ),
-                        part(
-                            "pc",
-                            PartSpec::Computer {
-                                class: ComputerClass::Basic,
-                            },
-                        ),
-                        part(
-                            "pitot",
-                            PartSpec::Sensor {
-                                kind: SensorKind::Pitot,
-                            },
-                        ),
-                        part("module", PartSpec::MissionModule { mass_kg: 40.0 }),
-                    ],
-                },
-            ],
-        }
-    }
 
     #[test]
     fn solid_motor_burn_time_trades_thrust_for_duration_and_casing_mass() {
@@ -576,99 +628,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn stage_reports_compute_twr_and_delta_v_with_the_stack_above() {
-        let reports = sounding_rocket().stage_reports();
-        assert_eq!(reports.len(), 2);
-        assert!(reports[0].ignition_mass_kg > reports[0].stage_wet_mass_kg);
-        assert!(reports[0].twr_at_ignition > 1.0, "{}", reports[0].twr_at_ignition);
-        assert!(reports[1].twr_at_ignition > reports[1].thrust_n / (reports[0].ignition_mass_kg * G0));
-        assert!(reports[0].delta_v_ms > 0.0 && reports[1].delta_v_ms > 0.0);
-        assert_eq!(reports[0].burn_time_s, Some(20.0));
-    }
-
-    #[test]
-    fn valid_vehicle_passes_and_problems_are_listed() {
-        assert!(sounding_rocket().validate().is_ok());
-        let mut bad = sounding_rocket();
-        bad.stages[0].parts.push(part(
-            "pc2",
-            PartSpec::Computer {
-                class: ComputerClass::Basic,
-            },
-        ));
-        bad.stages[1].parts.push(part("booster", PartSpec::Decoupler));
-        let issues = bad.validate().unwrap_err().join(" | ");
-        assert!(issues.contains("only one flight computer"), "{issues}");
-        assert!(issues.contains("duplicate part id"), "{issues}");
-
-        let mut dropped = sounding_rocket();
-        let computer = dropped.stages[1].parts.remove(1);
-        dropped.stages[0].parts.push(computer);
-        assert!(dropped.validate().unwrap_err().join(" ").contains("last stage"));
-
-        let mut no_tank = sounding_rocket();
-        no_tank.stages[1]
-            .parts
-            .push(part("eng", PartSpec::LiquidEngine { scale: 1.0 }));
-        assert!(no_tank.validate().unwrap_err().join(" ").contains("fuel tank"));
-
-        let mut huge = sounding_rocket();
-        huge.stages[0].parts[0].spec = PartSpec::SolidMotor {
-            length_m: 20.0,
-            diameter_m: 0.4,
-            burn_time_s: 20.0,
-        };
-        assert!(huge.validate().is_err());
-        assert!(Vehicle::default().validate().is_err());
-    }
-
-    #[test]
-    fn installed_sensors_unlock_programming_blocks() {
-        let mut vehicle = sounding_rocket();
-        let blocks = vehicle.available_blocks();
-        assert!(blocks.contains("hold_speed") && !blocks.contains("lock_target") && !blocks.contains("hold_pressure"));
-        vehicle.stages[1].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: SensorKind::Radar(RadarClass::Active),
-            },
-        ));
-        vehicle.stages[1].parts.push(part(
-            "baro",
-            PartSpec::Sensor {
-                kind: SensorKind::Barometer,
-            },
-        ));
-        let blocks = vehicle.available_blocks();
-        assert!(blocks.contains("lock_target") && blocks.contains("hold_pressure"));
-        assert!(vehicle.best_radar(0).unwrap().class == RadarClass::Active);
-        let mut single = sounding_rocket();
-        single.stages.pop();
-        assert!(!single.available_blocks().contains("separate_stage"));
-    }
-
-    #[test]
-    fn missing_research_lists_only_what_is_not_owned() {
-        let mut vehicle = sounding_rocket();
-        vehicle.stages[1].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: SensorKind::Radar(RadarClass::Active),
-            },
-        ));
-        let owned: BTreeSet<String> = [
-            "part:solid_motor",
-            "part:decoupler",
-            "part:mission_module",
-            "computer:basic",
-            "sensor:pitot",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
-        assert_eq!(
-            vehicle.missing_research(&owned),
-            vec!["sensor:radar_active".to_string()]
+    fn part_ranges_are_enforced() {
+        assert!(
+            PartSpec::SolidMotor {
+                length_m: 20.0,
+                diameter_m: 0.4,
+                burn_time_s: 20.0
+            }
+            .validate()
+            .is_err()
         );
+        assert!(PartSpec::LiquidEngine { scale: 0.1 }.validate().is_err());
+        assert!(PartSpec::Decoupler.validate().is_ok());
     }
 }

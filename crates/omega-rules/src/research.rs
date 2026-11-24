@@ -10,15 +10,17 @@ use std::collections::{BTreeSet, HashMap};
 pub enum Department {
     VehicleFamilies,
     Materials,
+    Aerodynamics,
     Sensors,
     Computing,
     DesignTools,
 }
 
 impl Department {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::VehicleFamilies,
         Self::Materials,
+        Self::Aerodynamics,
         Self::Sensors,
         Self::Computing,
         Self::DesignTools,
@@ -28,6 +30,7 @@ impl Department {
         match self {
             Self::VehicleFamilies => "MISSILE FAMILIES",
             Self::Materials => "PROPULSION & STRUCTURES",
+            Self::Aerodynamics => "AERODYNAMICS",
             Self::Sensors => "SENSORS & ELECTRONICS",
             Self::Computing => "ONBOARD COMPUTING",
             Self::DesignTools => "DESIGN & TEST TOOLS",
@@ -329,6 +332,56 @@ pub fn default_tree() -> Vec<TechNode> {
             vec![cap("part:air_breathing")],
         ),
         node(
+            "aerodynamics",
+            Aerodynamics,
+            "Aerodynamics",
+            "Unlocks wings for cruise airframes.",
+            2_200,
+            4,
+            &["liquid_engines"],
+            vec![cap("part:wing")],
+        ),
+        node(
+            "fin_stabilisation",
+            Aerodynamics,
+            "Fin stabilisation",
+            "Unlocks fin sets for passive stability.",
+            1_800,
+            3,
+            &["aerodynamics"],
+            vec![cap("part:fin")],
+        ),
+        node(
+            "control_surfaces",
+            Aerodynamics,
+            "Control surfaces",
+            "Unlocks moving surfaces; integrated and combined sets need a better computer.",
+            3_000,
+            5,
+            &["aerodynamics", "computer_standard"],
+            vec![cap("part:control_surface")],
+        ),
+        node(
+            "advanced_aero_profiles",
+            Aerodynamics,
+            "Advanced profiles",
+            "Experimental profiles, variable geometry and asymmetric fin sets.",
+            4_200,
+            6,
+            &["fin_stabilisation", "control_surfaces"],
+            vec![cap("aero:advanced_profiles")],
+        ),
+        node(
+            "light_aero_structures",
+            Aerodynamics,
+            "Light aero structures",
+            "Lighter surfaces at the cost of complexity and reliability.",
+            2_600,
+            4,
+            &["advanced_aero_profiles"],
+            vec![cap("aero:light_structures")],
+        ),
+        node(
             "barometer",
             Sensors,
             "Barometric altimeter",
@@ -473,6 +526,27 @@ mod tests {
             },
             PartSpec::Decoupler,
             PartSpec::MissionModule { mass_kg: 10.0 },
+            PartSpec::Wing {
+                span_m: 1.0,
+                chord_m: 0.3,
+                sweep_deg: 15.0,
+                planform: crate::vehicle::WingPlanform::Swept,
+                profile: crate::vehicle::AirfoilProfile::Classic,
+                light: false,
+            },
+            PartSpec::FinSet {
+                span_m: 0.3,
+                chord_m: 0.3,
+                role: crate::vehicle::StabilizerRole::Rear,
+                layout: crate::vehicle::FinLayout::Symmetric,
+                light: false,
+            },
+            PartSpec::ControlSurface {
+                span_m: 0.3,
+                chord_m: 0.3,
+                kind: crate::vehicle::ControlKind::Classic,
+                light: false,
+            },
         ];
         for spec in specs {
             assert!(
@@ -552,16 +626,18 @@ mod tests {
 
     #[test]
     fn a_design_is_blocked_until_its_research_is_done() {
-        use crate::vehicle::tests::{part, sounding_rocket};
+        use crate::assembly::tests::sounding_rocket;
         use crate::vehicle::{PartSpec, RadarClass, SensorKind};
         let tree = default_tree();
         let mut vehicle = sounding_rocket();
-        vehicle.stages[1].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: SensorKind::Radar(RadarClass::Basic),
-            },
-        ));
+        vehicle
+            .add_to_top(
+                "radar",
+                PartSpec::Sensor {
+                    kind: SensorKind::Radar(RadarClass::Basic),
+                },
+            )
+            .unwrap();
         let mut state = ResearchState::default();
         assert_eq!(
             vehicle.missing_research(&state.owned_capabilities(&tree)),

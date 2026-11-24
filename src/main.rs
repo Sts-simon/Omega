@@ -1,6 +1,7 @@
 mod campus;
 mod interface;
 mod missile;
+mod picking;
 mod procurement;
 mod program_editor;
 mod revisions;
@@ -8,6 +9,7 @@ mod save;
 mod scene;
 mod trials;
 mod ui_kit;
+mod workshop;
 
 use crate::ui_kit::UiInteraction;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
@@ -30,6 +32,10 @@ fn main() {
         .init_resource::<program_editor::MissileProgramSession>()
         .init_resource::<trials::TrialSession>()
         .init_resource::<procurement::Procurement>()
+        .init_resource::<campus::ResearchScroll>()
+        .init_resource::<campus::WorkshopScroll>()
+        .init_resource::<workshop::DragState>()
+        .init_resource::<workshop::WorkshopInput>()
         .add_systems(
             Startup,
             (
@@ -50,6 +56,7 @@ fn main() {
                     procurement::sync_offers,
                     procurement::record_trial_evidence,
                     campus::handle_input,
+                    workshop::workshop_pointer,
                 )
                     .chain(),
                 (
@@ -58,6 +65,9 @@ fn main() {
                     move_camera,
                     campus::sync_boards,
                     campus::scroll_program_list,
+                    campus::scroll_research_grid,
+                    campus::scroll_part_list,
+                    workshop::draw_aero_markers,
                     missile::sync_missile_visuals,
                     missile::focus_missile_camera,
                     campus::update_toast,
@@ -74,6 +84,7 @@ fn main() {
 }
 
 fn move_camera(
+    workshop_input: Res<workshop::WorkshopInput>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mouse_motion: Res<AccumulatedMouseMotion>,
@@ -111,7 +122,7 @@ fn move_camera(
             rig.target += right * (-delta.x * pan_scale) + forward * (delta.y * pan_scale);
             changed = true;
         }
-        if mouse_scroll.delta.y != 0.0 {
+        if mouse_scroll.delta.y != 0.0 && !workshop_input.wheel_used {
             // Mouse wheels usually report lines; touchpads often report pixels.
             let scroll_lines = match mouse_scroll.unit {
                 MouseScrollUnit::Line => mouse_scroll.delta.y,

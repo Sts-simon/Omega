@@ -101,3 +101,41 @@ Keep worker inputs and outputs owned and explicit. Do not let worker tasks mutat
 ## Historical documentation
 
 The former assembly editor, civil contract workflow, chamber sequencer and scientific-study UI are historical features. Their implementation notes remain in the archived documents and changelog, not in the current application architecture.
+
+
+## Workshop assembly graph (0.31.1)
+
+`crates/omega-rules/src/assembly.rs` owns the design tree. A `Vehicle` is a list of `PlacedPart`s,
+each with an optional `Attach { parent, node, angle_deg, separation }`; `NodeId` is `Top`, `Bottom`
+or `Radial(0..3)`. Stage indices are derived by walking the tree from the single root: an edge
+starts a new stage when its `separation` flag is set or when the parent is a decoupler.
+
+`Vehicle::stage_views()` rebuilds the flat `Vec<Stage>` that the program validator, `flight::simulate`
+and the dossier already consume, so those rules and their figures are unchanged. `validate()` refuses
+cycles, occupied nodes, unknown parents, multiple roots, an engine without a tank in its stage and a
+computer outside the last stage; `warnings()` reports diameter steps without blocking the design.
+
+`src/missile.rs` keeps only the session (selection by part id, palette additions, parameter edits),
+the 3D layout built from `Vehicle::poses()` and the revision diff. Save files carry
+`schema_version: 4`; deserialization accepts a schema-3 graph or the old stage list and rewrites it as
+4, and refuses a newer schema with an error instead of guessing.
+
+## Aerodynamics (0.32.0)
+
+`crates/omega-rules/src/aero.rs` is Bevy-free and owns every aerodynamic rule. Three leaf parts
+(`Wing`, `FinSet`, `ControlSurface`) live on radial nodes; each design choice (planform, profile,
+stabiliser role, fin layout, control family, light build) maps to one fixed `Effect` table in that
+module, so no coefficient is scattered through the app.
+
+`aero::figures(&Vehicle)` walks the tree once and returns `AeroFigures`: reference area, wing/fin/
+control areas, area-weighted sweep, stability, control authority, lift, drag index, complexity,
+reliability, aerodynamic mass, surface drag area, CG, CA, margin, stable band and balance. It is
+computed on edit, not per flight step. `flight::simulate` applies it to the existing 1-D integration:
+surface drag area, a lift-dependent air-breathing minimum speed and climb gravity, a stability-damped
+seeded drag spread and a stability/authority-dependent altitude rate. A design without surfaces
+leaves every term at its previous value.
+
+`Vehicle::validate()` refuses aerodynamic parts on axial nodes, surfaces with children and moving
+surfaces without a compatible computer; `Vehicle::warnings()` reports oversized spans, heavy surface
+mass, control surfaces with no fixed surface and an unstable CG/CA margin. The workshop draws CG
+(yellow), CA (cyan), the acceptable band and the surface plates from the same figures.

@@ -13,7 +13,7 @@ All values and outcomes are game mechanics. The project does not attempt to mode
 The following features are already present in the application:
 
 - **Research:** 13 technologies across five departments, credit costs, prerequisites, a day clock and capability grants.
-- **Workshop:** staged vehicle editor, 13 part types, one to four stages, presets, editable parameters, derived game statistics, validation and persistence.
+- **Workshop:** attachment-tree vehicle editor, 16 part types including wings, fin sets and control surfaces, one to four derived stages, presets, editable parameters and design choices, derived game statistics, validation and persistence.
 - **Program editor:** parallel threads, seven abstract block types, hardware and computer-limit validation, editing, persistence and content hashing.
 - **Trials:** repeatable seeded runs, four result plots, event timeline, anomaly summaries, batch runs of 10/100/1,000 seeds, progress reporting and A/B comparison.
 - **Contracts:** mission and vehicle families, research-gated offers, active-contract limits, deadlines, hash-bound evidence dossiers and delivery rewards.
@@ -102,6 +102,46 @@ The recent CI run on the current `main` commit is green. This is a repository ba
 - Run a final manual play-through.
 
 **Acceptance:** a tester can install, launch, play, save and update using only the release instructions.
+
+### Lot 6 — Workshop assembly graph (0.31.1, in progress)
+
+**Purpose:** replace the flat stage list with an attachment tree so radial boosters, free placement
+and a real build interaction become possible.
+
+- Done: `omega-rules::assembly` (nodes, attachments, symmetry slots, derived stages, validation,
+  diameter warnings, save schema 3 with migration), 3D layout from the tree, workshop UI showing
+  derived stages, part selection by id and palette additions above the selected part.
+- Delivered: 3D picking (`src/picking.rs`: cylinder raycast, nearest part, 28 px node snapping), a
+  drag ghost and node markers (`src/workshop.rs`), palette-to-node drops, subtree moves with a 5 px
+  drag threshold so a click only selects, `Delete`, linked radial symmetry (`X`, 1 → 2 → 3 → 4),
+  undo/redo (50 snapshots, buttons and layout-independent `Ctrl+Z` / `Ctrl+Y`) and the wheel
+  adjusting the selected part's main value without zooming the camera.
+- Remaining for this lot: live flight forecast and the active-contract requirement bar.
+
+**Acceptance:** a new player builds a two-stage rocket with two radial boosters with the mouse only;
+old presets keep identical stage figures; every refusal has a message and a test.
+
+### Lot 7 — Aerodynamics: wings, fins and control surfaces (0.32.0, delivered)
+
+**Purpose:** make the airframe shape matter. Cruise vehicles get wings that let the air-breathing
+engine work at a lower speed; ballistic vehicles get fins for stability and control surfaces for
+authority, all placed on the same radial nodes and mirrored with `X`.
+
+- Done: one `omega-rules::aero` aggregation (areas, sweep, stability, control authority, lift, drag,
+  complexity, reliability, mass, CG/CA) consumed by the existing 1-D flight integration; no guidance
+  law, no CFD, no per-step geometry.
+- Done: `Wing`, `FinSet` and `ControlSurface` specs with planform, profile, stabiliser role, fin
+  layout, control family and light build; `designs/vehicle.json` schema 4 with migration from schema
+  3; a design without surfaces keeps its previous flight figures.
+- Done: aero palette row, plate 3D meshes, oriented-box picking in `src/picking.rs`, span/chord/sweep
+  and design choices in the inspector, leaf-only attachment, CG/CA markers and stable band.
+- Done: five aerodynamics technologies, a soft stability requirement on surface-to-air offers, and
+  flight tests for fin damping, wing lift and control authority.
+- Full plan, accepted values and delivery record: `docs/AERODYNAMICS_PLAN.md`.
+
+**Acceptance:** fins measurably improve stability and altitude settling, wings enable a cruise design
+that the wingless version cannot complete, control surfaces reduce the time to the target, old
+designs fly unchanged, schema 3 migrates, and the whole lot is checked in game at 1600×960.
 
 ### Stable release (1.0.0)
 

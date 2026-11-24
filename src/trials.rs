@@ -416,9 +416,9 @@ mod tests {
     }
 
     fn rocket() -> Vehicle {
-        Vehicle {
-            name: "Test rocket".into(),
-            stages: vec![
+        Vehicle::from_stages(
+            "Test rocket",
+            vec![
                 Stage {
                     parts: vec![
                         part(
@@ -451,7 +451,7 @@ mod tests {
                     ],
                 },
             ],
-        }
+        )
     }
 
     fn two_stage(separate_at: f64) -> Program {
@@ -556,11 +556,14 @@ mod tests {
         assert!(session.batch_stale(&vehicle, &two_stage(8.0)), "program changed");
 
         let mut edited = rocket();
-        edited.stages[0].parts[0].spec = PartSpec::SolidMotor {
-            length_m: 3.0,
-            diameter_m: 0.4,
-            burn_time_s: 20.0,
-        };
+        edited.replace_part(
+            "booster",
+            PartSpec::SolidMotor {
+                length_m: 3.0,
+                diameter_m: 0.4,
+                burn_time_s: 20.0,
+            },
+        );
         assert!(session.batch_stale(&edited, &program), "vehicle changed");
 
         session.air_launch = true;
@@ -601,12 +604,14 @@ mod tests {
     #[test]
     fn the_seed_roll_is_visible_and_flips_the_lock() {
         let mut vehicle = rocket();
-        vehicle.stages[1].parts.push(part(
-            "radar",
-            PartSpec::Sensor {
-                kind: omega_rules::SensorKind::Radar(omega_rules::RadarClass::Basic),
-            },
-        ));
+        vehicle
+            .add_to_top(
+                "radar",
+                PartSpec::Sensor {
+                    kind: omega_rules::SensorKind::Radar(omega_rules::RadarClass::Basic),
+                },
+            )
+            .unwrap();
         let program = Program::single(vec![Block::IgniteStage { stage: 0 }, Block::LockTarget]);
         let first = lock_probe(&vehicle, &program, 1).unwrap();
         assert_eq!(first.roll, lock_roll(1));

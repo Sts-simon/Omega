@@ -5,7 +5,7 @@
 //! `LockTarget` is only a request for an abstract success roll in the simulation; there is no
 //! guidance or tracking logic anywhere in this crate.
 
-use crate::vehicle::Vehicle;
+use crate::assembly::Vehicle;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -114,7 +114,7 @@ pub fn validate_program(program: &Program, vehicle: &Vehicle) -> Vec<String> {
                 Block::Wait { seconds } if !(0.0..=3_600.0).contains(&seconds) || !seconds.is_finite() => {
                     issues.push(format!("{place}: wait must be between 0 and 3600 s"));
                 }
-                Block::IgniteStage { stage } | Block::SeparateStage { stage } if stage >= vehicle.stages.len() => {
+                Block::IgniteStage { stage } | Block::SeparateStage { stage } if stage >= vehicle.stage_count() => {
                     issues.push(format!("{place}: stage {} does not exist", stage + 1));
                 }
                 Block::SetThrottle { fraction } if !(0.0..=1.0).contains(&fraction) || !fraction.is_finite() => {
@@ -147,17 +147,18 @@ pub fn validate_program(program: &Program, vehicle: &Vehicle) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vehicle::tests::{part, sounding_rocket};
+    use crate::assembly::tests::sounding_rocket;
     use crate::vehicle::{ComputerClass, PartSpec, RadarClass, SensorKind};
 
     fn with_radar() -> Vehicle {
         let mut v = sounding_rocket();
-        v.stages[1].parts.push(part(
+        v.add_to_top(
             "radar",
             PartSpec::Sensor {
                 kind: SensorKind::Radar(RadarClass::Basic),
             },
-        ));
+        )
+        .unwrap();
         v
     }
 
@@ -188,9 +189,12 @@ mod tests {
         assert!(validate_program(&long, &vehicle).join(" ").contains("memory"));
 
         let mut better = sounding_rocket();
-        better.stages[1].parts[1].spec = PartSpec::Computer {
-            class: ComputerClass::Standard,
-        };
+        better.replace_part(
+            "pc",
+            PartSpec::Computer {
+                class: ComputerClass::Standard,
+            },
+        );
         assert!(validate_program(&program, &better).is_empty());
         assert!(
             validate_program(&long, &better).is_empty(),
@@ -234,14 +238,14 @@ mod tests {
         let issues = validate_program(&program, &vehicle);
         assert_eq!(issues.len(), 4, "{issues:?}");
         let mut single = sounding_rocket();
-        single.stages.pop();
+        single.remove_subtree("sustainer");
         assert!(!validate_program(&Program::single(vec![Block::SeparateStage { stage: 0 }]), &single).is_empty());
     }
 
     #[test]
     fn no_computer_means_no_program() {
         let mut vehicle = sounding_rocket();
-        vehicle.stages[1].parts.remove(1);
+        vehicle.remove_subtree("pc");
         assert!(validate_program(&Program::default(), &vehicle)[0].contains("no flight computer"));
     }
 

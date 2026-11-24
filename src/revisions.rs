@@ -158,9 +158,9 @@ mod tests {
     use omega_rules::{ComputerClass, Part, PartSpec, Stage};
 
     fn vehicle(length: f64) -> Vehicle {
-        Vehicle {
-            name: "Revision rocket".into(),
-            stages: vec![Stage {
+        Vehicle::from_stages(
+            "Revision rocket",
+            vec![Stage {
                 parts: vec![
                     Part {
                         id: "motor".into(),
@@ -178,7 +178,7 @@ mod tests {
                     },
                 ],
             }],
-        }
+        )
     }
 
     #[test]

@@ -32,9 +32,10 @@ workspace folder are ignored.
 
 ### Research Centre
 
-- 13 technologies in five departments (missile families, propulsion and structures, sensors and
-  electronics, onboard computing, design and test tools), each with a credit cost, a duration in
-  days and prerequisites.
+- 18 technologies in six departments (missile families, propulsion and structures, aerodynamics,
+  sensors and electronics, onboard computing, design and test tools), each with a credit cost, a
+  duration in days and prerequisites. Aerodynamics, fin stabilisation, control surfaces, advanced
+  profiles and light aero structures unlock the airframe choices.
 - One research project at a time. Credits are deducted when research starts; the **NEXT DAY**
   button advances the game clock, shown as `DAY n` in the navigation bar. Finishing a project
   grants its capabilities and prints the technology name.
@@ -51,11 +52,29 @@ workspace folder are ignored.
 
 ### Missile workshop
 
-- A staged vehicle built from 13 part types: solid motor, fuel tank, liquid engine, turbofan,
-  pitot tube, barometer, basic radar, active radar, three flight computers, decoupler and mission
-  module. Each part is resizable within validated ranges.
-- One to four stages. New parts go to the selected stage. The single flight computer always sits in
-  the last stage and moves there automatically when a stage is added or removed.
+- A staged vehicle built from 16 part types: solid motor, fuel tank, liquid engine, turbofan,
+  pitot tube, barometer, basic radar, active radar, three flight computers, decoupler, mission
+  module, wing, fin set and control surface. Each part is resizable within validated ranges.
+- **The vehicle is an attachment tree.** A part is mounted on a node of another part (`top`,
+  `bottom`, or one of four radial mounts on motors, tanks and modules); the stages are derived from
+  that tree, so a decoupler starts a new stage instead of a separate stage editor. The tree is saved
+  as `designs/vehicle.json` schema 4; schema-3 graphs and older stage-list files are migrated when
+  read.
+- **Parts are placed with the mouse.** Drag a palette entry onto any free node shown in the 3D view;
+  a plain click still adds above the selected part (or the highest one). Drag an existing part onto
+  another node to move its whole subtree, `Delete` removes the selection, `X` cycles radial symmetry
+  (1 → 2 → 3 → 4, copies share a group id) and `Ctrl+Z` / `Ctrl+Y` undo and redo up to 50 edits.
+- The wheel adjusts the selected part's main value when the pointer is over it, and zooms the camera
+  everywhere else. A second flight computer replaces the first in place, so the single computer
+  stays in the last stage. A diameter step between a part and its mount is reported as a warning,
+  not refused.
+- **Aerodynamics is a design decision.** A wing, fin set or control surface mounts on a free radial
+  slot, mirrors with `X`, and carries span, chord and (for a wing) sweep plus discrete choices:
+  planform, airfoil profile, stabiliser role, fin layout, control family and standard/light build.
+  The workshop quotes the resulting stability, control authority, lift, drag, complexity,
+  reliability and aerodynamic mass, plus the centre of gravity, the centre of aerodynamics, the
+  stable band and an A/B snapshot. Moving surfaces need a compatible flight computer; an oversized
+  or unstable design is a warning, not a refusal.
 - Presets: two-stage rocket, cruise vehicle, or an empty vehicle. Presets whose parts are not yet
   researched are refused with the missing technologies.
 - Selected part resizing with `-` / `+`: length and diameter (motors, tanks), burn time (solid
@@ -203,9 +222,12 @@ card opens it.
 
 ### Missile workshop
 
-Editing is mouse-only: presets, part palette (locked parts greyed), stage buttons and `+ STAGE` /
-`- STAGE`, the part list per stage, `-` / `+` on the selected part's adjustable values,
-`REMOVE PART` and `RECORD REVISION`. Stage figures and validation update immediately.
+Editing is mouse-first: presets, part palette (locked parts greyed), drag a part from the palette to
+a glowing node in the 3D view or drag an existing part to move its subtree, `Delete`, `X` for
+symmetry, `Ctrl+Z` / `Ctrl+Y`, the derived part list with click-to-select, `-` / `+` on the selected
+part's adjustable values (or the wheel over the part, one undo entry per continuous gesture),
+`UNDO` / `REDO`, `REMOVE PART` and `RECORD REVISION`. Escape cancels a drag and keeps the workshop
+open; a second Escape returns to the island. Stage figures and validation update immediately.
 
 ### Research Centre
 
@@ -238,7 +260,7 @@ saves/slot_1/
   campaign.json                 credits, research, day (schema 2; schema 1 still loads)
   contracts/missile.json        offers, active contracts, evidence, deliveries (schema 2)
   designs/revisions.json        missile design revisions (schema 3)
-  designs/vehicle.json          missile vehicle
+  designs/vehicle.json          missile vehicle (schema 4; schema 3 graphs and 1-2 lists migrate)
   programs/missile.json         missile program
 ```
 
@@ -257,7 +279,9 @@ src/
   campus/board.rs      card boards: island, contracts, research, workshop, program, trials
   procurement.rs       offers, active contracts, trial evidence, dossier, delivery, persistence
   revisions.rs         missile design revision log
-  missile.rs           missile workshop session, parts, stages, 3D stack, change summary
+  missile.rs           missile workshop session, parts, attachment tree view, 3D layout
+  picking.rs           camera-ray picking and screen-space node snapping (pure, tested)
+  workshop.rs          pointer system: palette drag, subtree move, delete, symmetry, undo, wheel
   program_editor.rs    missile program session, validation, persistence
   trials.rs            seeded trial session, batches, comparison
   interface.rs         navigation bar, UiAction dispatch
@@ -267,8 +291,8 @@ src/
 crates/
   sim-core/            standalone Bevy-free solvers: thermal FV, truss, mesh, mesh thermal, reports
   omega-data/          content hashes, atomic writes, versioned save slot
-  omega-rules/         vehicle, program, flight, research, contracts, requirements, dossier,
-                       metrics, diff
+  omega-rules/         assembly graph, vehicle parts, program, flight, research, contracts,
+                       requirements, dossier, metrics, diff
 docs/                  architecture, vision, roadmap, changelog, model notes
 examples/              sample assembly, chamber program, polygon sketch
 ```

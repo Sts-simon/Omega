@@ -5,7 +5,7 @@ use crate::campus::{CampusState, CampusView};
 use crate::ui_kit::{self, NavStatus, UiInteraction};
 use bevy::prelude::*;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum UiAction {
     Navigate(CampusView),
     StartResearch(usize),
@@ -146,7 +146,7 @@ pub fn handle_actions(
         if *interaction != UiInteraction::Pressed {
             continue;
         }
-        match button.0 {
+        match button.0.clone() {
             UiAction::Navigate(view) => campus.ui_navigate(view),
             UiAction::StartResearch(index) => campus.ui_start_research(index),
             UiAction::NextDay => campus.ui_next_day(),

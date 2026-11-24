@@ -513,9 +513,9 @@ mod tests {
     }
 
     fn vehicle() -> Vehicle {
-        Vehicle {
-            name: "Test vehicle".into(),
-            stages: vec![Stage {
+        Vehicle::from_stages(
+            "Test vehicle",
+            vec![Stage {
                 parts: vec![
                     Part {
                         id: "motor".into(),
@@ -533,7 +533,7 @@ mod tests {
                     },
                 ],
             }],
-        }
+        )
     }
 
     fn program() -> Program {
@@ -543,6 +543,7 @@ mod tests {
     fn trial(vehicle: &Vehicle, program: &Program, run_id: u64) -> MissileTrial {
         let (vehicle_hash, program_hash) = hashes(vehicle, program);
         MissileTrial {
+            stability: 0.0,
             run_id,
             vehicle: vehicle_hash,
             program: program_hash,
@@ -691,11 +692,14 @@ mod tests {
         procurement.accept(0, 3, 1, &caps(&[]));
         procurement.record_trial(trial(&vehicle(), &program(), 1));
         let mut edited = vehicle();
-        edited.stages[0].parts[0].spec = PartSpec::SolidMotor {
-            length_m: 2.2,
-            diameter_m: 0.4,
-            burn_time_s: 20.0,
-        };
+        edited.replace_part(
+            "motor",
+            PartSpec::SolidMotor {
+                length_m: 2.2,
+                diameter_m: 0.4,
+                burn_time_s: 20.0,
+            },
+        );
         assert_eq!(procurement.evidence_status(&edited, &program()), EvidenceStatus::Stale);
         let error = procurement.deliver(4, Some(7), &edited, &program()).unwrap_err();
         assert!(error.contains("stale") || error.contains("Dossier"), "{error}");

@@ -10,11 +10,10 @@ use serde::{Deserialize, Serialize};
 
 mod board;
 
-#[cfg(test)]
-pub(crate) use board::friendly_capabilities;
 pub(crate) use board::{
-    ToastText, handle_extra_actions, poll_trial_batch, scroll_program_list, setup_boards, sync_boards,
-    update_batch_progress, update_nav_status, update_toast,
+    ResearchScroll, ToastText, WorkshopScroll, handle_extra_actions, poll_trial_batch, scroll_part_list,
+    scroll_program_list, scroll_research_grid, setup_boards, sync_boards, update_batch_progress, update_nav_status,
+    update_toast,
 };
 
 const CAMPAIGN_SCHEMA: u32 = 2;
@@ -254,9 +253,14 @@ pub fn handle_input(
     missile: Res<crate::missile::MissileSession>,
     program: Res<crate::program_editor::MissileProgramSession>,
     mut procurement: ResMut<crate::procurement::Procurement>,
+    workshop: Res<crate::workshop::WorkshopInput>,
     ui_buttons: Query<&UiInteraction>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
+        if workshop.drag_active {
+            // The workshop cancels its drag this frame and keeps the board open.
+            return;
+        }
         if campus.view != CampusView::Island {
             campus.view = CampusView::Island;
             campus.message = "Returned to the island".to_string();
