@@ -379,7 +379,15 @@ pub(crate) fn workshop_pointer(
             session.commit_transform(before);
         }
         if amount.abs() > 0.001 {
-            campus.message = format!("{} {} {amount:+.2}", if transform_gizmo.mode == TransformMode::Rotate { "Rotation" } else { "Déplacement" }, ["X", "Y", "Z"][axis]);
+            campus.message = format!(
+                "{} {} {amount:+.2}",
+                if transform_gizmo.mode == TransformMode::Rotate {
+                    "Rotation"
+                } else {
+                    "Déplacement"
+                },
+                ["X", "Y", "Z"][axis]
+            );
         }
     }
 
