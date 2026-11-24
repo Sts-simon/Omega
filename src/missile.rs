@@ -1541,7 +1541,9 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
             let spec = part.spec;
             let (shape, color) = appearance(&spec);
             let (planform, sweep_deg) = match spec {
-                PartSpec::Wing { planform, sweep_deg, .. } => (Some(planform), sweep_deg as f32),
+                PartSpec::Wing {
+                    planform, sweep_deg, ..
+                } => (Some(planform), sweep_deg as f32),
                 _ => (None, 0.0),
             };
             let angle = part.attach.as_ref().map_or(0.0, |attach| match attach.node {
