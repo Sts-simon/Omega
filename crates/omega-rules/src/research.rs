@@ -277,7 +277,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Surface-to-air family",
             "Contracts for surface-launched interceptors.",
             3_000,
-            4,
+            3,
             &[],
             vec![cap("family:surface_to_air")],
         ),
@@ -287,7 +287,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Air-to-air family",
             "Contracts for air-launched missiles.",
             3_500,
-            5,
+            4,
             &["family_surface_to_air"],
             vec![cap("family:air_to_air")],
         ),
@@ -297,7 +297,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Cruise family",
             "Long-endurance low-flying vehicles.",
             4_000,
-            5,
+            4,
             &["turbofans"],
             vec![cap("family:cruise")],
         ),
@@ -307,7 +307,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Anti-ship family",
             "Contracts for sea-skimming vehicles.",
             4_500,
-            6,
+            4,
             &["family_cruise", "barometer"],
             vec![cap("family:anti_ship")],
         ),
@@ -317,7 +317,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Liquid engines",
             "Throttleable engines fed from tanks.",
             2_500,
-            4,
+            3,
             &[],
             vec![cap("part:liquid_engine")],
         ),
@@ -327,7 +327,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Turbofan engines",
             "Economical engines that need airspeed to run.",
             4_000,
-            6,
+            4,
             &["liquid_engines"],
             vec![cap("part:air_breathing")],
         ),
@@ -337,7 +337,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Aerodynamics",
             "Unlocks wings for cruise airframes.",
             2_200,
-            4,
+            3,
             &["liquid_engines"],
             vec![cap("part:wing")],
         ),
@@ -347,7 +347,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Fin stabilisation",
             "Unlocks fin sets for passive stability.",
             1_800,
-            3,
+            2,
             &["aerodynamics"],
             vec![cap("part:fin")],
         ),
@@ -357,7 +357,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Control surfaces",
             "Unlocks moving surfaces; integrated and combined sets need a better computer.",
             3_000,
-            5,
+            4,
             &["aerodynamics", "computer_standard"],
             vec![cap("part:control_surface")],
         ),
@@ -367,7 +367,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Advanced profiles",
             "Experimental profiles, variable geometry and asymmetric fin sets.",
             4_200,
-            6,
+            4,
             &["fin_stabilisation", "control_surfaces"],
             vec![cap("aero:advanced_profiles")],
         ),
@@ -377,7 +377,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Light aero structures",
             "Lighter surfaces at the cost of complexity and reliability.",
             2_600,
-            4,
+            3,
             &["advanced_aero_profiles"],
             vec![cap("aero:light_structures")],
         ),
@@ -397,7 +397,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Basic radar",
             "Unlocks the Lock target block (limited speed).",
             3_000,
-            5,
+            4,
             &[],
             vec![cap("sensor:radar_basic")],
         ),
@@ -407,7 +407,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Active radar",
             "Better lock chance and a higher speed limit.",
             6_000,
-            7,
+            5,
             &["radar_basic"],
             vec![cap("sensor:radar_active")],
         ),
@@ -417,7 +417,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Standard flight computer",
             "Two threads and more memory.",
             2_500,
-            4,
+            3,
             &[],
             vec![cap("computer:standard")],
         ),
@@ -427,7 +427,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Advanced flight computer",
             "Four threads and a large memory.",
             5_500,
-            7,
+            5,
             &["computer_standard"],
             vec![cap("computer:advanced")],
         ),
@@ -437,7 +437,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Parallel project management",
             "One extra active contract.",
             6_000,
-            8,
+            6,
             &[],
             vec![Grant::ExtraActiveProjects(1)],
         ),
@@ -447,7 +447,7 @@ pub fn default_tree() -> Vec<TechNode> {
             "Batch trials",
             "Run many seeded tests at once and compare results.",
             3_500,
-            5,
+            4,
             &[],
             vec![cap("analysis:monte_carlo")],
         ),
@@ -472,6 +472,21 @@ pub fn capability_label(capability: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tree_fits_a_reasonable_serial_campaign_budget() {
+        let tree = default_tree();
+        let cost: u64 = tree.iter().map(|node| node.cost_cr).sum();
+        let days: u16 = tree.iter().map(|node| node.duration_days).sum();
+        assert_eq!(cost, 63_000, "the total research cost is the campaign's credit target");
+        assert!(days <= 70, "serial research must stay near 70 days, not {days}");
+        let aero: u16 = tree
+            .iter()
+            .filter(|node| node.department == Department::Aerodynamics)
+            .map(|node| node.duration_days)
+            .sum();
+        assert!(aero <= 16, "the aerodynamics department costs {aero} days");
+    }
 
     #[test]
     fn default_tree_is_valid_and_covers_every_department() {
@@ -611,8 +626,13 @@ mod tests {
         let mut state = ResearchState::default();
         assert!(!state.has_capability(&tree, "part:liquid_engine"));
         assert!(state.has_capability(&tree, "part:solid_motor"), "starting capability");
+        let days = tree
+            .iter()
+            .find(|node| node.id == "liquid_engines")
+            .unwrap()
+            .duration_days;
         state.start(&tree, "liquid_engines", 5_000).unwrap();
-        assert!(state.advance_days(3).is_empty());
+        assert!(state.advance_days(days - 1).is_empty());
         assert_eq!(state.active.as_ref().unwrap().days_left, 1);
         assert_eq!(state.advance_days(5), vec!["liquid_engines".to_string()]);
         assert!(state.active.is_none());

@@ -9,7 +9,10 @@
 
 use crate::assembly::Vehicle;
 use crate::vehicle::{AirfoilProfile, ControlKind, FinLayout, PartSpec, StabilizerRole, WingPlanform};
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::f64::consts::PI;
+use std::sync::OnceLock;
 
 /// Area (m²) at which a surface family reaches its full gameplay contribution. Chosen so a small
 /// four-fin set is clearly useful and a huge wing saturates instead of breaking the scale.
@@ -21,6 +24,11 @@ pub const STABLE_BAND_HIGH: f64 = 0.10;
 pub const LIGHT_MASS_FACTOR: f64 = 0.70;
 /// Drag index at which the drag indicator reads 100.
 const DRAG_INDEX_REFERENCE_M2: f64 = 0.60;
+/// Reliability below which a trial can suffer one abstract surface fault (see
+/// [`AeroFigures::surface_fault_chance`]). A sound airframe never draws one.
+pub const SURFACE_FAULT_RELIABILITY: f64 = 60.0;
+/// Fault chance a completely unreliable airframe (the 25 floor) would reach.
+pub const SURFACE_FAULT_MAX_CHANCE: f64 = 0.35;
 
 /// Areal density in kg/m². Thin wing skins, heavier fin sets, heaviest moving surfaces.
 pub const WING_AREAL_DENSITY: f64 = 3.2;
@@ -29,20 +37,98 @@ pub const CONTROL_AREAL_DENSITY: f64 = 5.6;
 
 /// One design choice's contribution. Every field is a multiplier or a 0..1 score; keeping them in
 /// one struct makes the trade-offs readable instead of scattering constants through the code.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 pub struct Effect {
+    #[serde(default = "one")]
     pub area: f64,
+    #[serde(default = "one")]
     pub lift: f64,
+    #[serde(default = "one")]
     pub drag: f64,
+    #[serde(default = "one")]
     pub stability: f64,
+    #[serde(default = "one")]
     pub authority: f64,
+    #[serde(default)]
     pub complexity: f64,
+    #[serde(default)]
     pub reliability: f64,
+    #[serde(default = "one")]
     pub mass: f64,
 }
 
+fn one() -> f64 {
+    1.0
+}
+
+/// The effect tables, embedded as data: balancing a design choice is an edit of
+/// `aero_effects.json` reviewed on its own, not a change to the rules. Every enum variant must have
+/// an entry; a missing key is a programming error and panics at first use.
+#[derive(Deserialize)]
+struct EffectTables {
+    planform: HashMap<String, Effect>,
+    profile: HashMap<String, Effect>,
+    role: HashMap<String, Effect>,
+    layout: HashMap<String, Effect>,
+    control: HashMap<String, Effect>,
+}
+
+const EFFECTS_JSON: &str = include_str!("aero_effects.json");
+
+fn tables() -> &'static EffectTables {
+    static TABLES: OnceLock<EffectTables> = OnceLock::new();
+    TABLES
+        .get_or_init(|| serde_json::from_str(EFFECTS_JSON).unwrap_or_else(|error| panic!("aero_effects.json: {error}")))
+}
+
+fn lookup(table: &'static HashMap<String, Effect>, key: &str) -> Effect {
+    *table
+        .get(key)
+        .unwrap_or_else(|| panic!("aero_effects.json has no '{key}' entry"))
+}
+
+/// Markdown report of every table, printed by `omega --aero-report` and committed as
+/// `docs/AERO_BALANCE.md` so the numbers can be reviewed without reading Rust.
+pub fn balance_report() -> String {
+    let tables = tables();
+    let mut out = String::from(
+        "# Aerodynamics effect tables\n\nGenerated from `crates/omega-rules/src/aero_effects.json` \
+         by `omega --aero-report`. Unlisted fields are neutral: 1 for the multipliers, 0 for \
+         complexity and reliability.\n",
+    );
+    for (title, table) in [
+        ("Planforms", &tables.planform),
+        ("Profiles", &tables.profile),
+        ("Stabiliser roles", &tables.role),
+        ("Fin layouts", &tables.layout),
+        ("Control families", &tables.control),
+    ] {
+        out.push_str(&format!(
+            "\n## {title}\n\n| Choice | Area | Lift | Drag | Stability | Authority | Complexity | Reliability | Mass |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n"
+        ));
+        let mut keys: Vec<&String> = table.keys().collect();
+        keys.sort();
+        for key in keys {
+            let effect = &table[key];
+            out.push_str(&format!(
+                "| {key} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:+.2} | {:.2} |\n",
+                effect.area,
+                effect.lift,
+                effect.drag,
+                effect.stability,
+                effect.authority,
+                effect.complexity,
+                effect.reliability,
+                effect.mass
+            ));
+        }
+    }
+    out
+}
+
 impl Effect {
-    const fn neutral() -> Self {
+    /// The identity multiplier: a choice that changes nothing.
+    pub const fn neutral() -> Self {
         Self {
             area: 1.0,
             lift: 1.0,
@@ -57,184 +143,53 @@ impl Effect {
 }
 
 pub fn planform_effect(planform: WingPlanform) -> Effect {
-    match planform {
-        WingPlanform::Straight => Effect::neutral(),
-        WingPlanform::Swept => Effect {
-            area: 0.95,
-            drag: 0.75,
-            stability: 1.05,
-            authority: 0.95,
-            complexity: 0.15,
-            ..Effect::neutral()
-        },
-        WingPlanform::Delta => Effect {
-            area: 0.90,
-            lift: 1.15,
-            drag: 1.10,
-            stability: 1.10,
-            authority: 0.90,
-            complexity: 0.25,
-            reliability: -0.05,
-            mass: 1.05,
-        },
-        WingPlanform::Trapezoidal => Effect {
-            area: 0.95,
-            lift: 1.05,
-            drag: 0.90,
-            stability: 1.05,
-            complexity: 0.10,
-            reliability: 0.02,
-            mass: 1.02,
-            ..Effect::neutral()
-        },
-        WingPlanform::VariableGeometry => Effect {
-            lift: 1.10,
-            drag: 0.85,
-            stability: 1.05,
-            authority: 1.15,
-            complexity: 0.55,
-            reliability: -0.20,
-            mass: 1.25,
-            ..Effect::neutral()
-        },
-    }
+    let key = match planform {
+        WingPlanform::Straight => "straight",
+        WingPlanform::Swept => "swept",
+        WingPlanform::Delta => "delta",
+        WingPlanform::Trapezoidal => "trapezoidal",
+        WingPlanform::VariableGeometry => "variable_geometry",
+    };
+    lookup(&tables().planform, key)
 }
 
 pub fn profile_effect(profile: AirfoilProfile) -> Effect {
-    match profile {
-        AirfoilProfile::Symmetric => Effect {
-            lift: 0.90,
-            drag: 0.95,
-            stability: 1.05,
-            complexity: 0.0,
-            reliability: 0.05,
-            ..Effect::neutral()
-        },
-        AirfoilProfile::Classic => Effect {
-            complexity: 0.05,
-            reliability: 0.02,
-            ..Effect::neutral()
-        },
-        AirfoilProfile::LowDrag => Effect {
-            lift: 0.85,
-            drag: 0.70,
-            stability: 0.95,
-            authority: 0.95,
-            complexity: 0.20,
-            ..Effect::neutral()
-        },
-        AirfoilProfile::HighLift => Effect {
-            lift: 1.25,
-            drag: 1.25,
-            stability: 0.90,
-            authority: 0.90,
-            complexity: 0.20,
-            reliability: -0.05,
-            ..Effect::neutral()
-        },
-        AirfoilProfile::Experimental => Effect {
-            lift: 1.35,
-            drag: 0.80,
-            stability: 0.85,
-            authority: 1.20,
-            complexity: 0.60,
-            reliability: -0.30,
-            ..Effect::neutral()
-        },
-    }
+    let key = match profile {
+        AirfoilProfile::Symmetric => "symmetric",
+        AirfoilProfile::Classic => "classic",
+        AirfoilProfile::LowDrag => "low_drag",
+        AirfoilProfile::HighLift => "high_lift",
+        AirfoilProfile::Experimental => "experimental",
+    };
+    lookup(&tables().profile, key)
 }
 
 pub fn role_effect(role: StabilizerRole) -> Effect {
-    match role {
-        StabilizerRole::Rear => Effect {
-            lift: 0.20,
-            authority: 0.60,
-            stability: 1.00,
-            complexity: 0.0,
-            reliability: 0.05,
-            ..Effect::neutral()
-        },
-        StabilizerRole::Front => Effect {
-            lift: 0.30,
-            drag: 1.05,
-            stability: 0.60,
-            authority: 0.80,
-            complexity: 0.15,
-            ..Effect::neutral()
-        },
-        StabilizerRole::Blended => Effect {
-            lift: 0.15,
-            drag: 0.70,
-            stability: 0.50,
-            authority: 0.40,
-            complexity: 0.05,
-            reliability: 0.05,
-            mass: 0.80,
-            ..Effect::neutral()
-        },
-        StabilizerRole::Combined => Effect {
-            lift: 0.25,
-            drag: 1.20,
-            stability: 1.15,
-            authority: 0.90,
-            complexity: 0.30,
-            reliability: -0.05,
-            mass: 1.10,
-            ..Effect::neutral()
-        },
-    }
+    let key = match role {
+        StabilizerRole::Rear => "rear",
+        StabilizerRole::Front => "front",
+        StabilizerRole::Blended => "blended",
+        StabilizerRole::Combined => "combined",
+    };
+    lookup(&tables().role, key)
 }
 
 pub fn layout_effect(layout: FinLayout) -> Effect {
-    match layout {
-        FinLayout::Symmetric => Effect::neutral(),
-        FinLayout::Asymmetric => Effect {
-            drag: 1.10,
-            stability: 0.80,
-            authority: 1.30,
-            complexity: 0.35,
-            reliability: -0.25,
-            ..Effect::neutral()
-        },
-    }
+    let key = match layout {
+        FinLayout::Symmetric => "symmetric",
+        FinLayout::Asymmetric => "asymmetric",
+    };
+    lookup(&tables().layout, key)
 }
 
 pub fn control_effect(kind: ControlKind) -> Effect {
-    match kind {
-        ControlKind::Classic => Effect {
-            lift: 0.15,
-            authority: 1.00,
-            complexity: 0.05,
-            ..Effect::neutral()
-        },
-        ControlKind::Integrated => Effect {
-            lift: 0.15,
-            drag: 0.90,
-            authority: 1.20,
-            complexity: 0.25,
-            reliability: -0.05,
-            ..Effect::neutral()
-        },
-        ControlKind::Combined => Effect {
-            lift: 0.20,
-            drag: 1.15,
-            stability: 1.10,
-            authority: 1.35,
-            complexity: 0.40,
-            reliability: -0.12,
-            mass: 1.10,
-            ..Effect::neutral()
-        },
-        ControlKind::Fixed => Effect {
-            lift: 0.10,
-            drag: 1.10,
-            stability: 1.25,
-            authority: 0.0,
-            complexity: 0.0,
-            reliability: 0.10,
-            ..Effect::neutral()
-        },
-    }
+    let key = match kind {
+        ControlKind::Classic => "classic",
+        ControlKind::Integrated => "integrated",
+        ControlKind::Combined => "combined",
+        ControlKind::Fixed => "fixed",
+    };
+    lookup(&tables().control, key)
 }
 
 /// The flight computer a moving control surface needs. `Fixed` and `Classic` work with the basic
@@ -373,6 +328,17 @@ impl AeroFigures {
 
     pub fn authority_ratio(&self) -> f64 {
         self.control_authority / 100.0
+    }
+
+    /// Seeded chance that this airframe suffers one surface fault during a trial. Only a fragile
+    /// design below [`SURFACE_FAULT_RELIABILITY`] is exposed, and the chance grows linearly as the
+    /// reliability drops; this is the gameplay sink for `reliability` and `complexity`.
+    pub fn surface_fault_chance(&self) -> f64 {
+        if self.surface_count == 0 {
+            return 0.0;
+        }
+        let exposure = (SURFACE_FAULT_RELIABILITY - self.reliability) / SURFACE_FAULT_RELIABILITY;
+        SURFACE_FAULT_MAX_CHANCE * exposure.clamp(0.0, 1.0)
     }
 
     /// The gameplay band in which the aerodynamic centre sits behind the centre of gravity.
@@ -588,10 +554,18 @@ pub fn figures(vehicle: &Vehicle) -> AeroFigures {
     }
 }
 
+/// One design note, with the part it is about when the player can act on that part directly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AeroWarning {
+    pub message: String,
+    pub part: Option<String>,
+}
+
 /// Non-blocking design notes for the aerodynamics. Refusals live in `Vehicle::validate`.
-pub fn warnings(vehicle: &Vehicle) -> Vec<String> {
+pub fn warning_details(vehicle: &Vehicle) -> Vec<AeroWarning> {
     let figures = figures(vehicle);
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<AeroWarning> = Vec::new();
+    let mut note = |message: String, part: Option<String>| warnings.push(AeroWarning { message, part });
     let body_diameter = vehicle.max_diameter_m().max(0.1);
     for part in &vehicle.parts {
         let (PartSpec::Wing { span_m, .. } | PartSpec::FinSet { span_m, .. } | PartSpec::ControlSurface { span_m, .. }) =
@@ -600,36 +574,119 @@ pub fn warnings(vehicle: &Vehicle) -> Vec<String> {
             continue;
         };
         if span_m > 2.0 * body_diameter {
-            warnings.push(format!(
-                "{} spans {span_m:.2} m on a {body_diameter:.2} m body: ground clearance and launcher fit",
-                part.id
-            ));
+            note(
+                format!(
+                    "{} spans {span_m:.2} m on a {body_diameter:.2} m body: ground clearance and launcher fit",
+                    part.id
+                ),
+                Some(part.id.clone()),
+            );
         }
     }
     if figures.mass_kg > 0.0 {
         let total = vehicle.total_wet_mass_kg().max(1e-9);
         let share = figures.mass_kg / total;
         if share > 0.20 {
-            warnings.push(format!(
-                "aerodynamic surfaces add {:.0} kg, {:.0}% of launch mass",
-                figures.mass_kg,
-                share * 100.0
-            ));
+            note(
+                format!(
+                    "aerodynamic surfaces add {:.0} kg, {:.0}% of launch mass",
+                    figures.mass_kg,
+                    share * 100.0
+                ),
+                None,
+            );
         }
     }
     if figures.control_area_m2 > 0.0 && figures.wing_area_m2 == 0.0 && figures.fin_area_m2 == 0.0 {
-        warnings.push("control surfaces have no fixed wing or fin to act with: add a lifting surface".to_string());
+        note(
+            "control surfaces have no fixed wing or fin to act with: add a lifting surface".to_string(),
+            None,
+        );
     }
     if figures.asymmetric {
-        warnings.push("asymmetric fin set: experimental, stability reduced".to_string());
+        let fin = vehicle
+            .parts
+            .iter()
+            .find(|part| {
+                matches!(
+                    part.spec,
+                    PartSpec::FinSet {
+                        layout: FinLayout::Asymmetric,
+                        ..
+                    }
+                )
+            })
+            .map(|part| part.id.clone());
+        note("asymmetric fin set: experimental, stability reduced".to_string(), fin);
     }
     if figures.surface_count > 0 && figures.margin_m < 0.0 {
-        warnings.push(format!(
-            "centre of aerodynamics is {:.2} m ahead of the centre of gravity: unstable",
-            -figures.margin_m
-        ));
+        let wing = vehicle
+            .parts
+            .iter()
+            .filter(|part| matches!(part.spec, PartSpec::Wing { .. }))
+            .max_by(|a, b| {
+                surface_area(&a.spec)
+                    .unwrap_or(0.0)
+                    .total_cmp(&surface_area(&b.spec).unwrap_or(0.0))
+            })
+            .map(|part| part.id.clone());
+        note(
+            format!(
+                "centre of aerodynamics is {:.2} m ahead of the centre of gravity: unstable",
+                -figures.margin_m
+            ),
+            wing,
+        );
     }
     warnings
+}
+
+/// The same notes as plain text, for callers that only print them.
+pub fn warnings(vehicle: &Vehicle) -> Vec<String> {
+    warning_details(vehicle)
+        .into_iter()
+        .map(|warning| warning.message)
+        .collect()
+}
+
+/// What one placed surface contributes to the sheet, in area-weighted m². The panel shows the
+/// selected surface so a design note such as "fins stabilise" can be traced to a real part.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceContribution {
+    pub id: String,
+    pub family: &'static str,
+    pub area_m2: f64,
+    pub lift: f64,
+    pub drag: f64,
+    pub stability: f64,
+    pub authority: f64,
+    pub mass_kg: f64,
+}
+
+pub fn breakdown(vehicle: &Vehicle) -> Vec<SurfaceContribution> {
+    vehicle
+        .parts
+        .iter()
+        .filter_map(|part| {
+            let effect = surface_effect(&part.spec)?;
+            let area = surface_area(&part.spec)? * effect.area;
+            let (family, drag) = match part.spec {
+                PartSpec::Wing { sweep_deg, .. } => ("WING", area * effect.drag * sweep_drag_factor(sweep_deg)),
+                PartSpec::FinSet { .. } => ("FIN", area * effect.drag),
+                _ => ("CONTROL", area * effect.drag),
+            };
+            Some(SurfaceContribution {
+                id: part.id.clone(),
+                family,
+                area_m2: area,
+                lift: area * effect.lift,
+                drag,
+                stability: area * effect.stability,
+                authority: area * effect.authority,
+                mass_kg: surface_mass_kg(&part.spec).unwrap_or(0.0),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -818,6 +875,35 @@ mod tests {
     }
 
     #[test]
+    fn each_surface_contribution_can_be_traced_to_its_part() {
+        let mut vehicle = sounding_rocket();
+        mount(&mut vehicle, "wing-1", wing(1.2, 0.4), "sustainer", NodeId::Radial(0));
+        mount(
+            &mut vehicle,
+            "ctrl-1",
+            control(0.4, 0.4, ControlKind::Fixed),
+            "booster",
+            NodeId::Radial(1),
+        );
+        let rows = breakdown(&vehicle);
+        assert_eq!(rows.len(), 2);
+        let wing = rows.iter().find(|row| row.id == "wing-1").unwrap();
+        assert_eq!(wing.family, "WING");
+        assert!(wing.lift > wing.drag, "a swept wing lifts more than it drags");
+        assert!(wing.stability > 0.0 && wing.mass_kg > 0.0);
+        let fixed = rows.iter().find(|row| row.id == "ctrl-1").unwrap();
+        assert_eq!(fixed.authority, 0.0, "a fixed surface has no authority");
+        assert!(fixed.stability > 0.0);
+
+        let details = warning_details(&vehicle);
+        let span = details
+            .iter()
+            .find(|warning| warning.message.contains("spans"))
+            .expect("a 1.2 m wing on a small body is a span warning");
+        assert_eq!(span.part.as_deref(), Some("wing-1"));
+    }
+
+    #[test]
     fn an_oversized_surface_is_a_warning_not_a_refusal() {
         let mut vehicle = sounding_rocket();
         mount(&mut vehicle, "wing-1", wing(3.0, 1.0), "booster", NodeId::Radial(0));
@@ -897,6 +983,76 @@ mod tests {
             figures.ca_y_m
         );
         figures
+    }
+
+    #[test]
+    fn the_embedded_tables_cover_every_choice_and_render_a_report() {
+        for planform in [
+            WingPlanform::Straight,
+            WingPlanform::Swept,
+            WingPlanform::Delta,
+            WingPlanform::Trapezoidal,
+            WingPlanform::VariableGeometry,
+        ] {
+            assert!(planform_effect(planform).area > 0.0);
+        }
+        for profile in [
+            AirfoilProfile::Symmetric,
+            AirfoilProfile::Classic,
+            AirfoilProfile::LowDrag,
+            AirfoilProfile::HighLift,
+            AirfoilProfile::Experimental,
+        ] {
+            assert!(profile_effect(profile).drag > 0.0);
+        }
+        for role in [
+            StabilizerRole::Rear,
+            StabilizerRole::Front,
+            StabilizerRole::Blended,
+            StabilizerRole::Combined,
+        ] {
+            assert!(role_effect(role).stability > 0.0);
+        }
+        assert_eq!(layout_effect(FinLayout::Symmetric), Effect::neutral());
+        // Pins the data file rather than the old Rust literals.
+        assert_eq!(planform_effect(WingPlanform::Swept).drag, 0.75);
+        assert_eq!(control_effect(ControlKind::Fixed).authority, 0.0);
+        let report = balance_report();
+        for key in ["variable_geometry", "experimental", "blended", "asymmetric", "fixed"] {
+            assert!(report.contains(key), "{key} missing from the report");
+        }
+    }
+
+    #[test]
+    fn a_fragile_airframe_is_exposed_and_a_sound_one_is_not() {
+        let mut sound = sounding_rocket();
+        four_fins(&mut sound);
+        let mut fragile = sounding_rocket();
+        for index in 0..4u8 {
+            mount(
+                &mut fragile,
+                &format!("fin-{index}"),
+                PartSpec::FinSet {
+                    span_m: 0.3,
+                    chord_m: 0.35,
+                    role: StabilizerRole::Rear,
+                    layout: FinLayout::Asymmetric,
+                    light: true,
+                },
+                "booster",
+                NodeId::Radial(index),
+            );
+        }
+        let sound = figures(&sound);
+        let fragile = figures(&fragile);
+        assert_eq!(sound.surface_fault_chance(), 0.0);
+        assert!(fragile.reliability < SURFACE_FAULT_RELIABILITY);
+        assert!(
+            fragile.surface_fault_chance() > 0.0 && fragile.surface_fault_chance() < SURFACE_FAULT_MAX_CHANCE / 2.0,
+            "{}",
+            fragile.surface_fault_chance()
+        );
+        assert_eq!(AeroFigures::default().surface_fault_chance(), 0.0);
     }
 
     #[test]

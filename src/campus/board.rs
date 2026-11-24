@@ -484,6 +484,11 @@ fn missile_active_card(
                     UiAction::Navigate(CampusView::Trials),
                     ButtonTone::Secondary,
                 );
+                // A stale or missing dossier is one click from fresh evidence: the same seeded run
+                // the trial board would make, recorded on every active contract.
+                if status != EvidenceStatus::Current {
+                    ui_kit::button_row_item(buttons, "RE-FLY", UiAction::ReflyMissileContract, ButtonTone::Secondary);
+                }
                 ui_kit::button_row_item(
                     buttons,
                     "DELIVER",
@@ -1046,6 +1051,18 @@ fn build_missile(
                         UiAction::Missile(MissileAction::Preset(1)),
                         ButtonTone::Ghost,
                     );
+                    ui_kit::button_row_item(
+                        row,
+                        "FINS",
+                        UiAction::Missile(MissileAction::Preset(2)),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "WINGS",
+                        UiAction::Missile(MissileAction::Preset(3)),
+                        ButtonTone::Ghost,
+                    );
                     ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
                 });
             heading(panel, "ADD PART");
@@ -1243,6 +1260,20 @@ fn build_missile(
                     9.0,
                     ui_kit::TEXT_DIM,
                 );
+                // Explainability: what the selected surface actually contributes to the totals.
+                if let Some(id) = &session.selected
+                    && let Some(row) = omega_rules::aero::breakdown(vehicle).iter().find(|row| &row.id == id)
+                {
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "{} {}: lift {:.2} | drag {:.2} | stability {:.2} | authority {:.2} m2 | {:.1} kg",
+                            row.family, row.id, row.lift, row.drag, row.stability, row.authority, row.mass_kg
+                        ),
+                        8.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                }
             }
             if let Some(before) = &session.comparison {
                 let current = vehicle.aero();
@@ -1373,8 +1404,19 @@ fn build_missile(
                     .spawn(Node::default())
                     .with_children(|c| ui_kit::chip(c, "DESIGN VALID", ui_kit::GOOD));
             }
-            for warning in vehicle.warnings().iter().take(3) {
-                ui_kit::label(panel, format!("- {warning}"), 9.5, ui_kit::WARN);
+            // A warning that names a part is a shortcut: pressing it selects that part so the
+            // player can fix it instead of hunting the tree.
+            for warning in vehicle.warning_details().iter().take(3) {
+                match &warning.part {
+                    Some(id) => ui_kit::button(
+                        panel,
+                        format!("{}  [SELECT {}]", warning.message, id),
+                        UiAction::Missile(MissileAction::Select { id: id.clone() }),
+                        ButtonTone::Ghost,
+                        Val::Percent(100.0),
+                    ),
+                    None => ui_kit::label(panel, format!("- {}", warning.message), 9.5, ui_kit::WARN),
+                };
             }
             if false {}
         });
@@ -2670,6 +2712,19 @@ pub(crate) fn handle_extra_actions(
             }
             UiAction::SelectMissileContract(id) => {
                 campus.message = procurement.select(id);
+            }
+            UiAction::ReflyMissileContract => {
+                let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
+                campus.message = match trials::apply_action(
+                    &mut trials,
+                    TrialAction::Run,
+                    &missile.vehicle,
+                    &program.program,
+                    monte_carlo,
+                ) {
+                    Ok(_) => format!("Re-flew {} for the active contract(s)", missile.vehicle.name),
+                    Err(error) => error,
+                };
             }
             UiAction::Program(action) => match program.apply(action, &missile.vehicle) {
                 Ok(message) => {

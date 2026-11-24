@@ -1,10 +1,10 @@
 # Omega — Missile Design
 
 [![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.32.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.32.0)
+[![Version](https://img.shields.io/badge/version-0.33.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.33.0)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-**Version 0.32.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
+**Version 0.33.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
 military-themed contracts, assembles an abstract staged vehicle, edits its onboard program, runs
 reproducible simulated trials and delivers a dossier. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
 research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
@@ -241,14 +241,34 @@ project at a time.
 | `1`–`4` | Accept the corresponding offer, if a slot is free and the family is researched |
 | `V` | Deliver the selected contract when its dossier is current and accepted |
 
-Each active contract has its own `SELECT`, `GO TO TRIALS` and `DELIVER` buttons; the dossier panel
-follows the selected one.
+Each active contract has its own `SELECT`, `GO TO TRIALS`, `RE-FLY` (when its evidence is stale or
+missing) and `DELIVER` buttons; the dossier panel follows the selected one. A delivered dossier pays
+the nominal fee at the 60 % acceptance threshold and up to +15 % for a perfect one.
 
 ### Camera
 
 Right-drag orbits, middle-drag pans, wheel or touchpad scroll zooms; WASD/arrows pan and `Q`/`E`
 change height. The camera is disabled on the contract, research and program boards or while the
 pointer is over an interactive panel.
+
+## Screenless commands
+
+The binary also runs without opening a window, which is how flight behaviour is checked in CI and
+over SSH:
+
+```text
+omega --trial saves/slot_1 --seed 3           # fly the saved design and program, print a JSON report
+omega --trial saves/slot_1 --air             # same, from an air launch at 200 m/s
+omega --revisions saves/slot_1 --seed 3      # replay the working copy and up to ten revisions, with deltas
+omega --export-design saves/slot_1 design.json
+omega --import-design saves/slot_1 design.json
+omega --aero-report                          # render the effect tables as Markdown (docs/AERO_BALANCE.md)
+```
+
+`--import-design` refuses a design that does not validate and never writes a partial save. The design
+file is the schema-4 vehicle itself, so an export from an older build imports after the normal
+migration. The complete contract loop still needs the window; these commands cover the flight,
+comparison, export and balance parts.
 
 ## Saves
 
@@ -280,6 +300,7 @@ src/
   procurement.rs       offers, active contracts, trial evidence, dossier, delivery, persistence
   revisions.rs         missile design revision log
   missile.rs           missile workshop session, parts, attachment tree view, 3D layout
+  headless.rs          screenless trial, revision comparison, design export/import, balance report
   picking.rs           camera-ray picking and screen-space node snapping (pure, tested)
   workshop.rs          pointer system: palette drag, subtree move, delete, symmetry, undo, wheel
   program_editor.rs    missile program session, validation, persistence

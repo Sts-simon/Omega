@@ -15,8 +15,8 @@ pub mod requirement;
 pub mod research;
 pub mod vehicle;
 
-pub use aero::{AeroFigures, AeroSummary};
-pub use assembly::{Attach, NodeId, PartPose, PlacedPart, VEHICLE_SCHEMA, Vehicle};
+pub use aero::{AeroFigures, AeroSummary, SurfaceContribution};
+pub use assembly::{Attach, NodeId, PartPose, PlacedPart, VEHICLE_SCHEMA, Vehicle, VehicleWarning};
 pub use contracts::{
     ContractEvaluation, ContractOffer, ContractPhase, ContractProgress, ContractRequirements, MissionFamily,
     VehicleFamily, generate_contract_board,

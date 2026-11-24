@@ -340,17 +340,18 @@ impl Procurement {
             return Err(format!("Dossier refused: {reason}"));
         }
         let score_percent = (dossier.score * 100.0).round().clamp(0.0, 100.0) as u8;
+        let reward = quality_reward(active.offer.reward_credits, dossier.score);
         let active = self.active.remove(index);
         let delivery = Delivery {
             id: active.offer.id,
-            reward: active.offer.reward_credits,
+            reward,
             score_percent,
         };
         self.completed.push(CompletedContract {
             id: active.offer.id,
             title: active.offer.title.clone(),
             client: active.offer.client.clone(),
-            reward: active.offer.reward_credits,
+            reward,
             completed_day: day,
             score_percent,
         });
@@ -476,6 +477,15 @@ pub(crate) fn record_trial_evidence(mut procurement: ResMut<Procurement>, trials
     }
 }
 
+/// The dossier score pays: a design that only reaches the acceptance threshold earns the nominal
+/// fee, and every point above it up to a perfect dossier adds a bonus of at most 15 %.
+fn quality_reward(base: u64, score: f64) -> u64 {
+    let above = ((score - omega_rules::dossier::ACCEPTANCE_THRESHOLD)
+        / (1.0 - omega_rules::dossier::ACCEPTANCE_THRESHOLD))
+        .clamp(0.0, 1.0);
+    (base as f64 * (1.0 + 0.15 * above)).round() as u64
+}
+
 fn trial_run_id(procurement: &Procurement) -> u64 {
     procurement
         .active
@@ -544,6 +554,8 @@ mod tests {
         let (vehicle_hash, program_hash) = hashes(vehicle, program);
         MissileTrial {
             stability: 0.0,
+            lift: 0.0,
+            control_authority: 0.0,
             run_id,
             vehicle: vehicle_hash,
             program: program_hash,
@@ -661,7 +673,8 @@ mod tests {
         let dossier = procurement.dossier_for(active, &vehicle(), &program());
         assert!(matches!(dossier.decision, DossierDecision::Accepted { .. }));
         let delivery = procurement.deliver(4, Some(7), &vehicle(), &program()).unwrap();
-        assert_eq!(delivery.reward, 9_000);
+        assert_eq!(delivery.reward, 10_350, "a perfect dossier pays a 15 % bonus");
+        assert_eq!(procurement.completed()[0].reward, delivery.reward);
         assert_eq!(procurement.completed().len(), 1);
         assert!(procurement.active().is_empty());
         assert!(
@@ -671,6 +684,16 @@ mod tests {
                 .any(|offer| offer.mission_family == MissionFamily::AirToSurface),
             "the delivered family gets a fresh offer"
         );
+    }
+
+    #[test]
+    fn the_dossier_score_scales_the_fee_from_nominal_to_a_bonus() {
+        let base = 9_000;
+        assert_eq!(quality_reward(base, 0.0), base, "no bonus below the threshold");
+        assert_eq!(quality_reward(base, 0.6), base, "the threshold pays the nominal fee");
+        assert_eq!(quality_reward(base, 1.0), 10_350);
+        assert!(quality_reward(base, 0.8) > base && quality_reward(base, 0.8) < 10_350);
+        assert!(quality_reward(base, 0.8) < quality_reward(base, 0.9));
     }
 
     #[test]
@@ -726,7 +749,7 @@ mod tests {
             EvidenceStatus::Current
         );
         let delivery = procurement.deliver(4, Some(7), &vehicle(), &original_program).unwrap();
-        assert_eq!(delivery.reward, 9_000);
+        assert_eq!(delivery.reward, 10_350);
         assert!(procurement.active().is_empty());
         assert_eq!(procurement.completed().len(), 1);
     }

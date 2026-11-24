@@ -124,8 +124,10 @@ the 3D layout built from `Vehicle::poses()` and the revision diff. Save files ca
 
 `crates/omega-rules/src/aero.rs` is Bevy-free and owns every aerodynamic rule. Three leaf parts
 (`Wing`, `FinSet`, `ControlSurface`) live on radial nodes; each design choice (planform, profile,
-stabiliser role, fin layout, control family, light build) maps to one fixed `Effect` table in that
-module, so no coefficient is scattered through the app.
+stabiliser role, fin layout, control family, light build) maps to one `Effect` table loaded from
+`aero_effects.json` next to the module, so a coefficient lives in data and the code only maps an
+enum to its key. A missing key is a programming error and panics at first use; a test walks every
+variant, and `omega --aero-report` renders the same tables as `docs/AERO_BALANCE.md`.
 
 `aero::figures(&Vehicle)` walks the tree once and returns `AeroFigures`: reference area, wing/fin/
 control areas, area-weighted sweep, stability, control authority, lift, drag index, complexity,
@@ -136,6 +138,16 @@ seeded drag spread and a stability/authority-dependent altitude rate. A design w
 leaves every term at its previous value.
 
 `Vehicle::validate()` refuses aerodynamic parts on axial nodes, surfaces with children and moving
-surfaces without a compatible computer; `Vehicle::warnings()` reports oversized spans, heavy surface
-mass, control surfaces with no fixed surface and an unstable CG/CA margin. The workshop draws CG
-(yellow), CA (cyan), the acceptable band and the surface plates from the same figures.
+surfaces without a compatible computer; `Vehicle::warning_details()` reports oversized spans, heavy
+surface mass, control surfaces with no fixed surface and an unstable CG/CA margin, each naming the
+part it concerns so the workshop can select it. The workshop draws CG (yellow), CA (cyan), the
+acceptable band and the surface plates from the same figures, quotes the selected surface's
+contribution (`aero::breakdown`) and lists the surface fault risk of a fragile airframe.
+
+## Screenless commands (0.33.0)
+
+`src/headless.rs` runs before the Bevy app when a command flag is present: `--trial` flies the
+saved design and program, `--revisions` replays the working copy and the newest revisions with one
+seed, `--export-design` / `--import-design` move a schema-4 vehicle through the normal save path,
+and `--aero-report` prints the effect tables. All of them reuse `omega-rules`, so the flight and
+dossier rules are identical to the game's; only the rendering is skipped.

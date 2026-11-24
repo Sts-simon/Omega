@@ -439,6 +439,12 @@ pub struct MissileTrial {
     /// Abstract aerodynamic stability the design had during the trial (0..100).
     #[serde(default)]
     pub stability: f64,
+    /// Abstract wing lift the design had during the trial (0..100).
+    #[serde(default)]
+    pub lift: f64,
+    /// Abstract control authority the design had during the trial (0..100).
+    #[serde(default)]
+    pub control_authority: f64,
 }
 
 impl MissileTrial {
@@ -461,6 +467,8 @@ impl MissileTrial {
             separated: report.events.iter().any(|(_, label)| label.contains("separated")),
             lock_acquired: report.lock.map(|lock| lock.success),
             stability: report.aero.stability,
+            lift: report.aero.lift,
+            control_authority: report.aero.control_authority,
         }
     }
 
@@ -484,6 +492,8 @@ impl MissileTrial {
             proof("SEPARATION", flag(self.separated), 0.0),
             proof("LOCK", flag(self.lock_acquired.unwrap_or(false)), 0.0),
             proof("STABILITY", self.stability, 2.0),
+            proof("LIFT", self.lift, 2.0),
+            proof("AUTHORITY", self.control_authority, 2.0),
         ]
     }
 }
@@ -581,6 +591,30 @@ impl ContractOffer {
                 "stability",
                 Comparator::AtLeast,
                 20.0,
+                0.5,
+                false,
+            ));
+        }
+        // Each family asks the airframe for the one thing it exists for: a cruise missile needs
+        // wings, an air-to-air interceptor needs moving surfaces, a surface-to-air round stability.
+        if matches!(self.vehicle_family, VehicleFamily::Cruise) {
+            requirements.push(missile_requirement(
+                "LIFT",
+                "Wing lift",
+                "lift",
+                Comparator::AtLeast,
+                40.0,
+                0.5,
+                false,
+            ));
+        }
+        if matches!(self.mission_family, MissionFamily::AirToAir) {
+            requirements.push(missile_requirement(
+                "AUTHORITY",
+                "Control authority",
+                "control_authority",
+                Comparator::AtLeast,
+                25.0,
                 0.5,
                 false,
             ));
@@ -690,6 +724,61 @@ mod tests {
                 .iter()
                 .any(|requirement| requirement.id == "STABILITY")
         );
+    }
+
+    #[test]
+    fn each_family_asks_for_the_airframe_trait_it_needs() {
+        let cruise = offer_for(MissionFamily::AirToSurface, VehicleFamily::Cruise);
+        let lift = cruise
+            .missile_requirements()
+            .into_iter()
+            .find(|requirement| requirement.id == "LIFT")
+            .expect("a cruise contract asks for wing lift");
+        assert!(!lift.hard && lift.limit > 0.0);
+        let interceptor = offer_for(MissionFamily::AirToAir, VehicleFamily::ShortRange);
+        let authority = interceptor
+            .missile_requirements()
+            .into_iter()
+            .find(|requirement| requirement.id == "AUTHORITY")
+            .expect("an air-to-air contract asks for control authority");
+        assert!(!authority.hard && authority.limit > 0.0);
+
+        let vehicle = ContentHash::of_bytes(b"vehicle");
+        let program = ContentHash::of_bytes(b"program");
+        let mut flight = report(20_000.0, 400.0, 250.0, true);
+        flight.aero.lift = 55.0;
+        flight.aero.control_authority = 40.0;
+        let trial = trial(&vehicle, &program, &flight);
+        let evidence = trial.evidence();
+        let quoted = |id: &str| {
+            evidence
+                .iter()
+                .find(|e| e.requirement_id == id)
+                .unwrap_or_else(|| panic!("{id} proof missing"))
+                .estimate
+                .value
+        };
+        assert_eq!(quoted("LIFT"), 55.0);
+        assert_eq!(quoted("AUTHORITY"), 40.0);
+
+        let row = |dossier: &Dossier, id: &str| {
+            dossier
+                .matrix
+                .iter()
+                .find(|row| row.requirement_id == id)
+                .unwrap_or_else(|| panic!("{id} row missing"))
+                .clone()
+        };
+        let cruise_dossier = cruise.missile_dossier(std::slice::from_ref(&trial), &vehicle, &program);
+        assert!(matches!(
+            row(&cruise_dossier, "LIFT").status,
+            crate::requirement::RequirementStatus::Verified { .. }
+        ));
+        let interceptor_dossier = interceptor.missile_dossier(&[trial], &vehicle, &program);
+        assert!(matches!(
+            row(&interceptor_dossier, "AUTHORITY").status,
+            crate::requirement::RequirementStatus::Verified { .. }
+        ));
     }
 
     #[test]

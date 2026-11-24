@@ -127,3 +127,31 @@ The interaction lot kept the values below; each is now covered by code and by a 
   score 100 stability and damp the seeded speed spread; one 1.2 × 0.5 m swept wing lets the turbofan
   run at 70 m/s while the wingless design never accelerates; four classic control surfaces settle the
   900 hPa target about 25 % sooner. No constant needed a second tuning pass.
+
+## 2026-11-24 — Post-aerodynamics follow-ups
+
+- **Reliability gets one consumer, not a system.** Below `SURFACE_FAULT_RELIABILITY` (60) a design
+  exposes `surface_fault_chance()` (linear, capped at 35 % at the 25 floor); the trial makes one roll
+  from the seed, halves control authority for the run and records an anomaly. A sound airframe never
+  draws it, so no existing flight changes, and the light build stops being a free mass saving. No
+  per-part failure model is introduced.
+- **The fee follows the dossier score.** Nominal at `ACCEPTANCE_THRESHOLD` and +15 % at a perfect
+  dossier, linear in between; below the threshold there is no fee because the dossier is refused.
+  This is the only economic effect of quality, and it keeps contracts affordable at the bottom.
+- **Aero requirements follow the family's purpose.** Cruise asks `LIFT ≥ 40`, air-to-air
+  `AUTHORITY ≥ 25`, surface-to-air `STABILITY ≥ 20`; all are soft (weight 0.5) so a compromise never
+  blocks a contract, and all proofs are test-run evidence bound to the design hash.
+- **Research durations are the lever, not costs.** The tree's 63 000 cr budget stays, so the economy
+  target is unchanged; serial days drop from 90 to 67 (aero 22 → 16) and a test pins both totals.
+  Costs were left alone because credits have a second source (delivery bonuses) and changing them
+  would move every existing campaign's balance.
+- **Balance data is a file.** `aero_effects.json` is embedded, parsed once, and a missing entry is a
+  hard error instead of a silent neutral fallback; the report is generated from the loaded tables so
+  the documentation cannot drift from the rules. Only design choices are persisted, so this changes
+  no save schema.
+- **The CLI is the verification surface.** Flight, comparison, export and balance live behind flags
+  that open no window; the UI keeps only the parts that need a pointer. `--export-design` writes the
+  vehicle itself, and `--import-design` validates before writing through `SaveSlot`, so a broken
+  export cannot corrupt a campaign.
+- **Explainability is derived, not stored.** `aero::breakdown` recomputes contributions from the same
+  `Effect` tables; warnings carry an optional part id rather than a new warning type in the save.

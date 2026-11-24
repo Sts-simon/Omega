@@ -1,4 +1,5 @@
 mod campus;
+mod headless;
 mod interface;
 mod missile;
 mod picking;
@@ -17,10 +18,13 @@ use bevy::prelude::*;
 use campus::{CampusState, CampusView};
 
 fn main() {
+    if let Some(code) = headless::main() {
+        std::process::exit(code);
+    }
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "OMEGA 0.32.0 | Missile Design".to_string(),
+                title: "OMEGA 0.33.0 | Missile Design".to_string(),
                 resolution: (1600, 960).into(),
                 ..default()
             }),

@@ -13,6 +13,8 @@ pub(crate) enum UiAction {
     AcceptMissileOffer(usize),
     DeliverMissile(u32),
     SelectMissileContract(u32),
+    /// Fly the current design and program once, so a stale contract gets fresh evidence.
+    ReflyMissileContract,
     RecordMissileRevision,
     Missile(crate::missile::MissileAction),
     Program(crate::program_editor::ProgramAction),
@@ -163,7 +165,11 @@ pub fn handle_actions(
             UiAction::SelectMissileContract(id) => campus.message = procurement.select(id),
             // Program, trial, workshop and revision actions need more resources than the campaign;
             // `campus::board::handle_extra_actions` runs after this system and dispatches them.
-            UiAction::RecordMissileRevision | UiAction::Missile(_) | UiAction::Program(_) | UiAction::Trial(_) => {}
+            UiAction::RecordMissileRevision
+            | UiAction::ReflyMissileContract
+            | UiAction::Missile(_)
+            | UiAction::Program(_)
+            | UiAction::Trial(_) => {}
         }
     }
 }

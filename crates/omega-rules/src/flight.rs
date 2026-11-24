@@ -160,7 +160,9 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
     // term below at its previous value.
     let aero = crate::aero::figures(vehicle);
     let stability = aero.stability_ratio();
-    let authority = aero.authority_ratio();
+    // A fragile airframe draws at most one seeded surface fault per run; a sound one never does.
+    let surface_fault = unit_random(config.seed ^ 0xF0A7_0000) < aero.surface_fault_chance();
+    let authority = aero.authority_ratio() * if surface_fault { 0.5 } else { 1.0 };
     let lift = aero.lift_ratio();
     // Passive stability damps the seeded drag spread, it never removes it.
     let drag_spread = if aero.surface_count == 0 {
@@ -207,6 +209,10 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
     let mut samples = Vec::new();
     let mut events: Vec<(f64, String)> = Vec::new();
     let mut anomalies: Vec<String> = Vec::new();
+    if surface_fault {
+        events.push((0.0, "Surface fault: authority halved".to_string()));
+        anomalies.push("a control surface faulted: control authority halved for this run".to_string());
+    }
     let mut first_ignition_twr = None;
     let mut lock: Option<LockResult> = None;
     let mut lifted_off = !vertical;
@@ -1005,6 +1011,58 @@ mod tests {
             without.max_speed_ms
         );
         assert!(with.path_length_m > without.path_length_m);
+    }
+
+    #[test]
+    fn a_fragile_airframe_can_fault_but_a_sound_one_never_does() {
+        let program = Program::single(vec![Block::IgniteStage { stage: 0 }]);
+        let mut sound = sounding_rocket();
+        with_fins(&mut sound);
+        let mut fragile = sounding_rocket();
+        for index in 0..4u8 {
+            fragile
+                .add_attached(
+                    format!("fin-{index}"),
+                    PartSpec::FinSet {
+                        span_m: 0.3,
+                        chord_m: 0.35,
+                        role: crate::vehicle::StabilizerRole::Rear,
+                        layout: crate::vehicle::FinLayout::Asymmetric,
+                        light: true,
+                    },
+                    "booster",
+                    crate::assembly::NodeId::Radial(index),
+                )
+                .unwrap();
+        }
+        let config = |seed| FlightConfig {
+            seed,
+            max_time_s: 5.0,
+            ..FlightConfig::default()
+        };
+        let faulted = |vehicle: &Vehicle, seed| {
+            simulate(vehicle, &program, config(seed))
+                .unwrap()
+                .anomalies
+                .iter()
+                .any(|anomaly| anomaly.contains("surface faulted"))
+        };
+        assert!(
+            !(0..256).any(|seed| faulted(&sound, seed)),
+            "a sound airframe never faults"
+        );
+        let seeds: Vec<u64> = (0..256).filter(|seed| faulted(&fragile, *seed)).collect();
+        assert!(!seeds.is_empty(), "the fragile airframe can draw a fault");
+        assert!(
+            seeds.len() < 100,
+            "a fault stays an incident, not the norm: {}",
+            seeds.len()
+        );
+        assert_eq!(
+            faulted(&fragile, seeds[0]),
+            faulted(&fragile, seeds[0]),
+            "seeded and repeatable"
+        );
     }
 
     #[test]

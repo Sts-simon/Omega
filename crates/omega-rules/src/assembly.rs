@@ -76,6 +76,13 @@ impl PlacedPart {
     }
 }
 
+/// A design warning, with the part it concerns when selecting that part helps.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VehicleWarning {
+    pub message: String,
+    pub part: Option<String>,
+}
+
 /// A design as a tree of parts. The root sits at the bottom of the stack.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Vehicle {
@@ -602,7 +609,7 @@ impl Vehicle {
 
     /// Non-blocking design notes: a diameter step between a part and its mount. Kept separate from
     /// `validate` so a future drag rule can use it without refusing the assembly now.
-    pub fn warnings(&self) -> Vec<String> {
+    pub fn warning_details(&self) -> Vec<VehicleWarning> {
         let mut warnings = Vec::new();
         for part in &self.parts {
             let Some(attach) = &part.attach else {
@@ -618,14 +625,32 @@ impl Vehicle {
             }
             let (parent_d, child_d) = (node_diameter(&parent.spec), node_diameter(&part.spec));
             if (parent_d - child_d).abs() > 0.051 {
-                warnings.push(format!(
-                    "{} ({child_d:.2} m) sits on {} ({parent_d:.2} m): diameter step",
-                    part.id, attach.parent
-                ));
+                warnings.push(VehicleWarning {
+                    message: format!(
+                        "{} ({child_d:.2} m) sits on {} ({parent_d:.2} m): diameter step",
+                        part.id, attach.parent
+                    ),
+                    part: Some(part.id.clone()),
+                });
             }
         }
-        warnings.extend(crate::aero::warnings(self));
+        warnings.extend(
+            crate::aero::warning_details(self)
+                .into_iter()
+                .map(|warning| VehicleWarning {
+                    message: warning.message,
+                    part: warning.part,
+                }),
+        );
         warnings
+    }
+
+    /// The same notes as plain text, for callers that only print them.
+    pub fn warnings(&self) -> Vec<String> {
+        self.warning_details()
+            .into_iter()
+            .map(|warning| warning.message)
+            .collect()
     }
 
     /// Abstract aerodynamic figures for the whole vehicle; one pass, computed once per edit.

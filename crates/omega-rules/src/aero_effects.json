@@ -1,0 +1,147 @@
+{
+  "_comment": "Aero design-choice effects. Unlisted fields keep their neutral value (area/lift/drag/stability/authority/mass = 1, complexity/reliability = 0). Rendered by `omega --aero-report` into docs/AERO_BALANCE.md; the shape is validated by omega-rules tests.",
+  "planform": {
+    "straight": {},
+    "swept": {
+      "area": 0.95,
+      "drag": 0.75,
+      "stability": 1.05,
+      "authority": 0.95,
+      "complexity": 0.15
+    },
+    "delta": {
+      "area": 0.9,
+      "lift": 1.15,
+      "drag": 1.1,
+      "stability": 1.1,
+      "authority": 0.9,
+      "complexity": 0.25,
+      "reliability": -0.05,
+      "mass": 1.05
+    },
+    "trapezoidal": {
+      "area": 0.95,
+      "lift": 1.05,
+      "drag": 0.9,
+      "stability": 1.05,
+      "complexity": 0.1,
+      "reliability": 0.02,
+      "mass": 1.02
+    },
+    "variable_geometry": {
+      "lift": 1.1,
+      "drag": 0.85,
+      "stability": 1.05,
+      "authority": 1.15,
+      "complexity": 0.55,
+      "reliability": -0.2,
+      "mass": 1.25
+    }
+  },
+  "profile": {
+    "symmetric": {
+      "lift": 0.9,
+      "drag": 0.95,
+      "stability": 1.05,
+      "reliability": 0.05
+    },
+    "classic": {
+      "complexity": 0.05,
+      "reliability": 0.02
+    },
+    "low_drag": {
+      "lift": 0.85,
+      "drag": 0.7,
+      "stability": 0.95,
+      "authority": 0.95,
+      "complexity": 0.2
+    },
+    "high_lift": {
+      "lift": 1.25,
+      "drag": 1.25,
+      "stability": 0.9,
+      "authority": 0.9,
+      "complexity": 0.2,
+      "reliability": -0.05
+    },
+    "experimental": {
+      "lift": 1.35,
+      "drag": 0.8,
+      "stability": 0.85,
+      "authority": 1.2,
+      "complexity": 0.6,
+      "reliability": -0.3
+    }
+  },
+  "role": {
+    "rear": {
+      "lift": 0.2,
+      "authority": 0.6,
+      "reliability": 0.05
+    },
+    "front": {
+      "lift": 0.3,
+      "drag": 1.05,
+      "stability": 0.6,
+      "authority": 0.8,
+      "complexity": 0.15
+    },
+    "blended": {
+      "lift": 0.15,
+      "drag": 0.7,
+      "stability": 0.5,
+      "authority": 0.4,
+      "complexity": 0.05,
+      "reliability": 0.05,
+      "mass": 0.8
+    },
+    "combined": {
+      "lift": 0.25,
+      "drag": 1.2,
+      "stability": 1.15,
+      "authority": 0.9,
+      "complexity": 0.3,
+      "reliability": -0.05,
+      "mass": 1.1
+    }
+  },
+  "layout": {
+    "symmetric": {},
+    "asymmetric": {
+      "drag": 1.1,
+      "stability": 0.8,
+      "authority": 1.3,
+      "complexity": 0.35,
+      "reliability": -0.25
+    }
+  },
+  "control": {
+    "classic": {
+      "lift": 0.15,
+      "complexity": 0.05
+    },
+    "integrated": {
+      "lift": 0.15,
+      "drag": 0.9,
+      "authority": 1.2,
+      "complexity": 0.25,
+      "reliability": -0.05
+    },
+    "combined": {
+      "lift": 0.2,
+      "drag": 1.15,
+      "stability": 1.1,
+      "authority": 1.35,
+      "complexity": 0.4,
+      "reliability": -0.12,
+      "mass": 1.1
+    },
+    "fixed": {
+      "lift": 0.1,
+      "drag": 1.1,
+      "stability": 1.25,
+      "authority": 0.0,
+      "reliability": 0.1
+    }
+  }
+}
