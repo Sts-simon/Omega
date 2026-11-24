@@ -305,6 +305,12 @@ pub(crate) fn workshop_pointer(
         campus.message = "Drag cancelled".to_string();
     }
     if drag.source.is_none() {
+        if keys.just_pressed(KeyCode::KeyQ) {
+            campus.message = session.rotate_selected(-1);
+        }
+        if keys.just_pressed(KeyCode::KeyE) {
+            campus.message = session.rotate_selected(1);
+        }
         if keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) {
             campus.message = session.delete_selected();
         }
