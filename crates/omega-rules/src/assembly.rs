@@ -279,19 +279,40 @@ pub struct PartPose {
 
 // Quaternion math keeps this rules crate independent from Bevy.
 fn quaternion_multiply(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
-    let [aw, ax, ay, az] = a; let [bw, bx, by, bz] = b;
-    [aw*bw-ax*bx-ay*by-az*bz, aw*bx+ax*bw+ay*bz-az*by,
-     aw*by-ax*bz+ay*bw+az*bx, aw*bz+ax*by-ay*bx+az*bw]
+    let [aw, ax, ay, az] = a;
+    let [bw, bx, by, bz] = b;
+    [
+        aw * bw - ax * bx - ay * by - az * bz,
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+    ]
 }
 fn quaternion_from_euler_xyz(x: f64, y: f64, z: f64) -> [f64; 4] {
-    let (sx,cx)=(x*0.5).sin_cos(); let (sy,cy)=(y*0.5).sin_cos(); let (sz,cz)=(z*0.5).sin_cos();
-    quaternion_multiply(quaternion_multiply([cx,sx,0.0,0.0],[cy,0.0,sy,0.0]),[cz,0.0,0.0,sz])
+    let (sx, cx) = (x * 0.5).sin_cos();
+    let (sy, cy) = (y * 0.5).sin_cos();
+    let (sz, cz) = (z * 0.5).sin_cos();
+    quaternion_multiply(
+        quaternion_multiply([cx, sx, 0.0, 0.0], [cy, 0.0, sy, 0.0]),
+        [cz, 0.0, 0.0, sz],
+    )
 }
 fn quaternion_rotate(q: [f64; 4], v: [f64; 3]) -> [f64; 3] {
-    let u=[q[1],q[2],q[3]];
-    let cross=|a:[f64;3],b:[f64;3]| [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-    let uv=cross(u,v); let uuv=cross(u,uv);
-    [v[0]+2.0*(q[0]*uv[0]+uuv[0]),v[1]+2.0*(q[0]*uv[1]+uuv[1]),v[2]+2.0*(q[0]*uv[2]+uuv[2])]
+    let u = [q[1], q[2], q[3]];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let uv = cross(u, v);
+    let uuv = cross(u, uv);
+    [
+        v[0] + 2.0 * (q[0] * uv[0] + uuv[0]),
+        v[1] + 2.0 * (q[0] * uv[1] + uuv[1]),
+        v[2] + 2.0 * (q[0] * uv[2] + uuv[2]),
+    ]
 }
 fn quaternion_to_euler_xyz(q: [f64; 4]) -> (f64, f64, f64) {
     let [w, x, y, z] = q;
