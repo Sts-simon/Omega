@@ -532,6 +532,12 @@ impl Vehicle {
             node,
             angle_deg,
             separation: false,
+            offset_x_m: 0.0,
+            offset_y_m: 0.0,
+            offset_z_m: 0.0,
+            rotation_x_deg: 0.0,
+            rotation_y_deg: 0.0,
+            rotation_z_deg: 0.0,
         });
         if self.stage_count() > MAX_STAGES {
             let part = self.part_mut(child).ok_or("missing part")?;
