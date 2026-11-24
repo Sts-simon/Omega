@@ -5,6 +5,8 @@
 //! - `omega --revisions <slot-dir> [--seed N] [--air]` flies the working copy and the last ten
 //!   recorded revisions with the same seed and prints them with the deltas between neighbours, so
 //!   a design change can be compared without editing anything in the game.
+//! - `omega --export-design <slot-dir> <out.json>` and `--import-design <slot-dir> <in.json>`
+//!   move one design between saves or people, refusing anything that does not validate.
 //!
 //! Neither mode opens a window, so a lot's flight acceptance criteria can be checked over SSH or
 //! in CI.
@@ -14,7 +16,9 @@ use omega_rules::{Program, Vehicle};
 use std::path::Path;
 
 const USAGE: &str = "usage: omega --trial <slot-dir> [--seed N] [--air] | \
-                     omega --revisions <slot-dir> [--seed N] [--air] | omega --aero-report";
+                     omega --revisions <slot-dir> [--seed N] [--air] | omega --aero-report | \
+                     omega --export-design <slot-dir> <out.json> | \
+                     omega --import-design <slot-dir> <in.json>";
 /// How many recorded revisions the comparison mode replays.
 const HISTORY_LIMIT: usize = 10;
 
@@ -29,6 +33,10 @@ pub(crate) fn main() -> Option<i32> {
         run_trial(&args)
     } else if args.iter().any(|arg| arg == "--revisions") {
         run_revisions(&args)
+    } else if args.iter().any(|arg| arg == "--export-design") {
+        run_export(&args)
+    } else if args.iter().any(|arg| arg == "--import-design") {
+        run_import(&args)
     } else {
         return None;
     };
@@ -47,6 +55,11 @@ pub(crate) fn main() -> Option<i32> {
 fn value_of<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     let index = args.iter().position(|arg| arg == flag)?;
     args.get(index + 1).map(String::as_str)
+}
+
+fn pair_of<'a>(args: &'a [String], flag: &str) -> Option<(&'a str, &'a str)> {
+    let index = args.iter().position(|arg| arg == flag)?;
+    Some((args.get(index + 1)?.as_str(), args.get(index + 2)?.as_str()))
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, String> {
@@ -207,6 +220,43 @@ fn history_json(history: &[HistoryEntry], program: &Program, config: FlightConfi
     serde_json::to_string_pretty(&json).map_err(|error| error.to_string())
 }
 
+/// A design is exported as the schema-4 vehicle itself, so it can be read back by any copy of the
+/// game; the export refuses a design the game would refuse.
+fn export_bytes(vehicle_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let vehicle: Vehicle = serde_json::from_slice(vehicle_bytes).map_err(|error| format!("design: {error}"))?;
+    vehicle
+        .validate()
+        .map_err(|issues| format!("design refused: {}", issues.join("; ")))?;
+    serde_json::to_vec_pretty(&vehicle).map_err(|error| error.to_string())
+}
+
+/// Import accepts a schema-4 export or any older design file the game can migrate, validates it and
+/// returns the schema-4 bytes to save. A refused design never reaches the save slot.
+fn import_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
+    let vehicle: Vehicle = serde_json::from_slice(input).map_err(|error| format!("design: {error}"))?;
+    vehicle
+        .validate()
+        .map_err(|issues| format!("design refused: {}", issues.join("; ")))?;
+    serde_json::to_vec_pretty(&vehicle).map_err(|error| error.to_string())
+}
+
+fn run_export(args: &[String]) -> Result<String, String> {
+    let (slot_dir, out_path) = pair_of(args, "--export-design").ok_or_else(|| USAGE.to_string())?;
+    let vehicle = read(&Path::new(slot_dir).join("designs/vehicle.json"))?;
+    let portable = export_bytes(&vehicle)?;
+    std::fs::write(out_path, &portable).map_err(|error| format!("{out_path}: {error}"))?;
+    Ok(format!("Exported the design to {out_path} ({} bytes)", portable.len()))
+}
+
+fn run_import(args: &[String]) -> Result<String, String> {
+    let (slot_dir, in_path) = pair_of(args, "--import-design").ok_or_else(|| USAGE.to_string())?;
+    let input = read(Path::new(in_path))?;
+    let bytes = import_bytes(&input)?;
+    let slot = omega_data::SaveSlot::new(slot_dir);
+    crate::save::write_to(&slot, Path::new("saves"), crate::save::SaveFile::Vehicle, &bytes)?;
+    Ok(format!("Imported the design into {slot_dir}"))
+}
+
 fn launch_label(launch: LaunchMode) -> &'static str {
     if matches!(launch, LaunchMode::Air { .. }) {
         "air"
@@ -292,6 +342,21 @@ mod tests {
         let empty = br#"{"schema_version":4,"name":"x","parts":[]}"#;
         let error = trial_json(empty, b"{}", FlightConfig::default()).unwrap_err();
         assert!(error.contains("program") || error.contains("no parts"), "{error}");
+    }
+
+    #[test]
+    fn a_design_export_round_trips_and_a_broken_import_is_refused() {
+        let session = crate::missile::MissileSession::new_default();
+        let original = session.to_bytes().unwrap();
+        let exported = export_bytes(&original).unwrap();
+        let imported = import_bytes(&exported).unwrap();
+        assert_eq!(imported, exported, "an export imports byte for byte");
+        let before: Vehicle = serde_json::from_slice(&original).unwrap();
+        let after: Vehicle = serde_json::from_slice(&imported).unwrap();
+        assert_eq!(before, after);
+        assert!(import_bytes(b"{}").unwrap_err().contains("design"));
+        let empty = br#"{"schema_version":4,"name":"x","parts":[]}"#;
+        assert!(import_bytes(empty).unwrap_err().contains("refused"));
     }
 
     #[test]
