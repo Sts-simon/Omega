@@ -1748,7 +1748,7 @@ fn build_missile(
                     for choice in missile::choices_of(&part.spec) {
                         ui_kit::button(
                             panel,
-                            format!("{}: {}", choice.label(), missile::choice_value(&part.spec, choice)),
+                            format!("{}: {}", choice.label(), missile::choice_value_for_part(part, choice)),
                             UiAction::Missile(MissileAction::CycleAero(choice)),
                             ButtonTone::Ghost,
                             Val::Percent(100.0),
