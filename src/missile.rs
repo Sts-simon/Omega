@@ -2100,7 +2100,12 @@ mod tests {
     fn ksp_transform_gizmo_edits_all_axes_and_undoes() {
         let mut session = MissileSession::new_default();
         select(&mut session, "module-6");
-        let before = session.vehicle.poses().into_iter().find(|pose| pose.id == "module-6").unwrap();
+        let before = session
+            .vehicle
+            .poses()
+            .into_iter()
+            .find(|pose| pose.id == "module-6")
+            .unwrap();
         assert!(session.transform_selected(0, 0.5, false).contains("X"));
         assert!(session.transform_selected(1, 0.25, false).contains("Y"));
         assert!(session.transform_selected(2, -0.75, false).contains("Z"));
@@ -2109,16 +2114,39 @@ mod tests {
         assert!(session.transform_selected(2, 35.0, true).contains("Z"));
         let part = session.vehicle.part("module-6").unwrap();
         let attach = part.attach.as_ref().unwrap();
-        assert_eq!((attach.offset_x_m, attach.offset_y_m, attach.offset_z_m), (0.5, 0.25, -0.75));
-        assert_eq!((attach.rotation_x_deg, attach.rotation_y_deg, attach.rotation_z_deg), (15.0, 25.0, 35.0));
-        let after = session.vehicle.poses().into_iter().find(|pose| pose.id == "module-6").unwrap();
+        assert_eq!(
+            (attach.offset_x_m, attach.offset_y_m, attach.offset_z_m),
+            (0.5, 0.25, -0.75)
+        );
+        assert_eq!(
+            (attach.rotation_x_deg, attach.rotation_y_deg, attach.rotation_z_deg),
+            (15.0, 25.0, 35.0)
+        );
+        let after = session
+            .vehicle
+            .poses()
+            .into_iter()
+            .find(|pose| pose.id == "module-6")
+            .unwrap();
         assert!((after.x_m - before.x_m - 0.5).abs() < 1e-9);
         assert!((after.y_m - before.y_m - 0.25).abs() < 1e-9);
         assert!((after.z_m - before.z_m + 0.75).abs() < 1e-9);
-        for _ in 0..6 { session.undo(); }
+        for _ in 0..6 {
+            session.undo();
+        }
         let restored = session.vehicle.part("module-6").unwrap().attach.as_ref().unwrap();
-        assert_eq!((restored.offset_x_m, restored.offset_y_m, restored.offset_z_m), (0.0, 0.0, 0.0));
-        assert_eq!((restored.rotation_x_deg, restored.rotation_y_deg, restored.rotation_z_deg), (0.0, 0.0, 0.0));
+        assert_eq!(
+            (restored.offset_x_m, restored.offset_y_m, restored.offset_z_m),
+            (0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            (
+                restored.rotation_x_deg,
+                restored.rotation_y_deg,
+                restored.rotation_z_deg
+            ),
+            (0.0, 0.0, 0.0)
+        );
     }
 
     #[test]
