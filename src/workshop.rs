@@ -113,13 +113,19 @@ fn free_nodes(vehicle: &Vehicle, anchor: Vec3) -> Vec<NodePoint> {
             continue; // a surface is a leaf: it offers no attachment node
         }
         let center = world_of(anchor, pose.x_m, pose.y_m, pose.z_m);
+        let orientation = Quat::from_euler(
+            EulerRot::XYZ,
+            (pose.rotation_x_deg as f32).to_radians(),
+            (pose.rotation_y_deg as f32).to_radians(),
+            (pose.rotation_z_deg as f32).to_radians(),
+        );
         let half = pose.height_m as f32 * missile::VISUAL_SCALE * 0.5;
         if is_free(&pose.id, NodeId::Top) {
             nodes.push(NodePoint {
                 parent: pose.id.clone(),
                 node: NodeId::Top,
                 angle: 0.0,
-                world: center + Vec3::Y * half,
+                world: center + orientation * Vec3::Y * half,
             });
         }
         if is_free(&pose.id, NodeId::Bottom) {
@@ -127,19 +133,24 @@ fn free_nodes(vehicle: &Vehicle, anchor: Vec3) -> Vec<NodePoint> {
                 parent: pose.id.clone(),
                 node: NodeId::Bottom,
                 angle: 0.0,
-                world: center - Vec3::Y * half,
+                world: center - orientation * Vec3::Y * half,
             });
         }
         for index in 0..radial_slots(&part.spec) {
             let node = NodeId::Radial(index);
             if is_free(&pose.id, node) {
                 let angle = f64::from(index) * 90.0;
-                let direction = Vec3::new(angle.to_radians().cos() as f32, 0.0, angle.to_radians().sin() as f32);
+                let local_direction = Vec3::new(
+                    angle.to_radians().cos() as f32,
+                    0.0,
+                    angle.to_radians().sin() as f32,
+                );
                 nodes.push(NodePoint {
                     parent: pose.id.clone(),
                     node,
                     angle,
-                    world: center + direction * pose.radius_m as f32 * missile::VISUAL_SCALE,
+                    world: center
+                        + orientation * local_direction * pose.radius_m as f32 * missile::VISUAL_SCALE,
                 });
             }
         }
