@@ -7,9 +7,12 @@ L'atelier est organisé autour de trois zones : la palette de pièces, la vue 3D
 1. Choisir une catégorie de pièces dans la palette.
 2. Faire glisser une pièce vers un point d'attache lumineux de la vue 3D.
 3. Sélectionner une pièce pour ouvrir son inspecteur et afficher ses points d'attache libres.
-4. Pour une surface aérodynamique sélectionnée, utiliser **Q** et **E** pour la faire pivoter par pas de 15°.
-4. Régler ses paramètres avec les boutons moins et plus, ou avec la molette lorsque le pointeur est au-dessus de la pièce.
-5. Déplacer une pièce existante pour déplacer également ses pièces enfants.
+4. Utiliser **W** pour le déplacement et **R** pour la rotation, comme dans KSP.
+5. Faire glisser une poignée colorée pour transformer la pièce : rouge = X, vert = Y, bleu = Z. En mode rotation, les anneaux représentent les trois axes.
+6. Maintenir **Maj** pour désactiver l'accrochage de la transformation (déplacement libre ou rotation fine).
+7. Pour une surface aérodynamique, **Q** et **E** conservent la rotation rapide par pas de 15°.
+8. Régler ses paramètres avec les boutons moins et plus, ou avec la molette lorsque le pointeur est au-dessus de la pièce.
+9. Déplacer une pièce existante pour déplacer également ses pièces enfants.
 
 ## Comprendre l'assemblage
 
