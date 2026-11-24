@@ -8,11 +8,11 @@ Omega is a fictional, abstract game about completing military-themed design cont
 
 All values and outcomes are game mechanics. The project does not attempt to model real weapons, real targeting, guidance, navigation, seeker logic, warheads or real-world performance. This boundary is deliberate and is not a future feature.
 
-## Current baseline (0.30.0)
+## Current baseline (0.33.0)
 
 The following features are already present in the application:
 
-- **Research:** 13 technologies across five departments, credit costs, prerequisites, a day clock and capability grants.
+- **Research:** 18 technologies across six departments, credit costs, prerequisites, a day clock and capability grants.
 - **Workshop:** attachment-tree vehicle editor, 16 part types including wings, fin sets and control surfaces, one to four derived stages, presets, editable parameters and design choices, derived game statistics, validation and persistence.
 - **Program editor:** parallel threads, seven abstract block types, hardware and computer-limit validation, editing, persistence and content hashing.
 - **Trials:** repeatable seeded runs, four result plots, event timeline, anomaly summaries, batch runs of 10/100/1,000 seeds, progress reporting and A/B comparison.
@@ -142,6 +142,20 @@ authority, all placed on the same radial nodes and mirrored with `X`.
 **Acceptance:** fins measurably improve stability and altitude settling, wings enable a cruise design
 that the wingless version cannot complete, control surfaces reduce the time to the target, old
 designs fly unchanged, schema 3 migrates, and the whole lot is checked in game at 1600×960.
+
+### Post-aerodynamics follow-ups (0.33.0, delivered)
+
+**Purpose:** make the aerodynamics lot pay, and make it verifiable without a display.
+
+- Done: one seeded surface fault for fragile airframes (the reliability sink), dossier fees that
+  scale with the score, per-family aero requirements (`LIFT`, `AUTHORITY`, `STABILITY`), and a
+  research pacing audit with durations reduced from 90 to 67 serial days.
+- Done: the design-choice effect tables moved to `aero_effects.json` with a generated
+  `docs/AERO_BALANCE.md`; per-surface contributions and part-linked warnings in the workshop.
+- Done: a screenless harness (`--trial`, `--revisions`, `--export-design`, `--import-design`,
+  `--aero-report`), a one-press `RE-FLY` for stale contracts, and `FINS` / `WINGS` presets.
+- Full record: `docs/CHANGELOG.md`; the numbers accepted for the aero tables are in
+  `docs/AERO_BALANCE.md`.
 
 ### Stable release (1.0.0)
 

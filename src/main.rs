@@ -24,7 +24,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "OMEGA 0.30.0 | Missile Design".to_string(),
+                title: "OMEGA 0.33.0 | Missile Design".to_string(),
                 resolution: (1600, 960).into(),
                 ..default()
             }),
