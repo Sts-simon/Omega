@@ -169,6 +169,12 @@ fn picked_part(vehicle: &Vehicle, origin: Vec3, direction: Vec3) -> Option<Strin
             let center = world_of(anchor, pose.x_m, pose.y_m, pose.z_m);
             let scale = missile::VISUAL_SCALE;
             let part = vehicle.part(&pose.id);
+            let orientation = Quat::from_euler(
+                EulerRot::XYZ,
+                (pose.rotation_x_deg as f32).to_radians(),
+                (pose.rotation_y_deg as f32).to_radians(),
+                (pose.rotation_z_deg as f32).to_radians(),
+            );
             if part.is_some_and(|part| part.spec.is_aero()) {
                 let angle = part
                     .and_then(|part| part.attach.as_ref())
@@ -183,13 +189,14 @@ fn picked_part(vehicle: &Vehicle, origin: Vec3, direction: Vec3) -> Option<Strin
                         (pose.height_m as f32) * scale * 0.5,
                         SURFACE_HALF_THICKNESS_M * scale,
                     ),
-                    yaw: (angle as f32).to_radians(),
+                    rotation: orientation * Quat::from_rotation_y((angle as f32).to_radians()),
                 }
             } else {
                 PickShape::Cylinder {
                     center,
                     radius: (pose.radius_m as f32).max(0.12) * scale,
                     half_height: (pose.height_m as f32) * scale * 0.5,
+                    rotation: orientation,
                 }
             }
         })
