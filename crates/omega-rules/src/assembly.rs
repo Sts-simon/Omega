@@ -1405,12 +1405,13 @@ pub(crate) mod tests {
         let original = before.iter().find(|pose| pose.id == "sustainer").unwrap();
         assert!(original.x_m.abs() < 1e-9);
 
+        let parent_y = before.iter().find(|pose| pose.id == "dec1").unwrap().y_m;
         let attach = vehicle.part_mut("dec1").unwrap().attach.as_mut().unwrap();
         attach.rotation_z_deg = 90.0;
         let after = vehicle.poses();
         let rotated = after.iter().find(|pose| pose.id == "sustainer").unwrap();
         assert!(rotated.x_m < -0.5, "child should orbit with its parent: {rotated:?}");
-        assert!(rotated.y_m.abs() < 1e-9, "a quarter-turn around Z moves the stack sideways");
+        assert!((rotated.y_m - parent_y).abs() < 1e-9, "a quarter-turn around Z moves the child sideways");
         assert!((rotated.rotation_z_deg - 90.0).abs() < 1e-6);
     }
 
