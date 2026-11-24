@@ -672,7 +672,7 @@ impl MissileSession {
 
     pub fn load_preset(&mut self, index: u8) {
         self.vehicle = match index {
-            0 => Vehicle::from_stages(
+            0 | 2 => Vehicle::from_stages(
                 "Two-stage rocket",
                 vec![
                     Stage {
@@ -744,6 +744,47 @@ impl MissileSession {
                 }],
             ),
         };
+        // Two presets exist to teach the airframe: fins make a small rocket stable, wings make the
+        // cruise vehicle lift. Both stay research-gated like the other presets.
+        if index == 2 {
+            self.vehicle.name = "Fin trainer".to_string();
+            for slot in 0..4u8 {
+                self.vehicle
+                    .add_attached(
+                        format!("fin-{}", slot + 5),
+                        PartSpec::FinSet {
+                            span_m: 0.35,
+                            chord_m: 0.30,
+                            role: StabilizerRole::Rear,
+                            layout: FinLayout::Symmetric,
+                            light: false,
+                        },
+                        "motor-1",
+                        omega_rules::NodeId::Radial(slot),
+                    )
+                    .expect("the fin trainer has free radial slots");
+            }
+        }
+        if index == 3 {
+            self.vehicle.name = "Winged cruise".to_string();
+            for slot in 0..2u8 {
+                self.vehicle
+                    .add_attached(
+                        format!("wing-{}", slot + 6),
+                        PartSpec::Wing {
+                            span_m: 1.2,
+                            chord_m: 0.4,
+                            sweep_deg: 20.0,
+                            planform: WingPlanform::Swept,
+                            profile: AirfoilProfile::Classic,
+                            light: false,
+                        },
+                        "tank-1",
+                        omega_rules::NodeId::Radial(slot),
+                    )
+                    .expect("the winged cruise has free radial slots");
+            }
+        }
         self.selected = self.vehicle.topmost_id();
         self.sync_next_id();
     }
@@ -1587,6 +1628,23 @@ mod tests {
         assert!(session.vehicle.parts.is_empty());
         assert!(session.vehicle.validate().is_err());
         assert_eq!(session.vehicle.parts.len(), before - before);
+    }
+
+    #[test]
+    fn the_aero_presets_are_valid_and_show_the_airframe() {
+        let mut session = MissileSession::default();
+        session.load_preset(2);
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        let trainer = session.vehicle.aero();
+        assert_eq!(trainer.surface_count, 4);
+        assert!(trainer.stability > 60.0, "stability {}", trainer.stability);
+        assert_eq!(session.vehicle.name, "Fin trainer");
+
+        session.load_preset(3);
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        assert!(session.vehicle.aero().lift > 40.0);
+        assert_eq!(session.vehicle.name, "Winged cruise");
+        assert_eq!(session.vehicle.parts.len(), 7);
     }
 
     #[test]

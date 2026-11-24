@@ -1051,6 +1051,18 @@ fn build_missile(
                         UiAction::Missile(MissileAction::Preset(1)),
                         ButtonTone::Ghost,
                     );
+                    ui_kit::button_row_item(
+                        row,
+                        "FINS",
+                        UiAction::Missile(MissileAction::Preset(2)),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "WINGS",
+                        UiAction::Missile(MissileAction::Preset(3)),
+                        ButtonTone::Ghost,
+                    );
                     ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
                 });
             heading(panel, "ADD PART");
