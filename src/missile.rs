@@ -8,7 +8,7 @@ use crate::scene::OrbitCameraRig;
 use bevy::prelude::*;
 use omega_rules::{
     AirfoilProfile, AvionicsModule, ComputerClass, ControlKind, FinLayout, Part, PartSpec, RadarClass, SensorKind,
-    StabilizerRole, Stage, Vehicle, WingPlanform,
+    StabilizerRole, Stage, Vehicle, WingPlanform, PartCategory,
 };
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -658,6 +658,7 @@ pub(crate) enum MissileAction {
     Preset(u8),
     Clear,
     CycleSymmetry,
+    SetPaletteCategory(Option<PartCategory>),
     Undo,
     Redo,
 }
@@ -668,6 +669,7 @@ pub(crate) struct MissileSession {
     pub selected: Option<String>,
     /// Radial copies placed by the next drop: 1 (off), 2, 3 or 4.
     pub symmetry: u8,
+    pub palette_category: Option<PartCategory>,
     next_id: u32,
     undo: Vec<Vehicle>,
     redo: Vec<Vehicle>,
@@ -683,6 +685,7 @@ impl Default for MissileSession {
             vehicle: Vehicle::default(),
             selected: None,
             symmetry: 1,
+            palette_category: None,
             next_id: 0,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -909,6 +912,7 @@ impl MissileSession {
                 "Started an empty vehicle: drag a part from the palette".to_string()
             }
             MissileAction::CycleSymmetry => self.cycle_symmetry(),
+            MissileAction::SetPaletteCategory(category) => { self.palette_category = category; String::new() }
             MissileAction::Undo => self.undo(),
             MissileAction::Redo => self.redo(),
         }

@@ -196,6 +196,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn french_translation_covers_workshop_and_navigation_labels() {
+        assert_eq!(fr("WORKSHOP"), "ATELIER");
+        assert_eq!(fr("ASSEMBLY TREE"), "ARBRE D'ASSEMBLAGE");
+        assert_eq!(fr("REMOVE PART"), "SUPPRIMER LA PIÈCE");
+    }
+
+    #[test]
+    fn unknown_identifiers_are_not_modified() {
+        assert_eq!(fr("family:cruise"), "family:cruise");
+    }
+
+    #[test]
     fn thousands_groups_digits() {
         assert_eq!(thousands(0), "0");
         assert_eq!(thousands(999), "999");

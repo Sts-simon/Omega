@@ -125,7 +125,7 @@ fn add_nav_button(parent: &mut ChildSpawnerCommands<'_>, label: &'static str, ta
         ))
         .with_children(|button| {
             button.spawn((
-                Text::new(label),
+                Text::new(ui_kit::fr(label)),
                 TextFont {
                     font_size: FontSize::Px(12.5),
                     ..default()
