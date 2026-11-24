@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Current `designs/vehicle.json` schema. 1-2 were the flat stage lists of the early workshops;
 /// 3 added the attachment graph, 4 the aerodynamic surfaces and 5 the mission electronics
 /// (older files load unchanged and are rewritten at the current version).
-pub const VEHICLE_SCHEMA: u32 = 5;
+pub const VEHICLE_SCHEMA: u32 = 6;
 /// A design may not grow beyond this many derived stages (the old workshop limit).
 pub const MAX_STAGES: usize = 4;
 
@@ -1400,7 +1400,7 @@ pub(crate) mod tests {
     fn saved_designs_round_trip_and_legacy_files_migrate() {
         let vehicle = sounding_rocket();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":5"), "{json}");
+        assert!(json.contains("\"schema_version\":6"), "{json}");
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
 
@@ -1477,9 +1477,9 @@ pub(crate) mod tests {
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
         assert_eq!(vehicle.aero().surface_count, 0);
         let written = serde_json::to_string(&vehicle).unwrap();
-        assert!(written.contains("\"schema_version\":5"), "{written}");
+        assert!(written.contains("\"schema_version\":6"), "{written}");
 
-        let future = r#"{"schema_version": 6, "name": "Future", "parts": []}"#;
+        let future = r#"{"schema_version": 7, "name": "Future", "parts": []}"#;
         let refused = serde_json::from_str::<Vehicle>(future).unwrap_err();
         assert!(refused.to_string().contains("newer"), "{refused}");
     }
@@ -1498,7 +1498,7 @@ pub(crate) mod tests {
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
         assert_eq!(vehicle.avionics().mission_modules, 0);
         let written = serde_json::to_string(&vehicle).unwrap();
-        assert!(written.contains("\"schema_version\":5"), "{written}");
+        assert!(written.contains("\"schema_version\":6"), "{written}");
     }
 
     #[test]
@@ -1550,7 +1550,7 @@ pub(crate) mod tests {
             )
             .unwrap();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":5"), "{json}");
+        assert!(json.contains("\"schema_version\":6"), "{json}");
         assert!(!json.contains("variable_geometry"));
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
