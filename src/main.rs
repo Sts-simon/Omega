@@ -182,22 +182,25 @@ fn move_camera(
     let control_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let forward = Vec3::new(-rig.yaw.sin(), 0.0, -rig.yaw.cos());
     let right = Vec3::new(rig.yaw.cos(), 0.0, -rig.yaw.sin());
-    if !control_held && (keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp)) {
+    // In the workshop W/R belong to the transform tools, so camera keyboard panning
+    // uses the arrow keys there. The rest of the campus keeps WASD navigation.
+    let workshop_view = campus.view == CampusView::Missile;
+    if !control_held && (keys.pressed(KeyCode::ArrowUp) || (!workshop_view && keys.pressed(KeyCode::KeyW))) {
         direction += forward;
     }
-    if !control_held && (keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown)) {
+    if !control_held && (keys.pressed(KeyCode::ArrowDown) || (!workshop_view && keys.pressed(KeyCode::KeyS))) {
         direction -= forward;
     }
-    if !control_held && (keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft)) {
+    if !control_held && (keys.pressed(KeyCode::ArrowLeft) || (!workshop_view && keys.pressed(KeyCode::KeyA))) {
         direction -= right;
     }
-    if !control_held && (keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight)) {
+    if !control_held && (keys.pressed(KeyCode::ArrowRight) || (!workshop_view && keys.pressed(KeyCode::KeyD))) {
         direction += right;
     }
-    if keys.pressed(KeyCode::KeyQ) {
+    if !workshop_view && keys.pressed(KeyCode::KeyQ) {
         direction.y -= 1.0;
     }
-    if keys.pressed(KeyCode::KeyE) {
+    if !workshop_view && keys.pressed(KeyCode::KeyE) {
         direction.y += 1.0;
     }
     if direction.length_squared() > 0.0 {

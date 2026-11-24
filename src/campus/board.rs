@@ -1163,7 +1163,7 @@ fn build_missile(
             }
             ui_kit::label(
                 panel,
-                "Glissez une pièce vers un point d'attache lumineux. Déplacez une pièce pour déplacer son sous-ensemble. F centre la pièce sélectionnée ; Début cadre le véhicule. X change la symétrie ; Suppr supprime ; Ctrl+Z annule ; Ctrl+Y rétablit.",
+                "Glissez une pièce vers un point d'attache lumineux. W : déplacer ; R : faire pivoter. Saisissez un axe coloré ou un anneau pour manipuler X, Y ou Z ; Maj affine le réglage. F centre la pièce ; Début cadre le véhicule. Flèches : déplacer la caméra ; X : symétrie ; Suppr : supprimer ; Ctrl+Z / Ctrl+Y : annuler / rétablir.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );

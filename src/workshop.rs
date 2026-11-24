@@ -231,13 +231,34 @@ pub(crate) fn workshop_pointer(
         .map(|ray| (ray.origin, *ray.direction));
     let picked = ray.and_then(|(origin, direction)| picked_part(&session.vehicle, origin, direction));
 
+    // Read logical keys so W/R work on AZERTY as printed, not only at QWERTY scan positions.
+    let mut translate_tool_pressed = false;
+    let mut rotate_tool_pressed = false;
+    let mut undo_pressed = false;
+    let mut redo_pressed = false;
+    for event in typed.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        let control = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        if let Key::Character(character) = &event.logical_key {
+            match (control, character.to_lowercase().as_str()) {
+                (false, "w") => translate_tool_pressed = true,
+                (false, "r") => rotate_tool_pressed = true,
+                (true, "z") => undo_pressed = true,
+                (true, "y") => redo_pressed = true,
+                _ => {}
+            }
+        }
+    }
+
     // KSP-style tool selection. W = translate, R = rotate; the coloured handles select X/Y/Z directly.
-    if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::KeyR) {
+    if translate_tool_pressed || rotate_tool_pressed {
         if let Some(before) = transform_gizmo.before.take() {
             session.vehicle = before;
         }
         transform_gizmo.drag = None;
-        transform_gizmo.mode = if keys.just_pressed(KeyCode::KeyR) {
+        transform_gizmo.mode = if rotate_tool_pressed {
             TransformMode::Rotate
         } else {
             TransformMode::Translate
@@ -482,22 +503,11 @@ pub(crate) fn workshop_pointer(
         if keys.just_pressed(KeyCode::KeyX) {
             campus.message = session.cycle_symmetry();
         }
-        // Logical keys, not physical ones: on an AZERTY keyboard Ctrl+Z is the KeyW scan code.
-        for event in typed.read() {
-            if event.state != ButtonState::Pressed {
-                continue;
-            }
-            let control = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-            if !control {
-                continue;
-            }
-            if let Key::Character(text) = &event.logical_key {
-                match text.to_lowercase().as_str() {
-                    "z" => campus.message = session.undo(),
-                    "y" => campus.message = session.redo(),
-                    _ => {}
-                }
-            }
+        if undo_pressed {
+            campus.message = session.undo();
+        }
+        if redo_pressed {
+            campus.message = session.redo();
         }
     }
 
