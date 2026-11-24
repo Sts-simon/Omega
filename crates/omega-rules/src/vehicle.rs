@@ -5,6 +5,7 @@
 //! All coefficients are gameplay values chosen for readable trade-offs. They are not calibrated
 //! to any real system and the module contains no guidance, targeting or warhead modelling.
 
+use crate::avionics::AvionicsModule;
 use serde::{Deserialize, Serialize};
 
 pub const G0: f64 = 9.80665;
@@ -297,6 +298,11 @@ pub enum PartSpec {
         kind: ControlKind,
         light: bool,
     },
+    /// Abstract mission electronics. The module carries its category, its cost, its power draw
+    /// and the gameplay effect it contributes; the mass comes from the same module table.
+    Avionics {
+        module: AvionicsModule,
+    },
 }
 
 /// Palette grouping. Presentation metadata, owned here so the workshop cannot invent a category
@@ -395,7 +401,7 @@ impl PartSpec {
                 in_range("surface span (m)", span_m, 0.2, 4.0)?;
                 in_range("surface chord (m)", chord_m, 0.1, 2.0)
             }
-            Self::Sensor { .. } | Self::Computer { .. } | Self::Decoupler => Ok(()),
+            Self::Sensor { .. } | Self::Computer { .. } | Self::Decoupler | Self::Avionics { .. } => Ok(()),
         }
     }
 
@@ -416,7 +422,9 @@ impl PartSpec {
             Self::Decoupler | Self::MissionModule { .. } => PartCategory::Airframe,
             Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. } => PartCategory::Aerodynamics,
             Self::Sensor { .. } => PartCategory::Sensors,
-            Self::Computer { .. } => PartCategory::Avionics,
+            // Every mission module shares the electronics section; the inspector and the rules
+            // still name the narrower category (control, navigation, power, diagnostics).
+            Self::Computer { .. } | Self::Avionics { .. } => PartCategory::Avionics,
         }
     }
 
@@ -521,6 +529,10 @@ impl PartSpec {
                 dry_mass_kg: crate::aero::surface_mass_kg(self).unwrap_or(0.0),
                 ..PartStats::default()
             },
+            Self::Avionics { module } => PartStats {
+                dry_mass_kg: module.spec().mass_kg,
+                ..PartStats::default()
+            },
         }
     }
 
@@ -557,6 +569,7 @@ impl PartSpec {
             Self::Wing { .. } => "part:wing",
             Self::FinSet { .. } => "part:fin",
             Self::ControlSurface { .. } => "part:control_surface",
+            Self::Avionics { module } => module.capability(),
         }
     }
 

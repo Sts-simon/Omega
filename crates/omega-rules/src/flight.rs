@@ -65,6 +65,10 @@ pub struct FlightReport {
     pub anomalies: Vec<String>,
     /// Aerodynamic figures the run used: quoted by the workshop, the trial screen and the dossier.
     pub aero: AeroSummary,
+    /// Electronics figures the run used; all multipliers are 1 without mission modules.
+    pub avionics: crate::avionics::AvionicsSummary,
+    /// Whether the seeded airframe fault fired in this run.
+    pub surface_fault: bool,
     /// Thrust-to-weight ratio when the first stage was ignited.
     pub first_ignition_twr: Option<f64>,
     pub lifted_off: bool,
@@ -159,10 +163,13 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
     // design and applied to the existing integration. A design without surfaces leaves every
     // term below at its previous value.
     let aero = crate::aero::figures(vehicle);
+    let avionics = crate::avionics::figures(vehicle);
     let stability = aero.stability_ratio();
-    // A fragile airframe draws at most one seeded surface fault per run; a sound one never does.
-    let surface_fault = unit_random(config.seed ^ 0xF0A7_0000) < aero.surface_fault_chance();
-    let authority = aero.authority_ratio() * if surface_fault { 0.5 } else { 1.0 };
+    // A fragile airframe draws at most one seeded surface fault per run; a sound one never does,
+    // and the self-test suite lowers the exposure without removing it.
+    let surface_fault =
+        unit_random(config.seed ^ 0xF0A7_0000) < aero.surface_fault_chance() * avionics.fault_multiplier();
+    let authority = aero.authority_ratio() * avionics.authority_multiplier() * if surface_fault { 0.5 } else { 1.0 };
     let lift = aero.lift_ratio();
     // Passive stability damps the seeded drag spread, it never removes it.
     let drag_spread = if aero.surface_count == 0 {
@@ -320,7 +327,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                                     ));
                                     (0.0, Some(spec.class))
                                 } else {
-                                    (spec.base_lock_probability, Some(spec.class))
+                                    (avionics.lock_probability(spec.base_lock_probability), Some(spec.class))
                                 }
                             }
                             None => {
@@ -496,6 +503,8 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         events,
         anomalies,
         aero: aero.summary(),
+        avionics: avionics.summary(),
+        surface_fault,
         first_ignition_twr,
         lifted_off,
         max_speed_ms: max_speed,
@@ -510,7 +519,9 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
 mod tests {
     use super::*;
     use crate::assembly::tests::sounding_rocket;
-    use crate::vehicle::{ComputerClass, SensorKind};
+    use crate::assembly::{NodeId, Vehicle};
+    use crate::avionics::AvionicsModule;
+    use crate::vehicle::{AirfoilProfile, ComputerClass, SensorKind, WingPlanform};
 
     fn two_stage_program(separate_at: f64) -> Program {
         Program::single(vec![
@@ -745,6 +756,128 @@ mod tests {
             "{:?}",
             too_fast.anomalies
         );
+    }
+
+    #[test]
+    fn a_navigation_stack_raises_the_lock_probability() {
+        let program = Program::single(vec![
+            Block::IgniteStage { stage: 0 },
+            Block::HoldSpeed { speed_ms: 220.0 },
+            Block::Wait { seconds: 30.0 },
+            Block::LockTarget,
+        ]);
+        let mut vehicle = cruise_vehicle();
+        vehicle
+            .add_attached(
+                "nav",
+                PartSpec::Avionics {
+                    module: AvionicsModule::InertialNav,
+                },
+                "radar",
+                NodeId::Top,
+            )
+            .unwrap();
+        vehicle
+            .add_attached(
+                "power",
+                PartSpec::Avionics {
+                    module: AvionicsModule::PowerCell,
+                },
+                "nav",
+                NodeId::Top,
+            )
+            .unwrap();
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
+        let report = simulate(&vehicle, &program, air(200.0)).unwrap();
+        let lock = report.lock.unwrap();
+        assert!((lock.probability - 0.61).abs() < 1e-9, "{}", lock.probability);
+        assert_eq!(report.avionics.mission_modules, 2);
+        assert!((report.avionics.power_margin_w - 42.0).abs() < 1e-9);
+    }
+
+    fn fragile_vehicle() -> Vehicle {
+        let mut vehicle = Vehicle::from_stages(
+            "Fragile",
+            vec![crate::vehicle::Stage {
+                parts: vec![
+                    crate::vehicle::Part {
+                        id: "booster".into(),
+                        spec: PartSpec::SolidMotor {
+                            length_m: 2.0,
+                            diameter_m: 0.4,
+                            burn_time_s: 20.0,
+                        },
+                    },
+                    crate::vehicle::Part {
+                        id: "pc".into(),
+                        spec: PartSpec::Computer {
+                            class: ComputerClass::Basic,
+                        },
+                    },
+                ],
+            }],
+        );
+        vehicle
+            .add_attached(
+                "wing",
+                PartSpec::Wing {
+                    span_m: 1.8,
+                    chord_m: 0.6,
+                    sweep_deg: 30.0,
+                    planform: WingPlanform::VariableGeometry,
+                    profile: AirfoilProfile::Experimental,
+                    light: true,
+                },
+                "booster",
+                NodeId::Radial(0),
+            )
+            .unwrap();
+        vehicle
+    }
+
+    #[test]
+    fn the_self_test_suite_halves_the_fault_exposure() {
+        let vehicle = fragile_vehicle();
+        assert!(vehicle.aero().surface_fault_chance() > 0.0);
+        let mut protected = vehicle.clone();
+        protected
+            .add_attached(
+                "power",
+                PartSpec::Avionics {
+                    module: AvionicsModule::PowerCell,
+                },
+                "pc",
+                NodeId::Top,
+            )
+            .unwrap();
+        protected
+            .add_attached(
+                "test",
+                PartSpec::Avionics {
+                    module: AvionicsModule::Diagnostics,
+                },
+                "power",
+                NodeId::Top,
+            )
+            .unwrap();
+        assert!(protected.validate().is_ok(), "{:?}", protected.validate());
+        assert_eq!(vehicle.avionics().fault_multiplier(), 1.0);
+        assert_eq!(protected.avionics().fault_multiplier(), 0.5);
+
+        let program = Program::single(vec![Block::IgniteStage { stage: 0 }]);
+        let mut changed = false;
+        for seed in 0..200 {
+            let config = || FlightConfig {
+                seed,
+                ..FlightConfig::default()
+            };
+            let base = simulate(&vehicle, &program, config()).unwrap();
+            let safe = simulate(&protected, &program, config()).unwrap();
+            // The suite only ever removes faults, never adds one.
+            assert!(!safe.surface_fault || base.surface_fault);
+            changed |= base.surface_fault && !safe.surface_fault;
+        }
+        assert!(changed, "a seed must exercise the self-test suite");
     }
 
     #[test]

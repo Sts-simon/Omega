@@ -432,6 +432,30 @@ pub fn default_tree() -> Vec<TechNode> {
             vec![cap("computer:advanced")],
         ),
         node(
+            "flight_control_electronics",
+            Computing,
+            "Flight control electronics",
+            "Mission modules for control, power and self-test.",
+            6_500,
+            9,
+            &["computer_standard"],
+            vec![
+                cap("avionics:control"),
+                cap("avionics:power"),
+                cap("avionics:diagnostics"),
+            ],
+        ),
+        node(
+            "navigation_datalink",
+            Sensors,
+            "Navigation and datalink",
+            "Navigation sources and the relay that shares their target solution.",
+            7_500,
+            10,
+            &["radar_basic"],
+            vec![cap("avionics:navigation"), cap("avionics:datalink")],
+        ),
+        node(
             "parallel_projects",
             DesignTools,
             "Parallel project management",
@@ -478,8 +502,8 @@ mod tests {
         let tree = default_tree();
         let cost: u64 = tree.iter().map(|node| node.cost_cr).sum();
         let days: u16 = tree.iter().map(|node| node.duration_days).sum();
-        assert_eq!(cost, 63_000, "the total research cost is the campaign's credit target");
-        assert!(days <= 70, "serial research must stay near 70 days, not {days}");
+        assert_eq!(cost, 77_000, "the total research cost is the campaign's credit target");
+        assert!(days <= 90, "serial research must stay near 90 days, not {days}");
         let aero: u16 = tree
             .iter()
             .filter(|node| node.department == Department::Aerodynamics)
