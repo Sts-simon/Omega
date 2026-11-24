@@ -1627,7 +1627,11 @@ fn build_missile(
                     );
                     let (height, radius) = omega_rules::assembly::dimensions(&part.spec);
                     let place = part.attach.as_ref().map_or("root part".to_string(), |attach| {
-                        format!("on {} via {}", attach.parent, attach.node.label())
+                        if part.spec.is_aero() {
+                            format!("on {} via {} | {:.0}°", attach.parent, attach.node.label(), attach.angle_deg)
+                        } else {
+                            format!("on {} via {}", attach.parent, attach.node.label())
+                        }
                     });
                     ui_kit::label(
                         panel,
