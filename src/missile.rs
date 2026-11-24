@@ -283,6 +283,7 @@ pub(crate) fn params_of(spec: &PartSpec) -> Vec<(Param, f64)> {
 pub(crate) enum AeroChoice {
     Planform,
     Profile,
+    Angle,
     Role,
     Layout,
     ControlKind,
@@ -294,6 +295,7 @@ impl AeroChoice {
         match self {
             Self::Planform => "PLANFORM",
             Self::Profile => "PROFILE",
+            Self::Angle => "ANGLE",
             Self::Role => "STABILISER",
             Self::Layout => "LAYOUT",
             Self::ControlKind => "SURFACE",
@@ -304,7 +306,7 @@ impl AeroChoice {
 
 pub(crate) fn choices_of(spec: &PartSpec) -> Vec<AeroChoice> {
     match *spec {
-        PartSpec::Wing { .. } => vec![AeroChoice::Planform, AeroChoice::Profile, AeroChoice::Light],
+        PartSpec::Wing { .. } => vec![AeroChoice::Planform, AeroChoice::Profile, AeroChoice::Angle, AeroChoice::Light],
         PartSpec::FinSet { .. } => vec![AeroChoice::Role, AeroChoice::Layout, AeroChoice::Light],
         PartSpec::ControlSurface { .. } => vec![AeroChoice::ControlKind, AeroChoice::Light],
         _ => Vec::new(),
@@ -315,6 +317,7 @@ pub(crate) fn choice_value(spec: &PartSpec, choice: AeroChoice) -> String {
     match (*spec, choice) {
         (PartSpec::Wing { planform, .. }, AeroChoice::Planform) => planform.label().to_string(),
         (PartSpec::Wing { profile, .. }, AeroChoice::Profile) => profile.label().to_string(),
+        (_, AeroChoice::Angle) => "USE PART ANGLE".to_string(),
         (PartSpec::FinSet { role, .. }, AeroChoice::Role) => role.label().to_string(),
         (PartSpec::FinSet { layout, .. }, AeroChoice::Layout) => layout.label().to_string(),
         (PartSpec::ControlSurface { kind, .. }, AeroChoice::ControlKind) => kind.label().to_string(),
@@ -327,6 +330,13 @@ pub(crate) fn choice_value(spec: &PartSpec, choice: AeroChoice) -> String {
 }
 
 /// Advance one discrete design choice; `None` when the part does not offer it.
+pub(crate) fn choice_value_for_part(part: &omega_rules::PlacedPart, choice: AeroChoice) -> String {
+    if choice == AeroChoice::Angle {
+        return format!("{:+.0}°", part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg));
+    }
+    choice_value(&part.spec, choice)
+}
+
 pub(crate) fn cycled(spec: PartSpec, choice: AeroChoice) -> Option<PartSpec> {
     let toggled = |light: bool| !light;
     match (spec, choice) {
@@ -1016,6 +1026,18 @@ impl MissileSession {
         let Some(part) = self.vehicle.part(&id) else {
             return "That part is no longer there".to_string();
         };
+        if choice == AeroChoice::Angle {
+            if !matches!(part.spec, PartSpec::Wing { .. }) {
+                return "The angle setting is only available on wings".to_string();
+            }
+            let current = part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg);
+            let next = if current >= 15.0 { -15.0 } else { current + 5.0 };
+            self.push_undo();
+            if let Some(attach) = self.vehicle.part_mut(&id).and_then(|part| part.attach.as_mut()) {
+                attach.rotation_x_deg = next;
+            }
+            return format!("{id}: ANGLE {next:+.0}°");
+        }
         match cycled(part.spec, choice) {
             Some(spec) => {
                 if let Some(missing) = spec
