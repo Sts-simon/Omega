@@ -6,7 +6,7 @@ L'atelier est organisé autour de trois zones : la palette de pièces, la vue 3D
 
 1. Choisir une catégorie de pièces dans la palette.
 2. Faire glisser une pièce vers un point d'attache lumineux de la vue 3D.
-3. Sélectionner une pièce pour ouvrir son inspecteur.
+3. Sélectionner une pièce pour ouvrir son inspecteur et afficher ses points d'attache libres.
 4. Régler ses paramètres avec les boutons moins et plus, ou avec la molette lorsque le pointeur est au-dessus de la pièce.
 5. Déplacer une pièce existante pour déplacer également ses pièces enfants.
 
