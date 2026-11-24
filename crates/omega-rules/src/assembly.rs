@@ -290,6 +290,12 @@ impl Vehicle {
                     node: NodeId::Top,
                     angle_deg: 0.0,
                     separation: stage_index > 0 && part_index == 0 && !*parent_is_decoupler,
+                    offset_x_m: 0.0,
+                    offset_y_m: 0.0,
+                    offset_z_m: 0.0,
+                    rotation_x_deg: 0.0,
+                    rotation_y_deg: 0.0,
+                    rotation_z_deg: 0.0,
                 });
                 previous = Some((part.id.clone(), matches!(part.spec, PartSpec::Decoupler)));
                 parts.push(PlacedPart {
@@ -1298,6 +1304,12 @@ pub(crate) mod tests {
                 node: NodeId::Radial(0),
                 angle_deg: 0.0,
                 separation: false,
+                offset_x_m: 0.0,
+                offset_y_m: 0.0,
+                offset_z_m: 0.0,
+                rotation_x_deg: 0.0,
+                rotation_y_deg: 0.0,
+                rotation_z_deg: 0.0,
             }),
             symmetry: None,
         });
