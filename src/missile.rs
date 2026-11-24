@@ -306,7 +306,12 @@ impl AeroChoice {
 
 pub(crate) fn choices_of(spec: &PartSpec) -> Vec<AeroChoice> {
     match *spec {
-        PartSpec::Wing { .. } => vec![AeroChoice::Planform, AeroChoice::Profile, AeroChoice::Angle, AeroChoice::Light],
+        PartSpec::Wing { .. } => vec![
+            AeroChoice::Planform,
+            AeroChoice::Profile,
+            AeroChoice::Angle,
+            AeroChoice::Light,
+        ],
         PartSpec::FinSet { .. } => vec![AeroChoice::Role, AeroChoice::Layout, AeroChoice::Light],
         PartSpec::ControlSurface { .. } => vec![AeroChoice::ControlKind, AeroChoice::Light],
         _ => Vec::new(),
@@ -332,7 +337,10 @@ pub(crate) fn choice_value(spec: &PartSpec, choice: AeroChoice) -> String {
 /// Advance one discrete design choice; `None` when the part does not offer it.
 pub(crate) fn choice_value_for_part(part: &omega_rules::PlacedPart, choice: AeroChoice) -> String {
     if choice == AeroChoice::Angle {
-        return format!("{:+.0}°", part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg));
+        return format!(
+            "{:+.0}°",
+            part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg)
+        );
     }
     choice_value(&part.spec, choice)
 }
@@ -2254,7 +2262,10 @@ mod tests {
         assert!(after.lift < before.lift);
         assert!(after.drag_index > before.drag_index);
 
-        assert_eq!(choice_value_for_part(session.vehicle.part(&wing).unwrap(), AeroChoice::Angle), "+5°");
+        assert_eq!(
+            choice_value_for_part(session.vehicle.part(&wing).unwrap(), AeroChoice::Angle),
+            "+5°"
+        );
         session.undo();
         let restored = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
         assert_eq!(restored.rotation_x_deg, 0.0);
