@@ -834,16 +834,38 @@ impl Vehicle {
     }
 
     pub fn available_blocks(&self) -> BTreeSet<&'static str> {
-        let mut blocks: BTreeSet<&'static str> = ["wait", "ignite_stage", "set_throttle"].into_iter().collect();
+        // The computer itself provides the timer, the four flags, the mode register and the
+        // diagnostic marks; sensors and stage count enable the rest.
+        let mut blocks: BTreeSet<&'static str> = [
+            "wait",
+            "ignite_stage",
+            "set_throttle",
+            "wait_flag",
+            "toggle_flag",
+            "set_flag",
+            "set_mode",
+            "wait_mode",
+            "mark",
+        ]
+        .into_iter()
+        .collect();
         if self.stage_count() >= 2 {
             blocks.insert("separate_stage");
         }
         for part in &self.parts {
             if let PartSpec::Sensor { kind } = part.spec {
                 match kind {
-                    SensorKind::Pitot => blocks.insert("hold_speed"),
-                    SensorKind::Barometer => blocks.insert("hold_pressure"),
-                    SensorKind::Radar(_) => blocks.insert("lock_target"),
+                    SensorKind::Pitot => {
+                        blocks.insert("hold_speed");
+                        blocks.insert("wait_speed");
+                    }
+                    SensorKind::Barometer => {
+                        blocks.insert("hold_pressure");
+                        blocks.insert("wait_pressure");
+                    }
+                    SensorKind::Radar(_) => {
+                        blocks.insert("lock_target");
+                    }
                 };
             }
         }

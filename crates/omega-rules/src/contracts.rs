@@ -668,6 +668,7 @@ mod tests {
             aero: crate::aero::AeroSummary::default(),
             avionics: crate::avionics::AvionicsSummary::default(),
             surface_fault: false,
+            trace: Vec::new(),
             first_ignition_twr: Some(2.0),
             lifted_off: true,
             max_speed_ms: speed,

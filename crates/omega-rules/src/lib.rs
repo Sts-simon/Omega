@@ -32,7 +32,10 @@ pub use diff::{DesignDiff, diff_parts};
 pub use dossier::{ACCEPTANCE_THRESHOLD, Dossier, DossierDecision, MatrixRow, build_dossier};
 pub use flight::{FlightConfig, FlightReport, LaunchMode, LockResult, Sample, simulate};
 pub use metrics::{DerivedMetrics, PartGeometry, derive_metrics};
-pub use program::{Block, Program, validate_program};
+pub use program::{
+    Block, BlockCategory, BlockTrace, FLAGS, MARKS, MODES, Program, ProgramConnection, ProgramIssue, ProgramLibrary,
+    SavedProgram, program_issues, validate_program,
+};
 pub use requirement::{
     Comparator, Estimate, Evidence, Requirement, RequirementStatus, VerificationCost, VerificationMethod,
     evaluate_requirement, verification_cost,
