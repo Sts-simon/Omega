@@ -121,10 +121,8 @@ fn move_camera(
                 .and_then(|id| session.vehicle.poses().into_iter().find(|pose| pose.id == id))
             {
                 rig.target = missile::ANCHOR
-                    + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32)
-                        * missile::VISUAL_SCALE;
-                rig.distance = ((pose.radius_m as f32) * missile::VISUAL_SCALE * 4.0 + 8.0)
-                    .clamp(12.0, 45.0);
+                    + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
+                rig.distance = ((pose.radius_m as f32) * missile::VISUAL_SCALE * 4.0 + 8.0).clamp(12.0, 45.0);
                 changed = true;
             }
         }
@@ -139,17 +137,13 @@ fn move_camera(
                 let mut extent = 0.0_f32;
                 for pose in &poses {
                     let point = missile::ANCHOR
-                        + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32)
-                            * missile::VISUAL_SCALE;
+                        + Vec3::new(pose.x_m as f32, pose.y_m as f32, pose.z_m as f32) * missile::VISUAL_SCALE;
                     min = min.min(point);
                     max = max.max(point);
-                    extent = extent.max(
-                        pose.height_m.max(pose.radius_m * 2.0) as f32 * missile::VISUAL_SCALE,
-                    );
+                    extent = extent.max(pose.height_m.max(pose.radius_m * 2.0) as f32 * missile::VISUAL_SCALE);
                 }
                 rig.target = (min + max) * 0.5;
-                rig.distance = ((max - min).length() * 1.25 + extent * 2.0 + 8.0)
-                    .clamp(12.0, 115.0);
+                rig.distance = ((max - min).length() * 1.25 + extent * 2.0 + 8.0).clamp(12.0, 115.0);
             }
             changed = true;
         }

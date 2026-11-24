@@ -206,9 +206,7 @@ pub fn fr(text: impl Into<String>) -> String {
         "Click a part in the tree above to inspect, resize or remove it." => {
             "Sélectionnez une pièce dans l'arbre pour l'inspecter, la régler ou la supprimer."
         }
-        "No parts yet: add one from the palette." => {
-            "Aucune pièce : ajoutez-en une depuis la palette."
-        }
+        "No parts yet: add one from the palette." => "Aucune pièce : ajoutez-en une depuis la palette.",
         "root" => "racine",
         "root part" => "pièce racine",
         "No flight computer: add one to be able to program the vehicle." => {
@@ -264,9 +262,7 @@ pub fn fr(text: impl Into<String>) -> String {
         "None. Accept an offer above; the trials you fly afterwards become its evidence." => {
             "Aucun contrat. Acceptez une offre ; vos prochains essais serviront de preuves."
         }
-        "The program is empty: add blocks to a thread." => {
-            "Le programme est vide : ajoutez des blocs à une tâche."
-        }
+        "The program is empty: add blocks to a thread." => "Le programme est vide : ajoutez des blocs à une tâche.",
         "This vehicle has no flight computer. Add one in the workshop first." => {
             "Ce véhicule n'a pas d'ordinateur de bord. Ajoutez-en un dans l'atelier."
         }
