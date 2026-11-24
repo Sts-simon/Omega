@@ -2304,6 +2304,31 @@ mod tests {
     }
 
     #[test]
+    fn wing_planform_is_preserved_in_the_visual_layout() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.add_at(
+            PartTemplate::Wing,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let wing_id = session.selected.clone().unwrap();
+        let first = layout(&session.vehicle)
+            .into_iter()
+            .find(|part| part.id == wing_id)
+            .unwrap();
+        assert_eq!(first.planform, Some(WingPlanform::Swept));
+        assert_eq!(first.sweep_deg, 20.0);
+
+        session.apply(MissileAction::CycleAero(AeroChoice::Planform), &owned);
+        let changed = layout(&session.vehicle)
+            .into_iter()
+            .find(|part| part.id == wing_id)
+            .unwrap();
+        assert_eq!(changed.planform, Some(WingPlanform::Delta));
+    }
+
+    #[test]
     fn the_aero_comparison_keeps_the_previous_configuration() {
         let mut session = MissileSession::new_default();
         assert!(session.comparison.is_none());
