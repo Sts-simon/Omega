@@ -1,20 +1,38 @@
-//! Screenless trial runner: `omega --trial <slot-dir> [--seed N] [--air]` loads the design and the
-//! program stored in a save slot, flies one seeded trial and prints a JSON report. No window is
-//! opened, so a lot's flight acceptance criteria can be checked over SSH or in CI.
+//! Screenless trial runner used by `omega` command-line flags:
+//!
+//! - `omega --trial <slot-dir> [--seed N] [--air]` flies the saved design and program once and
+//!   prints a JSON report.
+//! - `omega --revisions <slot-dir> [--seed N] [--air]` flies the working copy and the last ten
+//!   recorded revisions with the same seed and prints them with the deltas between neighbours, so
+//!   a design change can be compared without editing anything in the game.
+//!
+//! Neither mode opens a window, so a lot's flight acceptance criteria can be checked over SSH or
+//! in CI.
 
 use omega_rules::flight::{FlightConfig, LaunchMode, simulate};
 use omega_rules::{Program, Vehicle};
 use std::path::Path;
 
-const USAGE: &str = "usage: omega --trial <slot-dir> [--seed N] [--air]";
+const USAGE: &str = "usage: omega --trial <slot-dir> [--seed N] [--air] | \
+                     omega --revisions <slot-dir> [--seed N] [--air] | omega --aero-report";
+/// How many recorded revisions the comparison mode replays.
+const HISTORY_LIMIT: usize = 10;
 
-/// Runs the headless mode when `--trial` is present. `None` means "start the game normally".
+/// Runs the headless modes when one of their flags is present. `None` means "start the game".
 pub(crate) fn main() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if !args.iter().any(|arg| arg == "--trial") {
-        return None;
+    if args.iter().any(|arg| arg == "--aero-report") {
+        println!("{}", omega_rules::aero::balance_report());
+        return Some(0);
     }
-    match run(&args) {
+    let mode = if args.iter().any(|arg| arg == "--trial") {
+        run_trial(&args)
+    } else if args.iter().any(|arg| arg == "--revisions") {
+        run_revisions(&args)
+    } else {
+        return None;
+    };
+    match mode {
         Ok(report) => {
             println!("{report}");
             Some(0)
@@ -31,15 +49,8 @@ fn value_of<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.get(index + 1).map(String::as_str)
 }
 
-fn run(args: &[String]) -> Result<String, String> {
-    let dir = value_of(args, "--trial").ok_or_else(|| USAGE.to_string())?;
-    let config = config(args)?;
-    let slot = Path::new(dir);
-    let vehicle_path = slot.join("designs/vehicle.json");
-    let program_path = slot.join("programs/missile.json");
-    let vehicle = std::fs::read(&vehicle_path).map_err(|error| format!("{}: {error}", vehicle_path.display()))?;
-    let program = std::fs::read(&program_path).map_err(|error| format!("{}: {error}", program_path.display()))?;
-    trial_json(&vehicle, &program, config)
+fn read(path: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 fn config(args: &[String]) -> Result<FlightConfig, String> {
@@ -63,11 +74,165 @@ fn config(args: &[String]) -> Result<FlightConfig, String> {
     })
 }
 
+fn run_trial(args: &[String]) -> Result<String, String> {
+    let dir = value_of(args, "--trial").ok_or_else(|| USAGE.to_string())?;
+    let config = config(args)?;
+    let slot = Path::new(dir);
+    let vehicle = read(&slot.join("designs/vehicle.json"))?;
+    let program = read(&slot.join("programs/missile.json"))?;
+    trial_json(&vehicle, &program, config)
+}
+
 fn trial_json(vehicle_bytes: &[u8], program_bytes: &[u8], config: FlightConfig) -> Result<String, String> {
     let vehicle: Vehicle = serde_json::from_slice(vehicle_bytes).map_err(|error| format!("design: {error}"))?;
     let program: Program = serde_json::from_slice(program_bytes).map_err(|error| format!("program: {error}"))?;
-    let figures = omega_rules::aero::figures(&vehicle);
-    let report = simulate(&vehicle, &program, config).map_err(|issues| issues.join("; "))?;
+    let json = serde_json::json!({
+        "design": vehicle.name,
+        "seed": config.seed,
+        "launch": launch_label(config.launch),
+        "aero": figures_json(&vehicle),
+        "flight": flight_json(&vehicle, &program, config)?,
+        "anomalies": simulate(&vehicle, &program, config).map_err(|issues| issues.join("; "))?.anomalies,
+    });
+    serde_json::to_string_pretty(&json).map_err(|error| error.to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct RawLog {
+    #[serde(default)]
+    revisions: Vec<RawRevision>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawRevision {
+    id: u32,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    hash: String,
+    vehicle: Vehicle,
+}
+
+/// One entry of the comparison: the working copy first, then the recorded revisions, newest first.
+struct HistoryEntry {
+    name: String,
+    hash: String,
+    vehicle: Vehicle,
+}
+
+fn run_revisions(args: &[String]) -> Result<String, String> {
+    let dir = value_of(args, "--revisions").ok_or_else(|| USAGE.to_string())?;
+    let config = config(args)?;
+    let slot = Path::new(dir);
+    let working: Vehicle = serde_json::from_slice(&read(&slot.join("designs/vehicle.json"))?)
+        .map_err(|error| format!("design: {error}"))?;
+    let program: Program = serde_json::from_slice(&read(&slot.join("programs/missile.json"))?)
+        .map_err(|error| format!("program: {error}"))?;
+    let log = match read(&slot.join("designs/revisions.json")) {
+        Ok(bytes) => serde_json::from_slice::<RawLog>(&bytes).map_err(|error| format!("revisions: {error}"))?,
+        Err(_) => RawLog { revisions: Vec::new() },
+    };
+    let history = history_entries(&working, log);
+    history_json(&history, &program, config)
+}
+
+fn history_entries(working: &Vehicle, log: RawLog) -> Vec<HistoryEntry> {
+    let hash = omega_data::hash_serializable(working)
+        .map(|hash| hash.as_str().to_string())
+        .unwrap_or_default();
+    let mut entries = vec![HistoryEntry {
+        name: "working copy".to_string(),
+        hash,
+        vehicle: working.clone(),
+    }];
+    entries.extend(
+        log.revisions
+            .into_iter()
+            .rev()
+            .take(HISTORY_LIMIT)
+            .map(|revision| HistoryEntry {
+                name: if revision.label.is_empty() {
+                    format!("revision {}", revision.id)
+                } else {
+                    format!("revision {} ({})", revision.id, revision.label)
+                },
+                hash: revision.hash,
+                vehicle: revision.vehicle,
+            }),
+    );
+    entries
+}
+
+fn history_json(history: &[HistoryEntry], program: &Program, config: FlightConfig) -> Result<String, String> {
+    let mut entries = Vec::new();
+    for entry in history {
+        entries.push(serde_json::json!({
+            "design": entry.name,
+            "hash": entry.hash,
+            "aero": figures_json(&entry.vehicle),
+            "flight": flight_json(&entry.vehicle, program, config)?,
+        }));
+    }
+    let deltas: Vec<serde_json::Value> = entries
+        .windows(2)
+        .map(|pair| {
+            let (now, before) = (&pair[0], &pair[1]);
+            let change = |path: &[&str]| {
+                let field = |entry: &serde_json::Value| {
+                    path.iter()
+                        .fold(entry, |value, key| &value[key])
+                        .as_f64()
+                        .unwrap_or(0.0)
+                };
+                field(now) - field(before)
+            };
+            serde_json::json!({
+                "from": before["design"],
+                "to": now["design"],
+                "stability": change(&["aero", "stability"]),
+                "control_authority": change(&["aero", "control_authority"]),
+                "lift": change(&["aero", "lift"]),
+                "drag_index": change(&["aero", "drag_index"]),
+                "max_speed_ms": change(&["flight", "max_speed_ms"]),
+                "path_length_m": change(&["flight", "path_length_m"]),
+            })
+        })
+        .collect();
+    let json = serde_json::json!({
+        "seed": config.seed,
+        "launch": launch_label(config.launch),
+        "entries": entries,
+        "deltas": deltas,
+    });
+    serde_json::to_string_pretty(&json).map_err(|error| error.to_string())
+}
+
+fn launch_label(launch: LaunchMode) -> &'static str {
+    if matches!(launch, LaunchMode::Air { .. }) {
+        "air"
+    } else {
+        "vertical"
+    }
+}
+
+fn figures_json(vehicle: &Vehicle) -> serde_json::Value {
+    let figures = omega_rules::aero::figures(vehicle);
+    serde_json::json!({
+        "surface_count": figures.surface_count,
+        "stability": figures.stability,
+        "lift": figures.lift,
+        "control_authority": figures.control_authority,
+        "drag_index": figures.drag_index,
+        "reliability": figures.reliability,
+        "mass_kg": figures.mass_kg,
+        "cg_y_m": figures.cg_y_m,
+        "ca_y_m": figures.ca_y_m,
+        "margin_m": figures.margin_m,
+    })
+}
+
+fn flight_json(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> Result<serde_json::Value, String> {
+    let report = simulate(vehicle, program, config).map_err(|issues| issues.join("; "))?;
     let lock = report.lock.map(|lock| {
         serde_json::json!({
             "success": lock.success,
@@ -75,36 +240,18 @@ fn trial_json(vehicle_bytes: &[u8], program_bytes: &[u8], config: FlightConfig) 
             "speed_ms": lock.speed_ms,
         })
     });
-    let json = serde_json::json!({
-        "design": vehicle.name,
-        "seed": config.seed,
-        "launch": if matches!(config.launch, LaunchMode::Air { .. }) { "air" } else { "vertical" },
-        "aero": {
-            "surface_count": figures.surface_count,
-            "stability": figures.stability,
-            "lift": figures.lift,
-            "control_authority": figures.control_authority,
-            "drag_index": figures.drag_index,
-            "reliability": figures.reliability,
-            "mass_kg": figures.mass_kg,
-            "cg_y_m": figures.cg_y_m,
-            "ca_y_m": figures.ca_y_m,
-            "margin_m": figures.margin_m,
-        },
-        "flight": {
-            "lifted_off": report.lifted_off,
-            "max_speed_ms": report.max_speed_ms,
-            "path_length_m": report.path_length_m,
-            "flight_time_s": report.flight_time_s,
-            "final_speed_ms": report.final_speed_ms,
-            "first_ignition_twr": report.first_ignition_twr,
-            "samples": report.samples.len(),
-        },
+    Ok(serde_json::json!({
+        "lifted_off": report.lifted_off,
+        "max_speed_ms": report.max_speed_ms,
+        "path_length_m": report.path_length_m,
+        "flight_time_s": report.flight_time_s,
+        "final_speed_ms": report.final_speed_ms,
+        "first_ignition_twr": report.first_ignition_twr,
+        "samples": report.samples.len(),
         "lock": lock,
         "events": report.events,
         "anomalies": report.anomalies,
-    });
-    serde_json::to_string_pretty(&json).map_err(|error| error.to_string())
+    }))
 }
 
 #[cfg(test)]
@@ -145,5 +292,30 @@ mod tests {
         let empty = br#"{"schema_version":4,"name":"x","parts":[]}"#;
         let error = trial_json(empty, b"{}", FlightConfig::default()).unwrap_err();
         assert!(error.contains("program") || error.contains("no parts"), "{error}");
+    }
+
+    #[test]
+    fn the_revision_history_starts_with_the_working_copy_and_compares_neighbours() {
+        let working = crate::missile::MissileSession::new_default().vehicle.clone();
+        let log = RawLog {
+            revisions: vec![RawRevision {
+                id: 4,
+                label: "Missile revision 4".to_string(),
+                hash: "abc".to_string(),
+                vehicle: working.clone(),
+            }],
+        };
+        let history = history_entries(&working, log);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].name, "working copy");
+        assert!(history[1].name.contains("revision 4"));
+        let program = Program::single(vec![Block::IgniteStage { stage: 0 }]);
+        let json = history_json(&history, &program, FlightConfig::default()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["entries"].as_array().unwrap().len(), 2);
+        let deltas = value["deltas"].as_array().unwrap();
+        assert_eq!(deltas.len(), 1);
+        assert!(deltas[0]["stability"].as_f64().unwrap().abs() < 1e-9);
+        assert!(deltas[0]["from"].as_str().unwrap().contains("revision 4"));
     }
 }

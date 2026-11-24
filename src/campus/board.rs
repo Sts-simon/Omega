@@ -484,6 +484,11 @@ fn missile_active_card(
                     UiAction::Navigate(CampusView::Trials),
                     ButtonTone::Secondary,
                 );
+                // A stale or missing dossier is one click from fresh evidence: the same seeded run
+                // the trial board would make, recorded on every active contract.
+                if status != EvidenceStatus::Current {
+                    ui_kit::button_row_item(buttons, "RE-FLY", UiAction::ReflyMissileContract, ButtonTone::Secondary);
+                }
                 ui_kit::button_row_item(
                     buttons,
                     "DELIVER",
@@ -2695,6 +2700,19 @@ pub(crate) fn handle_extra_actions(
             }
             UiAction::SelectMissileContract(id) => {
                 campus.message = procurement.select(id);
+            }
+            UiAction::ReflyMissileContract => {
+                let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
+                campus.message = match trials::apply_action(
+                    &mut trials,
+                    TrialAction::Run,
+                    &missile.vehicle,
+                    &program.program,
+                    monte_carlo,
+                ) {
+                    Ok(_) => format!("Re-flew {} for the active contract(s)", missile.vehicle.name),
+                    Err(error) => error,
+                };
             }
             UiAction::Program(action) => match program.apply(action, &missile.vehicle) {
                 Ok(message) => {
