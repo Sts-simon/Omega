@@ -32,6 +32,8 @@ fn main() {
         .init_resource::<program_editor::MissileProgramSession>()
         .init_resource::<trials::TrialSession>()
         .init_resource::<procurement::Procurement>()
+        .init_resource::<campus::ResearchScroll>()
+        .init_resource::<campus::WorkshopScroll>()
         .init_resource::<workshop::DragState>()
         .init_resource::<workshop::WorkshopInput>()
         .add_systems(
@@ -63,6 +65,9 @@ fn main() {
                     move_camera,
                     campus::sync_boards,
                     campus::scroll_program_list,
+                    campus::scroll_research_grid,
+                    campus::scroll_part_list,
+                    workshop::draw_aero_markers,
                     missile::sync_missile_visuals,
                     missile::focus_missile_camera,
                     campus::update_toast,

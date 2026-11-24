@@ -543,6 +543,7 @@ mod tests {
     fn trial(vehicle: &Vehicle, program: &Program, run_id: u64) -> MissileTrial {
         let (vehicle_hash, program_hash) = hashes(vehicle, program);
         MissileTrial {
+            stability: 0.0,
             run_id,
             vehicle: vehicle_hash,
             program: program_hash,

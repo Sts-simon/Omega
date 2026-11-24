@@ -31,6 +31,22 @@ pub(crate) struct ToastText;
 #[derive(Component)]
 pub(crate) struct ProgramListScroll;
 
+/// Marks the scrolling container that holds the research departments.
+#[derive(Component)]
+pub(crate) struct ResearchGrid;
+
+/// Scroll offset of the research grid, kept across board rebuilds.
+#[derive(Resource, Default)]
+pub(crate) struct ResearchScroll(pub(crate) f32);
+
+/// Marks the scrolling container that holds the workshop stage list.
+#[derive(Component)]
+pub(crate) struct PartListScroll;
+
+/// Scroll offset of the workshop stage list, kept across board rebuilds.
+#[derive(Resource, Default)]
+pub(crate) struct WorkshopScroll(pub(crate) f32);
+
 fn root_node(kind: BoardKind) -> Node {
     let mut node = Node {
         position_type: PositionType::Absolute,
@@ -730,13 +746,14 @@ fn department_color(dept: omega_rules::Department) -> Color {
     match dept {
         VehicleFamilies => Color::srgb(0.36, 0.84, 0.94),
         Materials => Color::srgb(0.92, 0.62, 0.30),
+        Aerodynamics => Color::srgb(0.55, 0.82, 0.45),
         Sensors => Color::srgb(0.35, 0.75, 0.55),
         Computing => Color::srgb(0.62, 0.50, 0.90),
         DesignTools => Color::srgb(0.36, 0.62, 0.95),
     }
 }
 
-fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
+fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, scroll: f32) {
     use omega_rules::{Department, ResearchError, default_tree};
     let tree = default_tree();
     root.spawn(Node {
@@ -778,11 +795,20 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState) {
             ui_kit::chip(head, format!("{} cr", ui_kit::thousands(campus.credits)), ui_kit::GOOD);
             ui_kit::button(head, "NEXT DAY", UiAction::NextDay, ButtonTone::Primary, Val::Px(130.0));
         });
-        col.spawn(Node {
-            width: Val::Percent(100.0),
-            column_gap: Val::Px(10.0),
-            ..default()
-        })
+        // A department can hold more cards than fit under the window, so the grid scrolls
+        // instead of drawing cards nobody can reach at the bottom of the screen.
+        col.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                column_gap: Val::Px(10.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            ScrollPosition(Vec2::new(0.0, scroll)),
+            ResearchGrid,
+        ))
         .with_children(|grid| {
             for dept in Department::ALL {
                 let color = department_color(dept);
@@ -890,6 +916,28 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
         Computer { class } => format!("Computer {class:?}"),
         Decoupler => "Decoupler".to_string(),
         MissionModule { mass_kg } => format!("Mission module {mass_kg:.0} kg"),
+        Wing {
+            span_m,
+            chord_m,
+            sweep_deg,
+            planform,
+            profile,
+            ..
+        } => format!(
+            "{} wing {span_m:.2} x {chord_m:.2} m, {sweep_deg:.0} deg, {}",
+            planform.label(),
+            profile.label()
+        ),
+        FinSet {
+            span_m,
+            chord_m,
+            role,
+            layout,
+            ..
+        } => format!("{} fins {span_m:.2} x {chord_m:.2} m, {}", role.label(), layout.label()),
+        ControlSurface {
+            span_m, chord_m, kind, ..
+        } => format!("{} control {span_m:.2} x {chord_m:.2} m", kind.label()),
     }
 }
 
@@ -931,6 +979,16 @@ fn param_row(parent: &mut ChildSpawnerCommands<'_>, param: missile::Param, value
         });
 }
 
+fn score_color(value: f64) -> Color {
+    if value < 30.0 {
+        ui_kit::BAD
+    } else if value < 55.0 {
+        ui_kit::WARN
+    } else {
+        ui_kit::GOOD
+    }
+}
+
 fn panel_node(width: Val) -> (Node, BackgroundColor, UiInteraction) {
     (
         Node {
@@ -951,6 +1009,7 @@ fn build_missile(
     campus: &CampusState,
     session: &MissileSession,
     log: &RevisionLog,
+    scroll: f32,
 ) {
     let owned = campus.owned_capabilities();
     let vehicle = &session.vehicle;
@@ -990,7 +1049,7 @@ fn build_missile(
                     ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
                 });
             heading(panel, "ADD PART");
-            let rows: [&[PartTemplate]; 6] = [
+            let rows: [&[PartTemplate]; 7] = [
                 &[PartTemplate::SolidMotor, PartTemplate::FuelTank],
                 &[PartTemplate::LiquidEngine, PartTemplate::AirBreathing],
                 &[PartTemplate::Pitot, PartTemplate::Barometer],
@@ -1000,6 +1059,11 @@ fn build_missile(
                     PartTemplate::ComputerBasic,
                     PartTemplate::ComputerStandard,
                     PartTemplate::ComputerAdvanced,
+                ],
+                &[
+                    PartTemplate::Wing,
+                    PartTemplate::FinSet,
+                    PartTemplate::ControlSurface,
                 ],
             ];
             for row in rows {
@@ -1018,7 +1082,7 @@ fn build_missile(
             }
             ui_kit::label(
                 panel,
-                "Drag a part onto a glowing node in the 3D view. Click adds above the selection. X cycles symmetry, Delete removes, Ctrl+Z undoes.",
+                "Drag a part onto a glowing node. Wings, fins and control surfaces need a free radial mount (X cycles symmetry). Delete removes, Ctrl+Z undoes.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
@@ -1069,6 +1133,134 @@ fn build_missile(
         ..default()
     })
     .with_children(|middle| {
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        middle.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "AERODYNAMICS", 12.0, ui_kit::ACCENT);
+            let aero = vehicle.aero();
+            // The snapshot control sits right under the title: it stays inside the panel's first
+            // rows whatever height the column gives it, unlike a control at the end of the card.
+            match &session.comparison {
+                Some(_) => ui_kit::button(
+                    panel,
+                    "CLEAR COMPARISON",
+                    UiAction::Missile(MissileAction::ClearComparison),
+                    ButtonTone::Ghost,
+                    Val::Percent(100.0),
+                ),
+                None => ui_kit::button(
+                    panel,
+                    "SNAPSHOT A",
+                    UiAction::Missile(MissileAction::CompareAero),
+                    ButtonTone::Ghost,
+                    Val::Percent(100.0),
+                ),
+            }
+            if aero.surface_count == 0 {
+                ui_kit::label(
+                    panel,
+                    "No aerodynamic surfaces. Drag a wing, fin set or control surface onto a radial mount.",
+                    10.0,
+                    ui_kit::TEXT_DIM,
+                );
+            } else {
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (label, value, color) in [
+                            ("STABILITY", aero.stability, score_color(aero.stability)),
+                            ("CONTROL", aero.control_authority, score_color(aero.control_authority)),
+                            ("LIFT", aero.lift, ui_kit::ACCENT),
+                            ("DRAG", aero.drag_index, score_color(100.0 - aero.drag_index)),
+                        ] {
+                            let (mut node, bg, border) = ui_kit::card_node(Val::Px(0.0), color);
+                            node.flex_grow = 1.0;
+                            node.flex_basis = Val::Px(0.0);
+                            node.row_gap = Val::Px(1.0);
+                            row.spawn((node, bg, border)).with_children(|card| {
+                                ui_kit::label(card, label, 8.5, ui_kit::TEXT_DIM);
+                                ui_kit::label(card, format!("{value:.0}"), 15.0, color);
+                            });
+                        }
+                    });
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (label, text, color) in [
+                            ("COMPLEXITY", format!("{:.0}", aero.complexity), ui_kit::TEXT_DIM),
+                            (
+                                "RELIABILITY",
+                                format!("{:.0}", aero.reliability),
+                                score_color(aero.reliability),
+                            ),
+                            ("AERO MASS", format!("{:.0} kg", aero.mass_kg), ui_kit::TEXT_DIM),
+                        ] {
+                            row.spawn(Node {
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            })
+                            .with_children(|col| {
+                                ui_kit::label(col, label, 8.5, ui_kit::TEXT_DIM);
+                                ui_kit::label(col, text, 11.0, color);
+                            });
+                        }
+                    });
+                let (low, high) = aero.stable_band_m();
+                ui_kit::label(
+                    panel,
+                    format!(
+                        "CG {:.2} m | CA {:.2} m | margin {:+.2} m (band {:.2}-{:.2} m)",
+                        aero.cg_y_m, aero.ca_y_m, aero.margin_m, low, high
+                    ),
+                    9.5,
+                    ui_kit::TEXT,
+                );
+                panel.spawn(Node::default()).with_children(|c| {
+                    let (text, color) = if aero.is_stable() {
+                        ("STABLE BAND", ui_kit::GOOD)
+                    } else if aero.margin_m < 0.0 {
+                        ("UNSTABLE: CA AHEAD OF CG", ui_kit::BAD)
+                    } else {
+                        ("MARGINAL", ui_kit::WARN)
+                    };
+                    ui_kit::chip(c, text, color);
+                });
+                ui_kit::label(
+                    panel,
+                    format!(
+                        "Wing {:.2} m2 | fin {:.2} m2 | control {:.2} m2 | sweep {:.0} deg",
+                        aero.wing_area_m2, aero.fin_area_m2, aero.control_area_m2, aero.mean_sweep_deg
+                    ),
+                    9.0,
+                    ui_kit::TEXT_DIM,
+                );
+            }
+            if let Some(before) = &session.comparison {
+                let current = vehicle.aero();
+                ui_kit::label(
+                    panel,
+                    format!(
+                        "A vs now: stability {:+.0} | control {:+.0} | lift {:+.0} | drag {:+.0} | mass {:+.0} kg",
+                        current.stability - before.stability,
+                        current.control_authority - before.control_authority,
+                        current.lift - before.lift,
+                        current.drag_index - before.drag_index,
+                        current.mass_kg - before.mass_kg
+                    ),
+                    9.5,
+                    ui_kit::TEXT,
+                );
+            }
+        });
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         middle.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "STAGE FIGURES", 12.0, ui_kit::ACCENT);
@@ -1196,7 +1388,11 @@ fn build_missile(
         ..default()
     })
     .with_children(|right| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        // A design with wings, fins and control surfaces has many rows; cap the list so the
+        // selected-part inspector underneath keeps its figures and choice buttons on screen.
+        node.max_height = Val::Percent(56.0);
+        node.overflow = Overflow::clip_y();
         right.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "PARTS BY STAGE (DERIVED)", 12.0, ui_kit::ACCENT);
             ui_kit::label(
@@ -1208,25 +1404,41 @@ fn build_missile(
             if vehicle.parts.is_empty() {
                 ui_kit::label(panel, "No parts yet: add one from the palette.", 10.0, ui_kit::TEXT_DIM);
             }
-            let mut stage = usize::MAX;
-            for (index, part) in vehicle.parts() {
-                if index != stage {
-                    stage = index;
-                    heading(panel, format!("STAGE {}", stage + 1));
-                }
-                let tone = if session.selected.as_deref() == Some(part.id.as_str()) {
-                    ButtonTone::Primary
-                } else {
-                    ButtonTone::Ghost
-                };
-                ui_kit::button(
-                    panel,
-                    format!("{}  {}", part.id, spec_summary(&part.spec)),
-                    UiAction::Missile(MissileAction::Select { id: part.id.clone() }),
-                    tone,
-                    Val::Percent(100.0),
-                );
-            }
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        row_gap: Val::Px(6.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    ScrollPosition(Vec2::new(0.0, scroll)),
+                    PartListScroll,
+                ))
+                .with_children(|panel| {
+                    let mut stage = usize::MAX;
+                    for (index, part) in vehicle.parts() {
+                        if index != stage {
+                            stage = index;
+                            heading(panel, format!("STAGE {}", stage + 1));
+                        }
+                        let tone = if session.selected.as_deref() == Some(part.id.as_str()) {
+                            ButtonTone::Primary
+                        } else {
+                            ButtonTone::Ghost
+                        };
+                        ui_kit::button(
+                            panel,
+                            format!("{}  {}", part.id, spec_summary(&part.spec)),
+                            UiAction::Missile(MissileAction::Select { id: part.id.clone() }),
+                            tone,
+                            Val::Percent(100.0),
+                        );
+                    }
+                });
         });
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         right.spawn((node, bg, interaction)).with_children(|panel| {
@@ -1245,6 +1457,15 @@ fn build_missile(
                     }
                     for (param, value) in params {
                         param_row(panel, param, value);
+                    }
+                    for choice in missile::choices_of(&part.spec) {
+                        ui_kit::button(
+                            panel,
+                            format!("{}: {}", choice.label(), missile::choice_value(&part.spec, choice)),
+                            UiAction::Missile(MissileAction::CycleAero(choice)),
+                            ButtonTone::Ghost,
+                            Val::Percent(100.0),
+                        );
                     }
                     let stats = part.spec.stats();
                     let mut line = format!("Dry {:.1} kg", stats.dry_mass_kg);
@@ -2135,6 +2356,49 @@ fn build_trials(
     });
 }
 
+/// Mouse-wheel scrolling for the workshop stage list, mirroring [`scroll_program_list`].
+pub(crate) fn scroll_part_list(
+    wheel: Res<AccumulatedMouseScroll>,
+    mut scroll: ResMut<WorkshopScroll>,
+    mut lists: Query<&mut ScrollPosition, With<PartListScroll>>,
+) {
+    let Ok(mut position) = lists.single_mut() else {
+        return;
+    };
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    if scroll.0 != position.y {
+        scroll.0 = position.y;
+    }
+}
+
+/// Mouse-wheel scrolling for the research grid, mirroring [`scroll_program_list`] so a department
+/// with more cards than the panel can show stays reachable.
+pub(crate) fn scroll_research_grid(
+    wheel: Res<AccumulatedMouseScroll>,
+    mut scroll: ResMut<ResearchScroll>,
+    mut grids: Query<&mut ScrollPosition, With<ResearchGrid>>,
+) {
+    let Ok(mut position) = grids.single_mut() else {
+        return;
+    };
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    if scroll.0 != position.y {
+        scroll.0 = position.y;
+    }
+}
+
 /// Mouse-wheel scrolling for the missile program block list.
 ///
 /// `bevy_ui` moves a node's children by `ScrollPosition` but nothing turns the wheel into an
@@ -2199,13 +2463,16 @@ fn signature(
         ),
         BoardKind::Research => format!("{:?}|{}|{}", campus.research, campus.credits, campus.day),
         BoardKind::Missile => format!(
-            "{:?}|{:?}|{}|{}|{:?}|{:?}",
+            "{:?}|{:?}|{}|{}|{:?}|{:?}|{:?}",
             missile.vehicle,
             missile.selected,
             missile.symmetry,
             campus.credits,
             campus.research,
-            log.head().map(|revision| revision.hash.clone())
+            log.head().map(|revision| revision.hash.clone()),
+            // Recording or clearing the A side must redraw the panel, or it keeps showing the
+            // button that was just pressed.
+            missile.comparison
         ),
         BoardKind::Program => format!(
             "{:?}|{:?}|{}|{:?}",
@@ -2233,6 +2500,8 @@ pub(crate) fn sync_boards(
     trials: Res<TrialSession>,
     procurement: Res<Procurement>,
     log: Res<RevisionLog>,
+    research_scroll: Res<ResearchScroll>,
+    workshop_scroll: Res<WorkshopScroll>,
     mut boards: Query<(Entity, &mut Node, &BoardKind)>,
     mut seen: Local<HashMap<BoardKind, String>>,
 ) {
@@ -2267,8 +2536,8 @@ pub(crate) fn sync_boards(
                 &missile_ref.vehicle,
                 &program_ref.program,
             ),
-            BoardKind::Research => build_research(root, campus_ref),
-            BoardKind::Missile => build_missile(root, campus_ref, missile_ref, &log),
+            BoardKind::Research => build_research(root, campus_ref, research_scroll.0),
+            BoardKind::Missile => build_missile(root, campus_ref, missile_ref, &log, workshop_scroll.0),
             BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref),
             BoardKind::Trials => build_trials(
                 root,

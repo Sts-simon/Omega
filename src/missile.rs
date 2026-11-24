@@ -6,7 +6,10 @@ use crate::campus::{CampusState, CampusView};
 use crate::save::{self, SaveFile};
 use crate::scene::OrbitCameraRig;
 use bevy::prelude::*;
-use omega_rules::{ComputerClass, Part, PartSpec, RadarClass, SensorKind, Stage, Vehicle};
+use omega_rules::{
+    AirfoilProfile, ComputerClass, ControlKind, FinLayout, Part, PartSpec, RadarClass, SensorKind, StabilizerRole,
+    Stage, Vehicle, WingPlanform,
+};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -31,6 +34,9 @@ pub(crate) enum PartTemplate {
     ComputerAdvanced,
     Decoupler,
     MissionModule,
+    Wing,
+    FinSet,
+    ControlSurface,
 }
 
 impl PartTemplate {
@@ -49,6 +55,9 @@ impl PartTemplate {
             Self::ComputerAdvanced => "COMPUTER 3",
             Self::Decoupler => "DECOUPLER",
             Self::MissionModule => "MISSION MODULE",
+            Self::Wing => "WING",
+            Self::FinSet => "FIN SET",
+            Self::ControlSurface => "CONTROL",
         }
     }
 
@@ -64,6 +73,9 @@ impl PartTemplate {
             Self::ComputerBasic | Self::ComputerStandard | Self::ComputerAdvanced => "computer",
             Self::Decoupler => "decoupler",
             Self::MissionModule => "module",
+            Self::Wing => "wing",
+            Self::FinSet => "fin",
+            Self::ControlSurface => "control",
         }
     }
 
@@ -103,6 +115,27 @@ impl PartTemplate {
             },
             Self::Decoupler => PartSpec::Decoupler,
             Self::MissionModule => PartSpec::MissionModule { mass_kg: 40.0 },
+            Self::Wing => PartSpec::Wing {
+                span_m: 1.2,
+                chord_m: 0.4,
+                sweep_deg: 20.0,
+                planform: WingPlanform::Swept,
+                profile: AirfoilProfile::Classic,
+                light: false,
+            },
+            Self::FinSet => PartSpec::FinSet {
+                span_m: 0.35,
+                chord_m: 0.4,
+                role: StabilizerRole::Rear,
+                layout: FinLayout::Symmetric,
+                light: false,
+            },
+            Self::ControlSurface => PartSpec::ControlSurface {
+                span_m: 0.35,
+                chord_m: 0.35,
+                kind: ControlKind::Classic,
+                light: false,
+            },
         }
     }
 
@@ -121,6 +154,9 @@ pub(crate) enum Param {
     BurnTime,
     Scale,
     Mass,
+    Span,
+    Chord,
+    Sweep,
 }
 
 impl Param {
@@ -131,6 +167,9 @@ impl Param {
             Self::BurnTime => "Burn time (s)",
             Self::Scale => "Engine scale",
             Self::Mass => "Mass (kg)",
+            Self::Span => "Span (m)",
+            Self::Chord => "Chord (m)",
+            Self::Sweep => "Sweep (deg)",
         }
     }
 
@@ -141,6 +180,9 @@ impl Param {
             Self::BurnTime => 1.0,
             Self::Scale => 0.1,
             Self::Mass => 5.0,
+            Self::Span => 0.05,
+            Self::Chord => 0.05,
+            Self::Sweep => 5.0,
         }
     }
 }
@@ -164,7 +206,206 @@ pub(crate) fn params_of(spec: &PartSpec) -> Vec<(Param, f64)> {
             vec![(Param::Scale, scale)]
         }
         PartSpec::MissionModule { mass_kg } => vec![(Param::Mass, mass_kg)],
+        PartSpec::Wing {
+            span_m,
+            chord_m,
+            sweep_deg,
+            ..
+        } => vec![
+            (Param::Span, span_m),
+            (Param::Chord, chord_m),
+            (Param::Sweep, sweep_deg),
+        ],
+        PartSpec::FinSet { span_m, chord_m, .. } | PartSpec::ControlSurface { span_m, chord_m, .. } => {
+            vec![(Param::Span, span_m), (Param::Chord, chord_m)]
+        }
         _ => Vec::new(),
+    }
+}
+
+/// Discrete design choices of an aerodynamic part, cycled from the inspector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AeroChoice {
+    Planform,
+    Profile,
+    Role,
+    Layout,
+    ControlKind,
+    Light,
+}
+
+impl AeroChoice {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Planform => "PLANFORM",
+            Self::Profile => "PROFILE",
+            Self::Role => "STABILISER",
+            Self::Layout => "LAYOUT",
+            Self::ControlKind => "SURFACE",
+            Self::Light => "BUILD",
+        }
+    }
+}
+
+pub(crate) fn choices_of(spec: &PartSpec) -> Vec<AeroChoice> {
+    match *spec {
+        PartSpec::Wing { .. } => vec![AeroChoice::Planform, AeroChoice::Profile, AeroChoice::Light],
+        PartSpec::FinSet { .. } => vec![AeroChoice::Role, AeroChoice::Layout, AeroChoice::Light],
+        PartSpec::ControlSurface { .. } => vec![AeroChoice::ControlKind, AeroChoice::Light],
+        _ => Vec::new(),
+    }
+}
+
+pub(crate) fn choice_value(spec: &PartSpec, choice: AeroChoice) -> String {
+    match (*spec, choice) {
+        (PartSpec::Wing { planform, .. }, AeroChoice::Planform) => planform.label().to_string(),
+        (PartSpec::Wing { profile, .. }, AeroChoice::Profile) => profile.label().to_string(),
+        (PartSpec::FinSet { role, .. }, AeroChoice::Role) => role.label().to_string(),
+        (PartSpec::FinSet { layout, .. }, AeroChoice::Layout) => layout.label().to_string(),
+        (PartSpec::ControlSurface { kind, .. }, AeroChoice::ControlKind) => kind.label().to_string(),
+        (
+            PartSpec::Wing { light, .. } | PartSpec::FinSet { light, .. } | PartSpec::ControlSurface { light, .. },
+            AeroChoice::Light,
+        ) => if light { "LIGHT" } else { "STANDARD" }.to_string(),
+        _ => "-".to_string(),
+    }
+}
+
+/// Advance one discrete design choice; `None` when the part does not offer it.
+pub(crate) fn cycled(spec: PartSpec, choice: AeroChoice) -> Option<PartSpec> {
+    let toggled = |light: bool| !light;
+    match (spec, choice) {
+        (
+            PartSpec::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                planform,
+                profile,
+                light,
+            },
+            AeroChoice::Planform,
+        ) => Some(PartSpec::Wing {
+            span_m,
+            chord_m,
+            sweep_deg,
+            planform: planform.next(),
+            profile,
+            light,
+        }),
+        (
+            PartSpec::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                planform,
+                profile,
+                light,
+            },
+            AeroChoice::Profile,
+        ) => Some(PartSpec::Wing {
+            span_m,
+            chord_m,
+            sweep_deg,
+            planform,
+            profile: profile.next(),
+            light,
+        }),
+        (
+            PartSpec::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                planform,
+                profile,
+                light,
+            },
+            AeroChoice::Light,
+        ) => Some(PartSpec::Wing {
+            span_m,
+            chord_m,
+            sweep_deg,
+            planform,
+            profile,
+            light: toggled(light),
+        }),
+        (
+            PartSpec::FinSet {
+                span_m,
+                chord_m,
+                role,
+                layout,
+                light,
+            },
+            AeroChoice::Role,
+        ) => Some(PartSpec::FinSet {
+            span_m,
+            chord_m,
+            role: role.next(),
+            layout,
+            light,
+        }),
+        (
+            PartSpec::FinSet {
+                span_m,
+                chord_m,
+                role,
+                layout,
+                light,
+            },
+            AeroChoice::Layout,
+        ) => Some(PartSpec::FinSet {
+            span_m,
+            chord_m,
+            role,
+            layout: layout.next(),
+            light,
+        }),
+        (
+            PartSpec::FinSet {
+                span_m,
+                chord_m,
+                role,
+                layout,
+                light,
+            },
+            AeroChoice::Light,
+        ) => Some(PartSpec::FinSet {
+            span_m,
+            chord_m,
+            role,
+            layout,
+            light: toggled(light),
+        }),
+        (
+            PartSpec::ControlSurface {
+                span_m,
+                chord_m,
+                kind,
+                light,
+            },
+            AeroChoice::ControlKind,
+        ) => Some(PartSpec::ControlSurface {
+            span_m,
+            chord_m,
+            kind: kind.next(),
+            light,
+        }),
+        (
+            PartSpec::ControlSurface {
+                span_m,
+                chord_m,
+                kind,
+                light,
+            },
+            AeroChoice::Light,
+        ) => Some(PartSpec::ControlSurface {
+            span_m,
+            chord_m,
+            kind,
+            light: toggled(light),
+        }),
+        _ => None,
     }
 }
 
@@ -226,6 +467,120 @@ pub(crate) fn adjusted(spec: PartSpec, param: Param, direction: f64) -> Option<P
         (PartSpec::MissionModule { mass_kg }, Param::Mass) => PartSpec::MissionModule {
             mass_kg: round((mass_kg + delta).clamp(1.0, 300.0)),
         },
+        (
+            PartSpec::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                planform,
+                profile,
+                light,
+            },
+            Param::Span,
+        ) => PartSpec::Wing {
+            span_m: round((span_m + delta).clamp(0.2, 4.0)),
+            chord_m,
+            sweep_deg,
+            planform,
+            profile,
+            light,
+        },
+        (
+            PartSpec::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                planform,
+                profile,
+                light,
+            },
+            Param::Chord,
+        ) => PartSpec::Wing {
+            span_m,
+            chord_m: round((chord_m + delta).clamp(0.1, 2.0)),
+            sweep_deg,
+            planform,
+            profile,
+            light,
+        },
+        (
+            PartSpec::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                planform,
+                profile,
+                light,
+            },
+            Param::Sweep,
+        ) => PartSpec::Wing {
+            span_m,
+            chord_m,
+            sweep_deg: round((sweep_deg + delta).clamp(0.0, 60.0)),
+            planform,
+            profile,
+            light,
+        },
+        (
+            PartSpec::FinSet {
+                span_m,
+                chord_m,
+                role,
+                layout,
+                light,
+            },
+            Param::Span,
+        ) => PartSpec::FinSet {
+            span_m: round((span_m + delta).clamp(0.2, 4.0)),
+            chord_m,
+            role,
+            layout,
+            light,
+        },
+        (
+            PartSpec::FinSet {
+                span_m,
+                chord_m,
+                role,
+                layout,
+                light,
+            },
+            Param::Chord,
+        ) => PartSpec::FinSet {
+            span_m,
+            chord_m: round((chord_m + delta).clamp(0.1, 2.0)),
+            role,
+            layout,
+            light,
+        },
+        (
+            PartSpec::ControlSurface {
+                span_m,
+                chord_m,
+                kind,
+                light,
+            },
+            Param::Span,
+        ) => PartSpec::ControlSurface {
+            span_m: round((span_m + delta).clamp(0.2, 4.0)),
+            chord_m,
+            kind,
+            light,
+        },
+        (
+            PartSpec::ControlSurface {
+                span_m,
+                chord_m,
+                kind,
+                light,
+            },
+            Param::Chord,
+        ) => PartSpec::ControlSurface {
+            span_m,
+            chord_m: round((chord_m + delta).clamp(0.1, 2.0)),
+            kind,
+            light,
+        },
         _ => return None,
     };
     Some(changed)
@@ -240,6 +595,10 @@ pub(crate) enum MissileAction {
         id: String,
     },
     Adjust(Param, i8),
+    CycleAero(AeroChoice),
+    /// Keep the current aerodynamic figures as the A side of a comparison.
+    CompareAero,
+    ClearComparison,
     RemovePart,
     Preset(u8),
     Clear,
@@ -259,6 +618,8 @@ pub(crate) struct MissileSession {
     redo: Vec<Vehicle>,
     /// The continuous wheel gesture in progress: its snapshot is pushed once, on the first notch.
     wheel_gesture: Option<((String, Param), Instant)>,
+    /// Aerodynamic figures kept as the A side of the workshop comparison.
+    pub comparison: Option<omega_rules::AeroFigures>,
 }
 
 impl Default for MissileSession {
@@ -271,6 +632,7 @@ impl Default for MissileSession {
             undo: Vec::new(),
             redo: Vec::new(),
             wheel_gesture: None,
+            comparison: None,
         }
     }
 }
@@ -399,6 +761,15 @@ impl MissileSession {
                 String::new()
             }
             MissileAction::Adjust(param, direction) => self.adjust_selected(param, direction, true),
+            MissileAction::CycleAero(choice) => self.cycle_aero(choice, owned),
+            MissileAction::CompareAero => {
+                self.comparison = Some(self.vehicle.aero());
+                "Aerodynamic snapshot A saved; edit the design to compare".to_string()
+            }
+            MissileAction::ClearComparison => {
+                self.comparison = None;
+                "Comparison cleared".to_string()
+            }
             MissileAction::RemovePart => {
                 let Some(id) = self.selected.clone() else {
                     return "Select a part first".to_string();
@@ -438,6 +809,7 @@ impl MissileSession {
                     parts: Vec::new(),
                 };
                 self.selected = None;
+                self.comparison = None;
                 "Started an empty vehicle: drag a part from the palette".to_string()
             }
             MissileAction::CycleSymmetry => self.cycle_symmetry(),
@@ -534,6 +906,53 @@ impl MissileSession {
         format!("Symmetry x{}", self.symmetry)
     }
 
+    fn cycle_aero(&mut self, choice: AeroChoice, owned: &BTreeSet<String>) -> String {
+        let Some(id) = self.selected.clone() else {
+            return "Select a part first".to_string();
+        };
+        let Some(part) = self.vehicle.part(&id) else {
+            return "That part is no longer there".to_string();
+        };
+        match cycled(part.spec, choice) {
+            Some(spec) => {
+                if let Some(missing) = spec
+                    .extra_capabilities()
+                    .into_iter()
+                    .find(|capability| !owned.contains(*capability))
+                {
+                    return format!(
+                        "Locked: research {} first",
+                        omega_rules::research::capability_label(missing)
+                    );
+                }
+                self.push_undo();
+                self.vehicle.replace_part(&id, spec);
+                format!("{id}: {} {}", choice.label(), choice_value(&spec, choice))
+            }
+            None => "This part has no such setting".to_string(),
+        }
+    }
+
+    /// A free radial mount for a surface: the selection first, then the rest of the assembly from
+    /// the top down. Surfaces are leaves, so a body with a free radial slot is required.
+    fn aero_mount(&self, spec: &PartSpec) -> Option<(String, omega_rules::NodeId, f64)> {
+        let candidates = std::iter::once(self.selected.clone())
+            .flatten()
+            .chain(self.vehicle.poses().into_iter().rev().map(|pose| pose.id));
+        for id in candidates {
+            let Some(part) = self.vehicle.part(&id) else {
+                continue;
+            };
+            for index in 0..omega_rules::assembly::radial_slots(&part.spec) {
+                let node = omega_rules::NodeId::Radial(index);
+                if self.vehicle.node_status(&id, node, spec).is_ok() {
+                    return Some((id, node, f64::from(index) * 90.0));
+                }
+            }
+        }
+        None
+    }
+
     /// Remove the selected part (and its subtree). Returns the message to show.
     pub fn delete_selected(&mut self) -> String {
         self.wheel_gesture = None;
@@ -578,11 +997,26 @@ impl MissileSession {
             self.selected = Some(existing.clone());
             return format!("Flight computer {existing} set to {}", template.label());
         }
-        // Without an explicit node, mount above the stack (or become the root of an empty design).
-        let target = match target {
-            None if !self.vehicle.is_empty() => self.vehicle.topmost_id().map(|id| (id, omega_rules::NodeId::Top, 0.0)),
-            other => other,
+        // A surface is a leaf on a radial mount: an explicit radial drop is used as is, a palette
+        // click finds the first free radial slot. Everything else mounts above the stack.
+        let target = if spec.is_aero() {
+            match target {
+                Some((parent, node, angle)) if node.is_radial() && self.vehicle.part(&parent).is_some() => {
+                    Some((parent, node, angle))
+                }
+                _ => self.aero_mount(&spec),
+            }
+        } else {
+            match target {
+                None if !self.vehicle.is_empty() => {
+                    self.vehicle.topmost_id().map(|id| (id, omega_rules::NodeId::Top, 0.0))
+                }
+                other => other,
+            }
         };
+        if spec.is_aero() && target.is_none() {
+            return "No free radial mount: select a body part with a free side".to_string();
+        }
         let mut placements: Vec<(omega_rules::NodeId, f64)> = Vec::new();
         if let Some((parent, node, angle)) = &target {
             if self.vehicle.part(parent).is_none() {
@@ -593,7 +1027,7 @@ impl MissileSession {
                     omega_rules::NodeId::Radial(index) => *index,
                     _ => 0,
                 };
-                placements = Vehicle::symmetry_slots(parent, &spec, first, self.symmetry);
+                placements = self.vehicle.symmetry_slots(parent, &spec, first, self.symmetry);
             } else {
                 placements.push((*node, *angle));
             }
@@ -803,6 +1237,8 @@ pub(crate) enum Shape {
     Nozzle,
     Sensor,
     Disc,
+    /// Flat plate: span outward from the mount, chord along the body.
+    Surface,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -813,6 +1249,10 @@ pub(crate) struct PartBox {
     pub y_bottom: f32,
     pub height: f32,
     pub radius: f32,
+    /// Full span of a surface plate, 0 for bodies.
+    pub span: f32,
+    /// Clockwise mount angle in degrees, used to orient the plate.
+    pub angle: f32,
     pub shape: Shape,
     pub color: [f32; 3],
 }
@@ -838,6 +1278,14 @@ fn appearance(spec: &PartSpec) -> (Shape, [f32; 3]) {
         PartSpec::Computer { .. } => (Shape::Disc, [0.40, 0.78, 0.40]),
         PartSpec::Decoupler => (Shape::Disc, [0.95, 0.80, 0.20]),
         PartSpec::MissionModule { .. } => (Shape::Body, [0.40, 0.55, 0.92]),
+        PartSpec::Wing { .. } => (Shape::Surface, [0.32, 0.72, 0.86]),
+        PartSpec::FinSet { .. } => (Shape::Surface, [0.55, 0.80, 0.62]),
+        // Fixed surfaces are grey, moving ones amber, so the two read differently in 3D.
+        PartSpec::ControlSurface {
+            kind: ControlKind::Fixed,
+            ..
+        } => (Shape::Surface, [0.62, 0.64, 0.68]),
+        PartSpec::ControlSurface { .. } => (Shape::Surface, [0.90, 0.72, 0.28]),
     }
 }
 
@@ -848,8 +1296,13 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
         .poses()
         .into_iter()
         .filter_map(|pose| {
-            let spec = vehicle.part(&pose.id)?.spec;
+            let part = vehicle.part(&pose.id)?;
+            let spec = part.spec;
             let (shape, color) = appearance(&spec);
+            let angle = part.attach.as_ref().map_or(0.0, |attach| match attach.node {
+                omega_rules::NodeId::Radial(index) => f64::from(index) * 90.0 + attach.angle_deg,
+                _ => attach.angle_deg,
+            });
             Some(PartBox {
                 id: pose.id,
                 x: pose.x_m as f32,
@@ -857,6 +1310,12 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
                 y_bottom: (pose.y_m - pose.height_m / 2.0) as f32,
                 height: pose.height_m as f32,
                 radius: pose.radius_m as f32,
+                span: if spec.is_aero() {
+                    (pose.radius_m * 2.0) as f32
+                } else {
+                    0.0
+                },
+                angle: angle as f32,
                 shape,
                 color,
             })
@@ -941,14 +1400,20 @@ pub(crate) fn sync_missile_visuals(
                 ..default()
             });
             let mid = b.y_bottom + b.height / 2.0;
-            let mesh = match b.shape {
-                Shape::Nozzle => meshes.add(Cone::new(b.radius, b.height)),
-                Shape::Body | Shape::Sensor | Shape::Disc => meshes.add(Cylinder::new(b.radius, b.height)),
+            let (mesh, rotation) = match b.shape {
+                Shape::Nozzle => (meshes.add(Cone::new(b.radius, b.height)), Quat::IDENTITY),
+                Shape::Body | Shape::Sensor | Shape::Disc => {
+                    (meshes.add(Cylinder::new(b.radius, b.height)), Quat::IDENTITY)
+                }
+                Shape::Surface => (
+                    meshes.add(Cuboid::new(b.span.max(0.05), b.height.max(0.02), 0.06)),
+                    Quat::from_rotation_y(-b.angle.to_radians()),
+                ),
             };
             root.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_xyz(b.x, mid, b.z),
+                Transform::from_xyz(b.x, mid, b.z).with_rotation(rotation),
             ));
         }
         if !boxes.is_empty() {
@@ -1292,13 +1757,134 @@ mod tests {
     }
 
     #[test]
-    fn legacy_files_load_and_save_as_schema_three() {
+    fn legacy_files_load_and_save_as_schema_four() {
         let legacy = br#"{"name":"Old","stages":[{"parts":[{"id":"m","spec":{"part":"solid_motor","length_m":2.0,"diameter_m":0.4,"burn_time_s":20.0}},{"id":"pc","spec":{"part":"computer","class":"basic"}}]}]}"#;
         let session = MissileSession::from_bytes(legacy).unwrap();
         assert_eq!(session.vehicle.stage_count(), 1);
+        assert_eq!(session.vehicle.aero().surface_count, 0);
         let saved = String::from_utf8(session.to_bytes().unwrap()).unwrap();
-        assert!(saved.contains("\"schema_version\": 3"), "{saved}");
+        assert!(saved.contains("\"schema_version\": 4"), "{saved}");
         let again = MissileSession::from_bytes(saved.as_bytes()).unwrap();
         assert_eq!(again.vehicle, session.vehicle);
+    }
+
+    #[test]
+    fn wings_are_added_to_a_radial_mount_and_mirror_with_symmetry() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.symmetry = 4;
+        let message = session.add_at(
+            PartTemplate::Wing,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        assert!(message.contains("4 copies"), "{message}");
+        let aero = session.vehicle.aero();
+        assert_eq!(aero.surface_count, 4);
+        assert!(aero.wing_area_m2 > 1.0);
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+        let slots: BTreeSet<_> = session
+            .vehicle
+            .parts
+            .iter()
+            .filter(|part| part.id.starts_with("wing-"))
+            .filter_map(|part| part.attach.as_ref().map(|attach| attach.node))
+            .collect();
+        assert_eq!(slots.len(), 4);
+        // A palette click finds another free radial mount instead of stacking on the axis.
+        session.symmetry = 1;
+        let added = session.add_at(PartTemplate::Wing, None, &owned);
+        assert!(added.contains("Added"), "{added}");
+        assert_eq!(session.vehicle.aero().surface_count, 5);
+        let extra = session.selected.clone().unwrap();
+        assert!(
+            session
+                .vehicle
+                .part(&extra)
+                .unwrap()
+                .attach
+                .as_ref()
+                .unwrap()
+                .node
+                .is_radial()
+        );
+    }
+
+    #[test]
+    fn clicking_an_aero_part_finds_a_free_radial_slot() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.apply(MissileAction::Clear, &owned);
+        session.apply(MissileAction::AddPart(PartTemplate::SolidMotor), &owned);
+        session.apply(MissileAction::AddPart(PartTemplate::ComputerBasic), &owned);
+        let motor = session
+            .vehicle
+            .parts
+            .iter()
+            .find(|part| matches!(part.spec, PartSpec::SolidMotor { .. }))
+            .map(|part| part.id.clone())
+            .unwrap();
+        session.apply(MissileAction::Select { id: motor.clone() }, &owned);
+        let message = session.add_at(PartTemplate::FinSet, None, &owned);
+        assert!(message.contains("Added"), "{message}");
+        let fin = session.selected.clone().unwrap();
+        let attach = session.vehicle.part(&fin).unwrap().attach.as_ref().unwrap();
+        assert_eq!(attach.parent, motor);
+        assert!(attach.node.is_radial());
+        assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
+    }
+
+    #[test]
+    fn cycling_design_choices_changes_the_figures_and_respects_research() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.add_at(
+            PartTemplate::Wing,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let wing = session.selected.clone().unwrap();
+        let before = session.vehicle.aero();
+        session.apply(MissileAction::CycleAero(AeroChoice::Planform), &owned);
+        let delta = session.vehicle.aero();
+        assert_ne!(delta.lift, before.lift);
+        assert!(delta.lift > before.lift, "a delta wing lifts more");
+        session.undo();
+        assert_eq!(session.vehicle.aero().lift, before.lift);
+
+        session.apply(MissileAction::Select { id: wing.clone() }, &owned);
+        session.apply(MissileAction::CycleAero(AeroChoice::Light), &owned);
+        let light = session.vehicle.aero();
+        assert!(light.mass_kg < before.mass_kg);
+        session.undo();
+
+        // Experimental profiles are gated by the advanced aerodynamics research.
+        let mut limited = everything_owned();
+        limited.remove("aero:advanced_profiles");
+        session.apply(MissileAction::Select { id: wing.clone() }, &owned);
+        session.apply(MissileAction::CycleAero(AeroChoice::Profile), &limited); // LOW DRAG
+        session.apply(MissileAction::CycleAero(AeroChoice::Profile), &limited); // HIGH LIFT
+        let refused = session.apply(MissileAction::CycleAero(AeroChoice::Profile), &limited);
+        assert!(refused.contains("Locked"), "experimental profile: {refused}");
+        let accepted = session.apply(MissileAction::CycleAero(AeroChoice::Profile), &owned);
+        assert!(accepted.contains("EXPERIMENTAL"), "{accepted}");
+    }
+
+    #[test]
+    fn the_aero_comparison_keeps_the_previous_configuration() {
+        let mut session = MissileSession::new_default();
+        assert!(session.comparison.is_none());
+        session.apply(MissileAction::CompareAero, &starting());
+        let saved = session.comparison.clone().unwrap();
+        assert_eq!(saved.surface_count, 0);
+        let owned = everything_owned();
+        session.add_at(
+            PartTemplate::FinSet,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        assert!(session.vehicle.aero().stability > saved.stability);
+        session.apply(MissileAction::ClearComparison, &owned);
+        assert!(session.comparison.is_none());
     }
 }

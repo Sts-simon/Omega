@@ -7,7 +7,7 @@
 
 use crate::campus::{CampusState, CampusView};
 use crate::missile::{self, MissileSession, PartTemplate};
-use crate::picking::{SNAP_PIXELS, nearest_part, nearest_snap};
+use crate::picking::{PickShape, SNAP_PIXELS, nearest_hit, nearest_snap};
 
 /// Pixels the pointer must travel before a press on a part becomes a move.
 const DRAG_PIXELS: f32 = 5.0;
@@ -76,6 +76,9 @@ fn free_nodes(vehicle: &Vehicle, anchor: Vec3) -> Vec<NodePoint> {
         let Some(part) = vehicle.part(&pose.id) else {
             continue;
         };
+        if part.spec.is_aero() {
+            continue; // a surface is a leaf: it offers no attachment node
+        }
         let center = world_of(anchor, pose.x_m, pose.y_m, pose.z_m);
         let half = pose.height_m as f32 * missile::VISUAL_SCALE * 0.5;
         if is_free(&pose.id, NodeId::Top) {
@@ -111,21 +114,44 @@ fn free_nodes(vehicle: &Vehicle, anchor: Vec3) -> Vec<NodePoint> {
     nodes
 }
 
+const SURFACE_HALF_THICKNESS_M: f32 = 0.05;
+
 fn picked_part(vehicle: &Vehicle, origin: Vec3, direction: Vec3) -> Option<String> {
     let anchor = missile::ANCHOR;
-    let parts: Vec<(Vec3, f32, f32)> = vehicle
-        .poses()
-        .into_iter()
+    let poses = vehicle.poses();
+    let shapes: Vec<PickShape> = poses
+        .iter()
         .map(|pose| {
-            (
-                world_of(anchor, pose.x_m, pose.y_m, pose.z_m),
-                (pose.radius_m as f32).max(0.12) * missile::VISUAL_SCALE,
-                pose.height_m as f32 * missile::VISUAL_SCALE,
-            )
+            let center = world_of(anchor, pose.x_m, pose.y_m, pose.z_m);
+            let scale = missile::VISUAL_SCALE;
+            let part = vehicle.part(&pose.id);
+            if part.is_some_and(|part| part.spec.is_aero()) {
+                let angle = part
+                    .and_then(|part| part.attach.as_ref())
+                    .map_or(0.0, |attach| match attach.node {
+                        NodeId::Radial(index) => f64::from(index) * 90.0 + attach.angle_deg,
+                        _ => attach.angle_deg,
+                    });
+                PickShape::Box {
+                    center,
+                    half: Vec3::new(
+                        (pose.radius_m as f32) * scale,
+                        (pose.height_m as f32) * scale * 0.5,
+                        SURFACE_HALF_THICKNESS_M * scale,
+                    ),
+                    yaw: (angle as f32).to_radians(),
+                }
+            } else {
+                PickShape::Cylinder {
+                    center,
+                    radius: (pose.radius_m as f32).max(0.12) * scale,
+                    half_height: (pose.height_m as f32) * scale * 0.5,
+                }
+            }
         })
         .collect();
-    let ids: Vec<String> = vehicle.poses().into_iter().map(|pose| pose.id).collect();
-    let (index, _) = nearest_part(origin, direction, &parts)?;
+    let ids: Vec<String> = poses.into_iter().map(|pose| pose.id).collect();
+    let (index, _) = nearest_hit(origin, direction, &shapes)?;
     ids.get(index).cloned()
 }
 
@@ -326,6 +352,45 @@ pub(crate) fn workshop_pointer(
         input.wheel_used = true;
     }
     input.drag_active = drag.source.is_some() || drag.pending.is_some();
+
+    // The palette, drag, wheel and keyboard paths edit the design directly while the inspector's
+    // buttons go through `UiAction`, which saves on its own. Saving here too means a palette-only
+    // edit (adding a wing, moving a fin) survives the next launch instead of only living in memory.
+    if session.is_changed()
+        && let Err(error) = missile::persist_missile(&session)
+    {
+        warn!("Could not save the vehicle: {error}");
+    }
+}
+
+/// Centre-of-gravity and centre-of-aerodynamics markers plus the acceptable middle band. Drawn
+/// only in the workshop, and only when the design has at least one aerodynamic surface.
+pub(crate) fn draw_aero_markers(session: Res<MissileSession>, campus: Res<CampusState>, mut gizmos: Gizmos) {
+    if campus.view != CampusView::Missile {
+        return;
+    }
+    let figures = session.vehicle.aero();
+    if figures.surface_count == 0 {
+        return;
+    }
+    let scale = missile::VISUAL_SCALE;
+    let anchor = missile::ANCHOR;
+    let at = |y: f64| anchor + Vec3::Y * (y as f32) * scale;
+    let cg = at(figures.cg_y_m);
+    let ca = at(figures.ca_y_m);
+    let (low, high) = figures.stable_band_m();
+    // Acceptable CA positions sit behind the CG: between cg - high and cg - low.
+    gizmos.line(
+        at(figures.cg_y_m - high),
+        at(figures.cg_y_m - low),
+        Color::srgba(0.45, 0.85, 0.55, 0.7),
+    );
+    gizmos.line(cg, ca, Color::srgba(0.85, 0.88, 0.92, 0.45));
+    gizmos.sphere(Isometry3d::from_translation(cg), 0.22, Color::srgb(0.95, 0.82, 0.25));
+    gizmos.cube(
+        Transform::from_translation(ca).with_scale(Vec3::splat(0.30)),
+        Color::srgb(0.30, 0.85, 0.95),
+    );
 }
 
 /// The palette builds its own buttons so they can carry `PalettePart` and be dragged; a plain

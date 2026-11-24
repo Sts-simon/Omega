@@ -47,13 +47,81 @@ pub fn ray_cylinder(origin: Vec3, direction: Vec3, center: Vec3, radius: f32, ha
     best
 }
 
-/// The part whose surface the ray reaches first, as an index into `parts` (origin, radius, height).
-pub fn nearest_part(origin: Vec3, direction: Vec3, parts: &[(Vec3, f32, f32)]) -> Option<(usize, f32)> {
-    parts
+/// What the pointer can hit. Bodies are cylinders; wings, fins and control surfaces are thin
+/// oriented plates with their span on the local X axis and a yaw about Y.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PickShape {
+    Cylinder {
+        center: Vec3,
+        radius: f32,
+        half_height: f32,
+    },
+    Box {
+        center: Vec3,
+        half: Vec3,
+        /// Rotation about Y in radians, matching the 3D mesh.
+        yaw: f32,
+    },
+}
+
+fn ray_box(origin: Vec3, direction: Vec3, center: Vec3, half: Vec3, yaw: f32) -> Option<f32> {
+    let (sin, cos) = (-yaw).sin_cos();
+    let offset = origin - center;
+    // Rotate the ray into the box's local frame (inverse of the render rotation).
+    let local_origin = Vec3::new(
+        offset.x * cos - offset.z * sin,
+        offset.y,
+        offset.x * sin + offset.z * cos,
+    );
+    let local_direction = Vec3::new(
+        direction.x * cos - direction.z * sin,
+        direction.y,
+        direction.x * sin + direction.z * cos,
+    );
+    let mut near = f32::NEG_INFINITY;
+    let mut far = f32::INFINITY;
+    for axis in 0..3 {
+        let d = local_direction[axis];
+        let o = local_origin[axis];
+        let h = half[axis];
+        if d.abs() < 1e-9 {
+            if o.abs() > h {
+                return None;
+            }
+            continue;
+        }
+        let t1 = (-h - o) / d;
+        let t2 = (h - o) / d;
+        near = near.max(t1.min(t2));
+        far = far.min(t1.max(t2));
+        if near > far {
+            return None;
+        }
+    }
+    if far > 0.0 && near > 0.0 {
+        Some(near)
+    } else if far > 0.0 {
+        Some(far)
+    } else {
+        None
+    }
+}
+
+/// Nearest hit among mixed shapes, as an index into `shapes`.
+pub fn nearest_hit(origin: Vec3, direction: Vec3, shapes: &[PickShape]) -> Option<(usize, f32)> {
+    shapes
         .iter()
         .enumerate()
-        .filter_map(|(index, (center, radius, height))| {
-            ray_cylinder(origin, direction, *center, *radius, *height * 0.5).map(|t| (index, t))
+        .filter_map(|(index, shape)| {
+            let t = match *shape {
+                PickShape::Cylinder {
+                    center,
+                    radius,
+                    half_height,
+                } => ray_cylinder(origin, direction, center, radius, half_height),
+                PickShape::Box { center, half, yaw } => ray_box(origin, direction, center, half, yaw),
+            };
+            t.map(|t| (index, t))
         })
         .min_by(|(_, a), (_, b)| a.total_cmp(b))
 }
@@ -105,11 +173,72 @@ mod tests {
 
     #[test]
     fn the_nearest_part_wins() {
-        let parts = [
-            (Vec3::new(0.0, 5.0, 0.0), 0.4, 1.0),
-            (Vec3::new(0.0, 2.0, 0.0), 0.4, 1.0),
+        let shapes = [
+            PickShape::Cylinder {
+                center: Vec3::new(0.0, 5.0, 0.0),
+                radius: 0.4,
+                half_height: 0.5,
+            },
+            PickShape::Cylinder {
+                center: Vec3::new(0.0, 2.0, 0.0),
+                radius: 0.4,
+                half_height: 0.5,
+            },
         ];
-        let (index, _) = nearest_part(Vec3::new(0.0, 10.0, 0.0), down(), &parts).unwrap();
+        let (index, _) = nearest_hit(Vec3::new(0.0, 10.0, 0.0), down(), &shapes).unwrap();
+        assert_eq!(index, 0);
+    }
+
+    #[test]
+    fn a_box_is_hit_on_its_plate_and_rotates_with_its_mount() {
+        // A wing plate 2 m wide (local X), 0.4 m chord, 0.06 m thick, at the origin, yawed 90°.
+        let half = Vec3::new(1.0, 0.2, 0.03);
+        let from_above = nearest_hit(
+            Vec3::new(0.0, 5.0, 0.0),
+            down(),
+            &[PickShape::Box {
+                center: Vec3::ZERO,
+                half,
+                yaw: 0.0,
+            }],
+        );
+        assert!(from_above.is_some(), "the plate is hit from above");
+        // Yawed by 90°, the wide axis now runs along Z: a ray along X passes through it.
+        let rotated = PickShape::Box {
+            center: Vec3::ZERO,
+            half,
+            yaw: std::f32::consts::FRAC_PI_2,
+        };
+        assert!(nearest_hit(Vec3::new(5.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0), &[rotated]).is_some());
+        let edge = nearest_hit(
+            Vec3::new(0.0, 5.0, 3.0),
+            down(),
+            &[PickShape::Box {
+                center: Vec3::ZERO,
+                half,
+                yaw: 0.0,
+            }],
+        );
+        assert!(edge.is_none(), "outside the plate's span");
+    }
+
+    #[test]
+    fn mixed_shapes_report_the_nearest_hit() {
+        let shapes = [
+            PickShape::Cylinder {
+                center: Vec3::new(0.0, 0.0, 0.0),
+                radius: 0.4,
+                half_height: 1.0,
+            },
+            PickShape::Box {
+                center: Vec3::new(0.0, 0.0, 2.0),
+                half: Vec3::new(1.0, 0.2, 0.03),
+                yaw: 0.0,
+            },
+        ];
+        let (index, _) = nearest_hit(Vec3::new(0.0, 5.0, 2.0), down(), &shapes).unwrap();
+        assert_eq!(index, 1);
+        let (index, _) = nearest_hit(Vec3::new(0.0, 5.0, 0.0), down(), &shapes).unwrap();
         assert_eq!(index, 0);
     }
 
