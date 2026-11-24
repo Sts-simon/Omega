@@ -1264,6 +1264,7 @@ impl MissileSession {
     }
 
     /// Apply a discrete transform as one undoable action.
+    #[cfg(test)]
     pub fn transform_selected(&mut self, axis: usize, amount: f64, rotate: bool) -> String {
         let before = self.vehicle.clone();
         let message = self.preview_transform(&before, axis, amount, rotate);
