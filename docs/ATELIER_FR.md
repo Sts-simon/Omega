@@ -20,6 +20,8 @@ L'arbre à droite affiche le nom lisible de chaque pièce, son point d'attache e
 
 ## Contrôles
 
+- **W** : outil de déplacement sur les axes X, Y et Z.
+- **R** : outil de rotation autour des axes X, Y et Z.
 - **F** : centrer la caméra sur la pièce sélectionnée.
 - **Début (Home)** : cadrer l'ensemble du véhicule.
 - **X** : changer le nombre de copies symétriques.
