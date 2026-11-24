@@ -1186,6 +1186,33 @@ impl MissileSession {
         }
     }
 
+    /// Rotate a mounted aerodynamic surface around its attachment axis.
+    /// The angle is a presentation/assembly choice and remains an abstract gameplay parameter.
+    pub fn rotate_selected(&mut self, direction: i8) -> String {
+        self.wheel_gesture = None;
+        let Some(id) = self.selected.clone() else {
+            return "Select an aerodynamic surface first".to_string();
+        };
+        let Some(part) = self.vehicle.part(&id) else {
+            return "That part is no longer there".to_string();
+        };
+        if !part.spec.is_aero() {
+            return "Only aerodynamic surfaces can be rotated here".to_string();
+        }
+        if part.attach.is_none() {
+            return "This surface has no attachment axis".to_string();
+        }
+        self.push_undo();
+        let Some(part) = self.vehicle.part_mut(&id) else {
+            return "That part is no longer there".to_string();
+        };
+        let Some(attach) = part.attach.as_mut() else {
+            return "This surface has no attachment axis".to_string();
+        };
+        attach.angle_deg = (attach.angle_deg + f64::from(direction) * 15.0).rem_euclid(360.0);
+        format!("{id}: rotation {:.0}°", attach.angle_deg)
+    }
+
     /// Move an existing part (with its subtree) to another node.
     pub fn move_part(&mut self, id: &str, parent: &str, node: omega_rules::NodeId, angle: f64) -> String {
         self.wheel_gesture = None;
