@@ -1395,6 +1395,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn three_axis_transforms_round_trip_in_schema_six() {
+        let mut vehicle = sounding_rocket();
+        let attach = vehicle.part_mut("pc").unwrap().attach.as_mut().unwrap();
+        attach.offset_x_m = 0.35;
+        attach.offset_y_m = -0.2;
+        attach.offset_z_m = 0.6;
+        attach.rotation_x_deg = 15.0;
+        attach.rotation_y_deg = 45.0;
+        attach.rotation_z_deg = 90.0;
+        let json = serde_json::to_string(&vehicle).unwrap();
+        assert!(json.contains("\"schema_version\":6"));
+        let restored: Vehicle = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, vehicle);
+    }
+
+    #[test]
     fn a_diameter_step_is_a_warning_not_an_error() {
         let vehicle = sounding_rocket();
         assert!(vehicle.validate().is_ok());
