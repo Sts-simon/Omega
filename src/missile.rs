@@ -2028,6 +2028,32 @@ mod tests {
     }
 
     #[test]
+    fn selected_aerodynamic_surface_rotates_and_can_be_undone() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.apply(MissileAction::Clear, &owned);
+        session.apply(MissileAction::AddPart(PartTemplate::SolidMotor), &owned);
+        let motor = session.selected.clone().unwrap();
+        session.add_at(
+            PartTemplate::FinSet,
+            Some((motor, omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let fin = session.selected.clone().unwrap();
+
+        assert!(session.rotate_selected(1).contains("15"));
+        assert_eq!(
+            session.vehicle.part(&fin).unwrap().attach.as_ref().unwrap().angle_deg,
+            15.0
+        );
+        session.undo();
+        assert_eq!(
+            session.vehicle.part(&fin).unwrap().attach.as_ref().unwrap().angle_deg,
+            0.0
+        );
+    }
+
+    #[test]
     fn cycling_design_choices_changes_the_figures_and_respects_research() {
         let mut session = MissileSession::new_default();
         let owned = everything_owned();
