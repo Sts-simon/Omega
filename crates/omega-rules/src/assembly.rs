@@ -14,8 +14,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Current `designs/vehicle.json` schema. 1-2 were the flat stage lists of the early workshops;
-/// 3 added the attachment graph, 4 the aerodynamic surfaces and 5 the mission electronics
-/// (older files load unchanged and are rewritten at the current version).
+/// 3 added the attachment graph, 4 the aerodynamic surfaces, 5 mission electronics and 6
+/// per-part three-axis transforms (older files load with zero offsets and rotations).
 pub const VEHICLE_SCHEMA: u32 = 6;
 /// A design may not grow beyond this many derived stages (the old workshop limit).
 pub const MAX_STAGES: usize = 4;
