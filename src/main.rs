@@ -71,6 +71,7 @@ fn main() {
                     campus::scroll_program_list,
                     campus::scroll_research_grid,
                     campus::scroll_part_list,
+                    workshop::draw_attachment_markers,
                     workshop::draw_aero_markers,
                     missile::sync_missile_visuals,
                     missile::focus_missile_camera,
