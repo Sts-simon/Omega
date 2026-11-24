@@ -224,13 +224,16 @@ pub(crate) fn workshop_pointer(
     let picked = ray.and_then(|(origin, direction)| picked_part(&session.vehicle, origin, direction));
 
     // KSP-style tool selection. W = translate, R = rotate; the coloured handles select X/Y/Z directly.
-    if keys.just_pressed(KeyCode::KeyW) {
-        transform_gizmo.mode = TransformMode::Translate;
+    if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::KeyR) {
+        if let Some(before) = transform_gizmo.before.take() {
+            session.vehicle = before;
+        }
         transform_gizmo.drag = None;
-    }
-    if keys.just_pressed(KeyCode::KeyR) {
-        transform_gizmo.mode = TransformMode::Rotate;
-        transform_gizmo.drag = None;
+        transform_gizmo.mode = if keys.just_pressed(KeyCode::KeyR) {
+            TransformMode::Rotate
+        } else {
+            TransformMode::Translate
+        };
     }
 
     // --- start a drag ---
@@ -415,10 +418,16 @@ pub(crate) fn workshop_pointer(
     }
 
     // --- keyboard ---
-    if keys.just_pressed(KeyCode::Escape) && (drag.source.is_some() || drag.pending.is_some()) {
+    if keys.just_pressed(KeyCode::Escape)
+        && (drag.source.is_some() || drag.pending.is_some() || transform_gizmo.drag.is_some())
+    {
         drag.source = None;
         drag.hover = None;
         drag.pending = None;
+        transform_gizmo.drag = None;
+        if let Some(before) = transform_gizmo.before.take() {
+            session.vehicle = before;
+        }
         campus.message = "Drag cancelled".to_string();
     }
     if drag.source.is_none() && transform_gizmo.drag.is_none() {
