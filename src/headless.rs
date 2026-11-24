@@ -255,7 +255,12 @@ fn run_import(args: &[String]) -> Result<String, String> {
     let input = read(Path::new(in_path))?;
     let bytes = import_bytes(&input)?;
     let slot = omega_data::SaveSlot::new(slot_dir);
-    crate::save::write_to(&slot, Path::new("saves"), crate::save::SaveFile::Vehicle, &bytes)?;
+    // The 0.21 files, if any, sit next to the slot, not in the process working directory.
+    let legacy = Path::new(slot_dir)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("saves"));
+    crate::save::write_to(&slot, legacy, crate::save::SaveFile::Vehicle, &bytes)?;
     Ok(format!("Imported the design into {slot_dir}"))
 }
 

@@ -3,7 +3,8 @@
 //! Every persistent file (campaign, vehicle, missile program, revisions, contracts) goes through
 //! here so that writes are atomic, listed in a manifest committed last, and verified by hash when
 //! read.
-//! Saves from 0.21 (`saves/*.json`) are imported once, without being modified or deleted.
+//! The 0.21 campaign file (`saves/campaign.json`) is imported once, without being modified or
+//! deleted; the civil-era files beside it are left alone because their schemas no longer exist.
 
 use bevy::log::{info, warn};
 use omega_data::{SaveSlot, SlotError};

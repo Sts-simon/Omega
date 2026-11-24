@@ -9,12 +9,11 @@ use std::path::{Component, Path, PathBuf};
 pub const CURRENT_SLOT_SCHEMA: u32 = 2;
 const MANIFEST_FILE: &str = "manifest.json";
 
-pub const LEGACY_FILES: [(&str, &str); 4] = [
-    ("campaign.json", "campaign.json"),
-    ("assembly.json", "designs/assembly.json"),
-    ("polygon-sketch.json", "designs/polygon-sketch.json"),
-    ("lab_sequence.json", "programs/lab_sequence.json"),
-];
+/// Files imported from the pre-0.22 `saves/` layout. Only the campaign outlived the missile-only
+/// reset: the civil assembly, polygon-sketch and lab-sequence schemas no longer exist, so copying
+/// them into the slot would add manifest entries the game cannot read — and one damaged dead file
+/// would then make every later `commit` fail through `verify_all`.
+pub const LEGACY_FILES: [(&str, &str); 1] = [("campaign.json", "campaign.json")];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManifestEntry {
@@ -462,11 +461,15 @@ mod tests {
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("campaign.json"), b"{\"credits\":1}").unwrap();
         fs::write(legacy.join("assembly.json"), b"{\"parts\":[]}").unwrap();
+        fs::write(legacy.join("polygon-sketch.json"), b"{}").unwrap();
         let slot = SaveSlot::new(dir.join("slot_1"));
         let manifest = slot.import_legacy(&legacy, "0.30.1").unwrap();
-        assert_eq!(manifest.files.len(), 2);
-        assert_eq!(slot.read_verified("designs/assembly.json").unwrap(), b"{\"parts\":[]}");
+        assert_eq!(manifest.files.len(), 1, "only the campaign is still readable");
+        assert_eq!(slot.read_verified("campaign.json").unwrap(), b"{\"credits\":1}");
+        assert!(!slot.root().join("designs/assembly.json").exists());
+        assert!(!slot.root().join("designs/polygon-sketch.json").exists());
         assert!(legacy.join("assembly.json").exists());
+        assert!(legacy.join("polygon-sketch.json").exists());
         assert!(matches!(
             slot.import_legacy(&legacy, "0.30.1"),
             Err(SlotError::AlreadyExists)
