@@ -1213,10 +1213,10 @@ impl MissileSession {
         format!("{id}: rotation {:.0}°", attach.angle_deg)
     }
 
-    /// Apply one KSP-style gizmo step to the selected mounted part.
-    /// Axis: 0 = X, 1 = Y, 2 = Z. Translation is in metres; rotation is in degrees.
-    pub fn transform_selected(&mut self, axis: usize, amount: f64, rotate: bool) -> String {
+    /// Preview a KSP gizmo transform from the drag's original design, without adding undo entries.
+    pub fn preview_transform(&mut self, before: &Vehicle, axis: usize, amount: f64, rotate: bool) -> String {
         self.wheel_gesture = None;
+        self.vehicle = before.clone();
         let Some(id) = self.selected.clone() else {
             return "Select a part first".to_string();
         };
@@ -1229,7 +1229,6 @@ impl MissileSession {
         if axis > 2 {
             return "Unknown transform axis".to_string();
         }
-        self.push_undo();
         let attach = self.vehicle.part_mut(&id).and_then(|part| part.attach.as_mut());
         let Some(attach) = attach else {
             return "That part is no longer there".to_string();
@@ -1251,6 +1250,22 @@ impl MissileSession {
             *value += amount;
             format!("{id}: translation {} {:+.2} m", ["X", "Y", "Z"][axis], *value)
         }
+    }
+
+    /// Commit a gizmo preview as one undoable edit when the mouse is released.
+    pub fn commit_transform(&mut self, before: Vehicle) {
+        if self.vehicle != before {
+            self.undo.push(before);
+            self.redo.clear();
+        }
+    }
+
+    /// Apply a discrete transform as one undoable action.
+    pub fn transform_selected(&mut self, axis: usize, amount: f64, rotate: bool) -> String {
+        let before = self.vehicle.clone();
+        let message = self.preview_transform(&before, axis, amount, rotate);
+        self.commit_transform(before);
+        message
     }
 
     /// Move an existing part (with its subtree) to another node.
