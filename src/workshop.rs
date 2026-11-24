@@ -244,19 +244,19 @@ pub(crate) fn workshop_pointer(
                 transform_gizmo.drag = Some((axis, cursor, handle));
             }
         }
-        if transform_gizmo.drag.is_none()
-            && let Some((interaction, palette)) = palettes.iter().find(|(i, _)| **i == UiInteraction::Pressed) {
-            let _ = interaction;
-            drag.source = Some(DragSource::Palette(palette.0));
-            drag.hover = None;
-        } else if !pointer_over_ui && let Some(id) = picked.clone() {
-            session.apply(missile::MissileAction::Select { id: id.clone() }, &owned);
-            drag.pending = session
-                .vehicle
-                .part(&id)
-                .is_some_and(|part| part.attach.is_some())
-                .then_some((cursor, DragSource::Part(id)));
-            drag.hover = None;
+        if transform_gizmo.drag.is_none() {
+            if let Some((_, palette)) = palettes.iter().find(|(i, _)| **i == UiInteraction::Pressed) {
+                drag.source = Some(DragSource::Palette(palette.0));
+                drag.hover = None;
+            } else if !pointer_over_ui && let Some(id) = picked.clone() {
+                session.apply(missile::MissileAction::Select { id: id.clone() }, &owned);
+                drag.pending = session
+                    .vehicle
+                    .part(&id)
+                    .is_some_and(|part| part.attach.is_some())
+                    .then_some((cursor, DragSource::Part(id)));
+                drag.hover = None;
+            }
         }
     }
     if mouse.pressed(MouseButton::Left) {
@@ -380,7 +380,7 @@ pub(crate) fn workshop_pointer(
             (Vec3::Y, Color::srgb(0.30, 0.90, 0.40)),
             (Vec3::Z, Color::srgb(0.25, 0.55, 1.0)),
         ];
-        for (axis, color) in axes {
+        for (axis_index, (axis, color)) in axes.into_iter().enumerate() {
             let end = center + axis * 1.5;
             gizmos.line(center, end, color);
             gizmos.sphere(Isometry3d::from_translation(end), 0.11, color);
@@ -388,9 +388,9 @@ pub(crate) fn workshop_pointer(
                 let mut previous = None;
                 for step in 0..=48 {
                     let angle = std::f32::consts::TAU * step as f32 / 48.0;
-                    let point = match axis {
-                        Vec3::X => center + Vec3::new(0.0, angle.cos(), angle.sin()) * 1.05,
-                        Vec3::Y => center + Vec3::new(angle.cos(), 0.0, angle.sin()) * 1.05,
+                    let point = match axis_index {
+                        0 => center + Vec3::new(0.0, angle.cos(), angle.sin()) * 1.05,
+                        1 => center + Vec3::new(angle.cos(), 0.0, angle.sin()) * 1.05,
                         _ => center + Vec3::new(angle.cos(), angle.sin(), 0.0) * 1.05,
                     };
                     if let Some(from) = previous {
