@@ -436,6 +436,9 @@ pub struct MissileTrial {
     pub lifted_off: bool,
     pub separated: bool,
     pub lock_acquired: Option<bool>,
+    /// Abstract aerodynamic stability the design had during the trial (0..100).
+    #[serde(default)]
+    pub stability: f64,
 }
 
 impl MissileTrial {
@@ -457,6 +460,7 @@ impl MissileTrial {
             lifted_off: report.lifted_off,
             separated: report.events.iter().any(|(_, label)| label.contains("separated")),
             lock_acquired: report.lock.map(|lock| lock.success),
+            stability: report.aero.stability,
         }
     }
 
@@ -479,6 +483,7 @@ impl MissileTrial {
             proof("LIFTOFF", flag(self.lifted_off), 0.0),
             proof("SEPARATION", flag(self.separated), 0.0),
             proof("LOCK", flag(self.lock_acquired.unwrap_or(false)), 0.0),
+            proof("STABILITY", self.stability, 2.0),
         ]
     }
 }
@@ -567,6 +572,19 @@ impl ContractOffer {
                 true,
             ));
         }
+        // A surface-launched interceptor wants a stable airframe, but this stays a soft
+        // requirement: a marginal design is a compromise, not an impossible contract.
+        if matches!(self.mission_family, MissionFamily::SurfaceToAir) {
+            requirements.push(missile_requirement(
+                "STABILITY",
+                "Aerodynamic stability",
+                "stability",
+                Comparator::AtLeast,
+                20.0,
+                0.5,
+                false,
+            ));
+        }
         requirements
     }
 
@@ -613,6 +631,7 @@ mod tests {
             }],
             events: vec![(1.0, "Stage 1 separated".to_string())],
             anomalies: Vec::new(),
+            aero: crate::aero::AeroSummary::default(),
             first_ignition_twr: Some(2.0),
             lifted_off: true,
             max_speed_ms: speed,
@@ -652,6 +671,42 @@ mod tests {
         assert!(id(&short, "RANGE").limit < id(&ballistic, "RANGE").limit);
         assert!(id(&short, "MASS").limit <= 300.0);
         assert!(!ballistic.missile_requirements().iter().any(|r| r.id == "LOCK"));
+    }
+
+    #[test]
+    fn surface_to_air_offers_ask_for_a_stable_airframe() {
+        let offer = offer_for(MissionFamily::SurfaceToAir, VehicleFamily::ShortRange);
+        let stability = offer
+            .missile_requirements()
+            .into_iter()
+            .find(|requirement| requirement.id == "STABILITY")
+            .expect("a surface-to-air offer asks for stability");
+        assert!(!stability.hard, "stability is a soft compromise");
+        assert!(stability.limit > 0.0);
+        let ground = offer_for(MissionFamily::AirToSurface, VehicleFamily::Ballistic);
+        assert!(
+            !ground
+                .missile_requirements()
+                .iter()
+                .any(|requirement| requirement.id == "STABILITY")
+        );
+    }
+
+    #[test]
+    fn evidence_quotes_the_aerodynamic_stability_of_the_design() {
+        let vehicle = ContentHash::of_bytes(b"vehicle");
+        let program = ContentHash::of_bytes(b"program");
+        let mut flight = report(20_000.0, 400.0, 250.0, true);
+        flight.aero.stability = 63.0;
+        let trial = trial(&vehicle, &program, &flight);
+        assert_eq!(trial.stability, 63.0);
+        let evidence = trial
+            .evidence()
+            .into_iter()
+            .find(|e| e.requirement_id == "STABILITY")
+            .unwrap();
+        assert_eq!(evidence.estimate.value, 63.0);
+        assert_eq!(evidence.design, vehicle);
     }
 
     #[test]

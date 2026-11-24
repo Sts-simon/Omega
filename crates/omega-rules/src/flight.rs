@@ -5,6 +5,7 @@
 //! trajectory optimisation, no tracking and no guidance law. A target lock is a single seeded
 //! probability roll that depends on the radar class and the speed at that moment.
 
+use crate::aero::AeroSummary;
 use crate::assembly::Vehicle;
 use crate::program::{Block, Program, validate_program};
 use crate::vehicle::{AIR_BREATHING_MIN_SPEED_MS, G0, PartSpec, RadarClass};
@@ -62,6 +63,8 @@ pub struct FlightReport {
     pub samples: Vec<Sample>,
     pub events: Vec<(f64, String)>,
     pub anomalies: Vec<String>,
+    /// Aerodynamic figures the run used: quoted by the workshop, the trial screen and the dossier.
+    pub aero: AeroSummary,
     /// Thrust-to-weight ratio when the first stage was ignited.
     pub first_ignition_twr: Option<f64>,
     pub lifted_off: bool,
@@ -152,6 +155,25 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
 
     let dt = config.dt_s;
     let spread = dispersion(config.seed);
+    // Aerodynamics never adds a per-step geometry pass: the figures are computed once from the
+    // design and applied to the existing integration. A design without surfaces leaves every
+    // term below at its previous value.
+    let aero = crate::aero::figures(vehicle);
+    let stability = aero.stability_ratio();
+    let authority = aero.authority_ratio();
+    let lift = aero.lift_ratio();
+    // Passive stability damps the seeded drag spread, it never removes it.
+    let drag_spread = if aero.surface_count == 0 {
+        spread.drag
+    } else {
+        1.0 + (spread.drag - 1.0) * (1.0 - 0.6 * stability)
+    };
+    // Wings lower the airspeed the air-breathing engine needs and reduce the gravity loss during
+    // the vertical climb, with floors so a huge wing cannot make a design free.
+    let air_min_speed = AIR_BREATHING_MIN_SPEED_MS * (1.0 - 0.45 * lift).max(0.55);
+    let pitch_gravity = G0 * (1.0 - 0.35 * lift);
+    // Authority and stability tighten the altitude controller.
+    let altitude_rate = ALTITUDE_RATE_MS * (1.0 + 0.30 * authority + 0.20 * stability);
     // The stages are derived from the attachment tree; the flight model keeps consuming the same
     // flat stage views it always did.
     let stages = vehicle.stage_views();
@@ -329,9 +351,8 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                 .fold(0.0, f64::max);
             d.max(0.1)
         };
-        let drag =
-            0.5 * rho * speed * speed * DRAG_COEFFICIENT * spread.drag * std::f64::consts::PI * diameter * diameter
-                / 4.0;
+        let body_drag_area = DRAG_COEFFICIENT * std::f64::consts::PI * diameter * diameter / 4.0;
+        let drag = 0.5 * rho * speed * speed * (body_drag_area + aero.surface_drag_area_m2) * drag_spread;
 
         let effective_throttle = match speed_target {
             Some(target) => {
@@ -368,8 +389,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                         }
                     }
                     PartSpec::LiquidEngine { .. } | PartSpec::AirBreathing { .. } => {
-                        let can_run =
-                            !matches!(part.spec, PartSpec::AirBreathing { .. }) || speed >= AIR_BREATHING_MIN_SPEED_MS;
+                        let can_run = !matches!(part.spec, PartSpec::AirBreathing { .. }) || speed >= air_min_speed;
                         if can_run && tank_pool - drawn > 0.0 {
                             let engine_thrust = stats.thrust_n * spread.thrust * effective_throttle;
                             thrust += engine_thrust;
@@ -398,7 +418,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
 
         // --- motion ---
         let mass = attached_mass(&attached, &remaining);
-        let gravity = if vertical && !pitched_over { G0 } else { 0.0 };
+        let gravity = if vertical && !pitched_over { pitch_gravity } else { 0.0 };
         let accel = (thrust - drag) / mass - gravity;
         if vertical && !pitched_over && ever_ignited && !lifted_off {
             if accel > 0.0 {
@@ -418,7 +438,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                 altitude_target.get_or_insert(altitude);
             }
         } else if let Some(target) = altitude_target {
-            let step = (target - altitude).clamp(-ALTITUDE_RATE_MS * dt, ALTITUDE_RATE_MS * dt);
+            let step = (target - altitude).clamp(-altitude_rate * dt, altitude_rate * dt);
             altitude = (altitude + step).max(0.0);
         }
         max_speed = max_speed.max(speed);
@@ -469,6 +489,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         samples,
         events,
         anomalies,
+        aero: aero.summary(),
         first_ignition_twr,
         lifted_off,
         max_speed_ms: max_speed,
@@ -857,6 +878,189 @@ mod tests {
                 }
             )
             .is_err()
+        );
+    }
+
+    fn with_fins(vehicle: &mut Vehicle) {
+        use crate::assembly::NodeId;
+        for index in 0..4u8 {
+            vehicle
+                .add_attached(
+                    format!("fin-{index}"),
+                    PartSpec::FinSet {
+                        span_m: 0.3,
+                        chord_m: 0.35,
+                        role: crate::vehicle::StabilizerRole::Rear,
+                        layout: crate::vehicle::FinLayout::Symmetric,
+                        light: false,
+                    },
+                    "booster",
+                    NodeId::Radial(index),
+                )
+                .unwrap();
+        }
+    }
+
+    fn with_surfaces(vehicle: &mut Vehicle, spec: PartSpec) {
+        use crate::assembly::NodeId;
+        for index in 0..4u8 {
+            vehicle
+                .add_attached(format!("surface-{index}"), spec, "tank", NodeId::Radial(index))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_design_without_surfaces_reports_no_aerodynamic_effect() {
+        let report = simulate(&sounding_rocket(), &two_stage_program(20.0), FlightConfig::default()).unwrap();
+        assert_eq!(report.aero.surface_count, 0);
+        assert_eq!(report.aero.surface_drag_area_m2, 0.0);
+        assert_eq!(report.aero.mass_kg, 0.0);
+        assert_eq!(report.aero.stability, 0.0);
+        assert_eq!(report.aero.margin_m, 0.0);
+        // The integration still answers exactly the same way twice.
+        let again = simulate(&sounding_rocket(), &two_stage_program(20.0), FlightConfig::default()).unwrap();
+        assert_eq!(report, again);
+    }
+
+    #[test]
+    fn fins_damp_the_seeded_dispersion_without_removing_it() {
+        let program = two_stage_program(20.0);
+        let plain = sounding_rocket();
+        let mut finned = plain.clone();
+        with_fins(&mut finned);
+        let spread = |vehicle: &Vehicle| {
+            let speeds: Vec<f64> = (0..24)
+                .map(|seed| {
+                    simulate(
+                        vehicle,
+                        &program,
+                        FlightConfig {
+                            seed,
+                            ..FlightConfig::default()
+                        },
+                    )
+                    .unwrap()
+                    .max_speed_ms
+                })
+                .collect();
+            let min = speeds.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max = speeds.iter().cloned().fold(0.0, f64::max);
+            let mean = speeds.iter().sum::<f64>() / speeds.len() as f64;
+            (max - min) / mean
+        };
+        let loose = spread(&plain);
+        let tight = spread(&finned);
+        assert!(tight < loose, "fins should damp the spread: {tight} vs {loose}");
+        assert!(tight > 0.0, "the seed still spreads the hardware");
+        assert!(
+            simulate(&finned, &program, FlightConfig::default())
+                .unwrap()
+                .aero
+                .stability
+                > 60.0
+        );
+    }
+
+    #[test]
+    fn wings_let_the_air_breathing_engine_run_at_a_lower_speed() {
+        let program = Program::single(vec![Block::IgniteStage { stage: 0 }]);
+        let config = FlightConfig {
+            launch: LaunchMode::Air {
+                speed_ms: 70.0,
+                altitude_m: 100.0,
+            },
+            max_time_s: 30.0,
+            ..FlightConfig::default()
+        };
+        let plain = cruise_vehicle();
+        let mut winged = plain.clone();
+        winged
+            .add_attached(
+                "wing-1",
+                PartSpec::Wing {
+                    span_m: 1.2,
+                    chord_m: 0.5,
+                    sweep_deg: 20.0,
+                    planform: crate::vehicle::WingPlanform::Swept,
+                    profile: crate::vehicle::AirfoilProfile::Classic,
+                    light: false,
+                },
+                "tank",
+                crate::assembly::NodeId::Radial(0),
+            )
+            .unwrap();
+        assert!(winged.validate().is_ok(), "{:?}", winged.validate());
+        let without = simulate(&plain, &program, config).unwrap();
+        let with = simulate(&winged, &program, config).unwrap();
+        assert!(with.aero.lift > 50.0, "lift {}", with.aero.lift);
+        assert!(
+            with.max_speed_ms > 80.0,
+            "the winged vehicle accelerates: {}",
+            with.max_speed_ms
+        );
+        assert!(
+            without.max_speed_ms <= 70.0 + 1e-6,
+            "the wingless turbofan cannot run at 70 m/s: {}",
+            without.max_speed_ms
+        );
+        assert!(with.path_length_m > without.path_length_m);
+    }
+
+    #[test]
+    fn control_surfaces_tighten_the_altitude_controller() {
+        let program = Program::single(vec![
+            Block::IgniteStage { stage: 0 },
+            Block::Wait { seconds: 1.0 },
+            Block::HoldPressure { hpa: 900.0 },
+        ]);
+        let config = FlightConfig {
+            launch: LaunchMode::Air {
+                speed_ms: 200.0,
+                altitude_m: 0.0,
+            },
+            max_time_s: 60.0,
+            ..FlightConfig::default()
+        };
+        let mut plain = cruise_vehicle();
+        plain
+            .add_attached(
+                "baro",
+                PartSpec::Sensor {
+                    kind: SensorKind::Barometer,
+                },
+                "radar",
+                crate::assembly::NodeId::Top,
+            )
+            .unwrap();
+        let mut steered = plain.clone();
+        with_surfaces(
+            &mut steered,
+            PartSpec::ControlSurface {
+                span_m: 0.4,
+                chord_m: 0.4,
+                kind: crate::vehicle::ControlKind::Classic,
+                light: false,
+            },
+        );
+        assert!(steered.validate().is_ok(), "{:?}", steered.validate());
+        let target = -8_000.0 * (900.0f64 / 1_013.25).ln();
+        let settle = |vehicle: &Vehicle| {
+            let report = simulate(vehicle, &program, config).unwrap();
+            let first = report
+                .samples
+                .iter()
+                .find(|sample| (sample.altitude_m - target).abs() < 15.0)
+                .map(|sample| sample.t_s);
+            (first, report.aero.control_authority)
+        };
+        let (slow, no_authority) = settle(&plain);
+        let (fast, authority) = settle(&steered);
+        assert!(authority > no_authority);
+        assert!(fast.is_some(), "the steered design reaches the pressure target");
+        assert!(
+            fast.unwrap() < slow.unwrap(),
+            "authority settles earlier: {fast:?} vs {slow:?}"
         );
     }
 }

@@ -12,8 +12,9 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Current `designs/vehicle.json` schema. 1-2 were the flat stage lists of the early workshops.
-pub const VEHICLE_SCHEMA: u32 = 3;
+/// Current `designs/vehicle.json` schema. 1-2 were the flat stage lists of the early workshops;
+/// 3 added the attachment graph, 4 the aerodynamic surfaces (schema-3 files load unchanged).
+pub const VEHICLE_SCHEMA: u32 = 4;
 /// A design may not grow beyond this many derived stages (the old workshop limit).
 pub const MAX_STAGES: usize = 4;
 
@@ -162,6 +163,11 @@ pub fn dimensions(spec: &PartSpec) -> (f64, f64) {
         PartSpec::Computer { .. } => (0.15, 0.15),
         PartSpec::Decoupler => (0.06, 0.20),
         PartSpec::MissionModule { mass_kg } => ((0.2 + mass_kg / 150.0).min(2.2), 0.20),
+        // A surface is a thin plate: its chord runs along the body, its span outward from the
+        // mount, so the radial offset places the root exactly on the parent's surface.
+        PartSpec::Wing { span_m, chord_m, .. }
+        | PartSpec::FinSet { span_m, chord_m, .. }
+        | PartSpec::ControlSurface { span_m, chord_m, .. } => (chord_m, span_m / 2.0),
     }
 }
 
@@ -375,10 +381,16 @@ impl Vehicle {
     }
 
     /// Why `node` of `parent` cannot take this spec right now (empty when it can).
-    pub fn node_status(&self, parent: &str, node: NodeId, _spec: &PartSpec) -> Result<(), String> {
+    pub fn node_status(&self, parent: &str, node: NodeId, spec: &PartSpec) -> Result<(), String> {
         let Some(parent_part) = self.part(parent) else {
             return Err("that part no longer exists".to_string());
         };
+        if parent_part.spec.is_aero() {
+            return Err(format!("{parent} is a surface and cannot carry parts"));
+        }
+        if spec.is_aero() && !node.is_radial() {
+            return Err(format!("{} mounts on a radial node only", spec.short_label()));
+        }
         if let Some(taken) = self.node_taken_by(parent, node, None) {
             return Err(format!("that node is already used by {taken}"));
         }
@@ -445,9 +457,11 @@ impl Vehicle {
         }
     }
 
-    /// Radial slots for a symmetry count, starting at `first` and evenly spaced.
-    pub fn symmetry_slots(_parent: &str, spec: &PartSpec, first: u8, count: u8) -> Vec<(NodeId, f64)> {
-        let slots = radial_slots(spec).min(4);
+    /// Radial slots for a symmetry count, starting at `first` and evenly spaced. The count comes
+    /// from the parent body, not from the part being placed: surfaces have no mounts of their own
+    /// but still form four-way sets around a body.
+    pub fn symmetry_slots(&self, parent: &str, _spec: &PartSpec, first: u8, count: u8) -> Vec<(NodeId, f64)> {
+        let slots = self.part(parent).map_or(0, |part| radial_slots(&part.spec)).clamp(1, 4);
         (0..count.min(slots))
             .map(|step| {
                 let index = (first + step) % slots.max(1);
@@ -556,6 +570,32 @@ impl Vehicle {
             }
             _ => issues.push("only one flight computer is allowed".to_string()),
         }
+        for part in &self.parts {
+            if !part.spec.is_aero() {
+                continue;
+            }
+            if part.attach.as_ref().is_some_and(|attach| !attach.node.is_radial()) {
+                issues.push(format!("{}: aerodynamic surfaces mount on a radial node", part.id));
+            }
+            if self
+                .parts
+                .iter()
+                .any(|child| child.attach.as_ref().is_some_and(|a| a.parent == part.id))
+            {
+                issues.push(format!("{} is a surface and cannot carry parts", part.id));
+            }
+            if let PartSpec::ControlSurface { kind, .. } = part.spec
+                && let Some(needed) = crate::aero::required_computer(kind)
+                && let Some(class) = self.computer()
+                && class.rank() < needed.rank()
+            {
+                issues.push(format!(
+                    "{}: {} control surfaces need a {needed:?} flight computer",
+                    part.id,
+                    kind.label()
+                ));
+            }
+        }
         if issues.is_empty() { Ok(()) } else { Err(issues) }
     }
 
@@ -570,6 +610,11 @@ impl Vehicle {
             let Some(parent) = self.part(&attach.parent) else {
                 continue;
             };
+            // Fins and wings are plates on the body, not a diameter step; their own fit warning is
+            // in `aero::warnings`.
+            if parent.spec.is_aero() || part.spec.is_aero() {
+                continue;
+            }
             let (parent_d, child_d) = (node_diameter(&parent.spec), node_diameter(&part.spec));
             if (parent_d - child_d).abs() > 0.051 {
                 warnings.push(format!(
@@ -578,7 +623,13 @@ impl Vehicle {
                 ));
             }
         }
+        warnings.extend(crate::aero::warnings(self));
         warnings
+    }
+
+    /// Abstract aerodynamic figures for the whole vehicle; one pass, computed once per edit.
+    pub fn aero(&self) -> crate::aero::AeroFigures {
+        crate::aero::figures(self)
     }
 
     pub fn computer(&self) -> Option<ComputerClass> {
@@ -620,7 +671,11 @@ impl Vehicle {
     }
 
     pub fn missing_research(&self, owned: &BTreeSet<String>) -> Vec<String> {
-        let needed: BTreeSet<&str> = self.parts.iter().map(|p| p.spec.required_capability()).collect();
+        let needed: BTreeSet<&str> = self
+            .parts
+            .iter()
+            .flat_map(|part| std::iter::once(part.spec.required_capability()).chain(part.spec.extra_capabilities()))
+            .collect();
         needed
             .into_iter()
             .filter(|capability| !owned.contains(*capability))
@@ -628,11 +683,15 @@ impl Vehicle {
             .collect()
     }
 
+    /// Largest body diameter. Aerodynamic surfaces span outward and are not part of the body
+    /// cross-section, so they are excluded from the reference area.
     pub fn max_diameter_m(&self) -> f64 {
         self.parts
             .iter()
+            .filter(|part| !part.spec.is_aero())
             .map(|part| dimensions(&part.spec).1 * 2.0)
             .fold(0.0, f64::max)
+            .max(0.1)
     }
 
     fn stage_wet_mass(stage: &Stage) -> f64 {
@@ -805,7 +864,12 @@ impl Vehicle {
             attach: None,
             symmetry: None,
         });
-        self.attach(&id, parent, node, 0.0)
+        if let Err(error) = self.attach(&id, parent, node, 0.0) {
+            // Do not leave an orphan root behind when the mount is refused.
+            self.parts.retain(|part| part.id != id);
+            return Err(error);
+        }
+        Ok(())
     }
 }
 
@@ -930,7 +994,7 @@ pub(crate) mod tests {
     fn radial_attachment_and_symmetry_slots() {
         let mut vehicle = sounding_rocket();
         let parent = "booster";
-        let slots = Vehicle::symmetry_slots(
+        let slots = vehicle.symmetry_slots(
             parent,
             &PartSpec::SolidMotor {
                 length_m: 1.0,
@@ -1031,7 +1095,7 @@ pub(crate) mod tests {
     fn saved_designs_round_trip_and_legacy_files_migrate() {
         let vehicle = sounding_rocket();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":3"), "{json}");
+        assert!(json.contains("\"schema_version\":4"), "{json}");
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
 
@@ -1050,5 +1114,124 @@ pub(crate) mod tests {
         let future = r#"{"schema_version": 99, "name": "Future", "parts": []}"#;
         let refused = serde_json::from_str::<Vehicle>(future).unwrap_err();
         assert!(refused.to_string().contains("newer"), "{refused}");
+    }
+
+    fn wing() -> PartSpec {
+        PartSpec::Wing {
+            span_m: 1.2,
+            chord_m: 0.4,
+            sweep_deg: 15.0,
+            planform: crate::vehicle::WingPlanform::Swept,
+            profile: crate::vehicle::AirfoilProfile::Classic,
+            light: false,
+        }
+    }
+
+    #[test]
+    fn aerodynamic_surfaces_mount_on_radial_nodes_and_carry_nothing() {
+        let mut vehicle = sounding_rocket();
+        assert!(
+            vehicle.add_attached("wing", wing(), "booster", NodeId::Top).is_err(),
+            "a wing cannot sit on the axis"
+        );
+        vehicle
+            .add_attached("wing", wing(), "booster", NodeId::Radial(0))
+            .unwrap();
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
+        assert!(
+            vehicle
+                .node_status("wing", NodeId::Radial(1), &PartSpec::Decoupler)
+                .unwrap_err()
+                .contains("cannot carry"),
+            "a surface is a leaf"
+        );
+        assert!(vehicle.attach("module", "wing", NodeId::Radial(1), 0.0).is_err());
+    }
+
+    #[test]
+    fn a_surface_set_uses_the_parent_body_slots() {
+        let vehicle = sounding_rocket();
+        let slots = vehicle.symmetry_slots("booster", &wing(), 0, 4);
+        assert_eq!(slots.len(), 4, "a body offers four slots to a wing");
+        let decoupler = vehicle.symmetry_slots("dec1", &wing(), 0, 4);
+        assert_eq!(decoupler.len(), 1, "a decoupler has no radial mount");
+    }
+
+    #[test]
+    fn schema_three_still_loads_and_is_rewritten_as_four() {
+        let old = r#"{
+            "schema_version": 3,
+            "name": "Schema three",
+            "parts": [
+                {"id": "m", "spec": {"part": "solid_motor", "length_m": 2.0, "diameter_m": 0.4, "burn_time_s": 20.0}},
+                {"id": "pc", "spec": {"part": "computer", "class": "basic"}, "attach": {"parent": "m", "node": "top"}}
+            ]
+        }"#;
+        let vehicle: Vehicle = serde_json::from_str(old).unwrap();
+        assert_eq!(vehicle.name, "Schema three");
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
+        assert_eq!(vehicle.aero().surface_count, 0);
+        let written = serde_json::to_string(&vehicle).unwrap();
+        assert!(written.contains("\"schema_version\":4"), "{written}");
+
+        let future = r#"{"schema_version": 5, "name": "Future", "parts": []}"#;
+        let refused = serde_json::from_str::<Vehicle>(future).unwrap_err();
+        assert!(refused.to_string().contains("newer"), "{refused}");
+    }
+
+    #[test]
+    fn schema_four_surfaces_round_trip_with_their_design_choices() {
+        let mut vehicle = sounding_rocket();
+        vehicle
+            .add_attached("wing", wing(), "booster", NodeId::Radial(0))
+            .unwrap();
+        vehicle
+            .add_attached(
+                "fin",
+                PartSpec::FinSet {
+                    span_m: 0.3,
+                    chord_m: 0.35,
+                    role: crate::vehicle::StabilizerRole::Rear,
+                    layout: crate::vehicle::FinLayout::Asymmetric,
+                    light: true,
+                },
+                "booster",
+                NodeId::Radial(1),
+            )
+            .unwrap();
+        let json = serde_json::to_string(&vehicle).unwrap();
+        assert!(json.contains("\"schema_version\":4"), "{json}");
+        assert!(!json.contains("variable_geometry"));
+        let read: Vehicle = serde_json::from_str(&json).unwrap();
+        assert_eq!(read, vehicle);
+        assert_eq!(read.aero().surface_count, 2);
+        assert!(read.aero().mass_kg > 0.0);
+    }
+
+    #[test]
+    fn a_moving_control_surface_needs_a_compatible_computer() {
+        let mut vehicle = sounding_rocket();
+        vehicle
+            .add_attached(
+                "ctrl",
+                PartSpec::ControlSurface {
+                    span_m: 0.4,
+                    chord_m: 0.4,
+                    kind: crate::vehicle::ControlKind::Combined,
+                    light: false,
+                },
+                "booster",
+                NodeId::Radial(0),
+            )
+            .unwrap();
+        let issues = vehicle.validate().unwrap_err().join(" | ");
+        assert!(issues.contains("Advanced"), "{issues}");
+        vehicle.replace_part(
+            "pc",
+            PartSpec::Computer {
+                class: ComputerClass::Advanced,
+            },
+        );
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
     }
 }

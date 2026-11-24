@@ -33,6 +33,15 @@ pub enum ComputerClass {
 }
 
 impl ComputerClass {
+    /// Ordering used by compatibility rules (a control surface needs a class at least this good).
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::Basic => 0,
+            Self::Standard => 1,
+            Self::Advanced => 2,
+        }
+    }
+
     /// Parallel program threads the computer can run.
     pub fn threads(self) -> usize {
         match self {
@@ -48,6 +57,184 @@ impl ComputerClass {
             Self::Basic => 8,
             Self::Standard => 16,
             Self::Advanced => 32,
+        }
+    }
+}
+
+/// Wing planform, an abstract gameplay shape. Each one trades lift, drag, stability, authority,
+/// complexity, reliability and mass; the numbers live in `crate::aero`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WingPlanform {
+    Straight,
+    Swept,
+    Delta,
+    Trapezoidal,
+    VariableGeometry,
+}
+
+impl WingPlanform {
+    pub const ALL: [Self; 5] = [
+        Self::Straight,
+        Self::Swept,
+        Self::Delta,
+        Self::Trapezoidal,
+        Self::VariableGeometry,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Straight => "STRAIGHT",
+            Self::Swept => "SWEPT",
+            Self::Delta => "DELTA",
+            Self::Trapezoidal => "TRAPEZOIDAL",
+            Self::VariableGeometry => "VARIABLE GEOMETRY",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Straight => Self::Swept,
+            Self::Swept => Self::Delta,
+            Self::Delta => Self::Trapezoidal,
+            Self::Trapezoidal => Self::VariableGeometry,
+            Self::VariableGeometry => Self::Straight,
+        }
+    }
+}
+
+/// Fictional wing section. No real lift/drag tables: each profile is a fixed set of game effects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AirfoilProfile {
+    Symmetric,
+    Classic,
+    LowDrag,
+    HighLift,
+    Experimental,
+}
+
+impl AirfoilProfile {
+    pub const ALL: [Self; 5] = [
+        Self::Symmetric,
+        Self::Classic,
+        Self::LowDrag,
+        Self::HighLift,
+        Self::Experimental,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Symmetric => "SYMMETRIC",
+            Self::Classic => "CLASSIC",
+            Self::LowDrag => "LOW DRAG",
+            Self::HighLift => "HIGH LIFT",
+            Self::Experimental => "EXPERIMENTAL",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Symmetric => Self::Classic,
+            Self::Classic => Self::LowDrag,
+            Self::LowDrag => Self::HighLift,
+            Self::HighLift => Self::Experimental,
+            Self::Experimental => Self::Symmetric,
+        }
+    }
+}
+
+/// Where a fin set sits on the airframe. The attachment node still decides the physical mount;
+/// this is the design intent the rules read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StabilizerRole {
+    Rear,
+    Front,
+    Blended,
+    Combined,
+}
+
+impl StabilizerRole {
+    pub const ALL: [Self; 4] = [Self::Rear, Self::Front, Self::Blended, Self::Combined];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rear => "REAR",
+            Self::Front => "FRONT",
+            Self::Blended => "BLENDED",
+            Self::Combined => "COMBINED",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Rear => Self::Front,
+            Self::Front => Self::Blended,
+            Self::Blended => Self::Combined,
+            Self::Combined => Self::Rear,
+        }
+    }
+}
+
+/// Symmetric is the normal fin set; an asymmetric set is an experimental trade of stability for
+/// authority and needs the advanced aerodynamics research.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinLayout {
+    Symmetric,
+    Asymmetric,
+}
+
+impl FinLayout {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Symmetric => "SYMMETRIC",
+            Self::Asymmetric => "ASYMMETRIC",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Symmetric => Self::Asymmetric,
+            Self::Asymmetric => Self::Symmetric,
+        }
+    }
+}
+
+/// Abstract control-surface family. `Fixed` adds passive stability only; the moving kinds need a
+/// compatible flight computer and give control authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlKind {
+    Classic,
+    Integrated,
+    Combined,
+    Fixed,
+}
+
+impl ControlKind {
+    pub const ALL: [Self; 4] = [Self::Classic, Self::Integrated, Self::Combined, Self::Fixed];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "CLASSIC",
+            Self::Integrated => "INTEGRATED",
+            Self::Combined => "COMBINED",
+            Self::Fixed => "FIXED",
+        }
+    }
+
+    pub fn is_moving(self) -> bool {
+        !matches!(self, Self::Fixed)
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Classic => Self::Integrated,
+            Self::Integrated => Self::Combined,
+            Self::Combined => Self::Fixed,
+            Self::Fixed => Self::Classic,
         }
     }
 }
@@ -83,6 +270,32 @@ pub enum PartSpec {
     /// Abstract mission module: only mass matters here.
     MissionModule {
         mass_kg: f64,
+    },
+    /// Lifting surface for cruise flight. `light` selects the light-structure build once its
+    /// research is done: less mass, more complexity and less reliability.
+    Wing {
+        span_m: f64,
+        chord_m: f64,
+        sweep_deg: f64,
+        planform: WingPlanform,
+        profile: AirfoilProfile,
+        light: bool,
+    },
+    /// Passive stabiliser. `role` is the designer's declared configuration; the mount node still
+    /// decides where the set physically sits.
+    FinSet {
+        span_m: f64,
+        chord_m: f64,
+        role: StabilizerRole,
+        layout: FinLayout,
+        light: bool,
+    },
+    /// Control surface: authority when moving, stability when fixed.
+    ControlSurface {
+        span_m: f64,
+        chord_m: f64,
+        kind: ControlKind,
+        light: bool,
     },
 }
 
@@ -137,8 +350,62 @@ impl PartSpec {
             }
             Self::LiquidEngine { scale } | Self::AirBreathing { scale } => in_range("engine scale", scale, 0.3, 3.0),
             Self::MissionModule { mass_kg } => in_range("module mass (kg)", mass_kg, 1.0, 300.0),
+            Self::Wing {
+                span_m,
+                chord_m,
+                sweep_deg,
+                ..
+            } => {
+                in_range("surface span (m)", span_m, 0.2, 4.0)?;
+                in_range("surface chord (m)", chord_m, 0.1, 2.0)?;
+                in_range("wing sweep (deg)", sweep_deg, 0.0, 60.0)
+            }
+            Self::FinSet { span_m, chord_m, .. } | Self::ControlSurface { span_m, chord_m, .. } => {
+                in_range("surface span (m)", span_m, 0.2, 4.0)?;
+                in_range("surface chord (m)", chord_m, 0.1, 2.0)
+            }
             Self::Sensor { .. } | Self::Computer { .. } | Self::Decoupler => Ok(()),
         }
+    }
+
+    /// True for the aerodynamic surfaces, which are always leaf parts on a radial mount.
+    pub fn is_aero(&self) -> bool {
+        matches!(
+            self,
+            Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. }
+        )
+    }
+
+    /// Research beyond the part itself: advanced shapes and the light-structure build.
+    pub fn extra_capabilities(&self) -> Vec<&'static str> {
+        let mut needed = Vec::new();
+        match *self {
+            Self::Wing {
+                planform,
+                profile,
+                light,
+                ..
+            } => {
+                if matches!(planform, WingPlanform::VariableGeometry) || matches!(profile, AirfoilProfile::Experimental)
+                {
+                    needed.push("aero:advanced_profiles");
+                }
+                if light {
+                    needed.push("aero:light_structures");
+                }
+            }
+            Self::FinSet { layout, light, .. } => {
+                if matches!(layout, FinLayout::Asymmetric) {
+                    needed.push("aero:advanced_profiles");
+                }
+                if light {
+                    needed.push("aero:light_structures");
+                }
+            }
+            Self::ControlSurface { light: true, .. } => needed.push("aero:light_structures"),
+            _ => {}
+        }
+        needed
     }
 
     pub fn stats(&self) -> PartStats {
@@ -206,6 +473,10 @@ impl PartSpec {
                 dry_mass_kg: mass_kg,
                 ..PartStats::default()
             },
+            Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. } => PartStats {
+                dry_mass_kg: crate::aero::surface_mass_kg(self).unwrap_or(0.0),
+                ..PartStats::default()
+            },
         }
     }
 
@@ -239,6 +510,19 @@ impl PartSpec {
             } => "computer:advanced",
             Self::Decoupler => "part:decoupler",
             Self::MissionModule { .. } => "part:mission_module",
+            Self::Wing { .. } => "part:wing",
+            Self::FinSet { .. } => "part:fin",
+            Self::ControlSurface { .. } => "part:control_surface",
+        }
+    }
+
+    /// Display label for a part family, shared by the palette and the inspector.
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            Self::Wing { .. } => "WING",
+            Self::FinSet { .. } => "FIN SET",
+            Self::ControlSurface { .. } => "CONTROL",
+            _ => "PART",
         }
     }
 }
