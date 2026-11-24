@@ -9,7 +9,14 @@ use bevy::prelude::{Quat, Vec2, Vec3};
 /// Nearest positive distance along `direction` where the ray enters the cylinder, if it does.
 /// `direction` does not need to be normalised. The cylinder is upright: its axis is Y and
 /// `center` is its middle.
-pub fn ray_cylinder(origin: Vec3, direction: Vec3, center: Vec3, radius: f32, half_height: f32, rotation: Quat) -> Option<f32> {
+pub fn ray_cylinder(
+    origin: Vec3,
+    direction: Vec3,
+    center: Vec3,
+    radius: f32,
+    half_height: f32,
+    rotation: Quat,
+) -> Option<f32> {
     let inverse = rotation.inverse();
     let origin = inverse * (origin - center);
     let direction = inverse * direction;
@@ -169,14 +176,7 @@ mod tests {
     #[test]
     fn a_cylinder_can_be_picked_after_a_quarter_turn() {
         let rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
-        let hit = ray_cylinder(
-            Vec3::new(-5.0, 0.0, 0.0),
-            Vec3::X,
-            Vec3::ZERO,
-            0.5,
-            1.0,
-            rotation,
-        );
+        let hit = ray_cylinder(Vec3::new(-5.0, 0.0, 0.0), Vec3::X, Vec3::ZERO, 0.5, 1.0, rotation);
         assert!(hit.is_some(), "the cylinder axis is now aligned with X");
     }
 
