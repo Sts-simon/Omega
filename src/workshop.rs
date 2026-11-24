@@ -140,17 +140,12 @@ fn free_nodes(vehicle: &Vehicle, anchor: Vec3) -> Vec<NodePoint> {
             let node = NodeId::Radial(index);
             if is_free(&pose.id, node) {
                 let angle = f64::from(index) * 90.0;
-                let local_direction = Vec3::new(
-                    angle.to_radians().cos() as f32,
-                    0.0,
-                    angle.to_radians().sin() as f32,
-                );
+                let local_direction = Vec3::new(angle.to_radians().cos() as f32, 0.0, angle.to_radians().sin() as f32);
                 nodes.push(NodePoint {
                     parent: pose.id.clone(),
                     node,
                     angle,
-                    world: center
-                        + orientation * local_direction * pose.radius_m as f32 * missile::VISUAL_SCALE,
+                    world: center + orientation * local_direction * pose.radius_m as f32 * missile::VISUAL_SCALE,
                 });
             }
         }
@@ -290,7 +285,14 @@ pub(crate) fn workshop_pointer(
             && let Some(pose) = session.vehicle.poses().into_iter().find(|pose| pose.id == id)
         {
             let center = world_of(missile::ANCHOR, pose.x_m, pose.y_m, pose.z_m);
-            let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+            let orientation = Quat::from_euler(
+                EulerRot::XYZ,
+                (pose.rotation_x_deg as f32).to_radians(),
+                (pose.rotation_y_deg as f32).to_radians(),
+                (pose.rotation_z_deg as f32).to_radians(),
+            );
+            // KSP-style local space: the handles follow the selected part's orientation.
+            let axes = [orientation * Vec3::X, orientation * Vec3::Y, orientation * Vec3::Z];
             let center_screen = camera.world_to_viewport(camera_transform, center).ok();
             let mut nearest: Option<(usize, Vec2, f32)> = None;
             for (axis, direction) in axes.into_iter().enumerate() {
@@ -307,11 +309,12 @@ pub(crate) fn workshop_pointer(
                 } else {
                     for step in 0..48 {
                         let angle = std::f32::consts::TAU * step as f32 / 48.0;
-                        let ring_point = match axis {
-                            0 => center + Vec3::new(0.0, angle.cos(), angle.sin()) * 1.05,
-                            1 => center + Vec3::new(angle.cos(), 0.0, angle.sin()) * 1.05,
-                            _ => center + Vec3::new(angle.cos(), angle.sin(), 0.0) * 1.05,
+                        let local_ring = match axis {
+                            0 => Vec3::new(0.0, angle.cos(), angle.sin()),
+                            1 => Vec3::new(angle.cos(), 0.0, angle.sin()),
+                            _ => Vec3::new(angle.cos(), angle.sin(), 0.0),
                         };
+                        let ring_point = center + orientation * local_ring * 1.05;
                         if let Ok(point) = camera.world_to_viewport(camera_transform, ring_point) {
                             let distance = cursor.distance(point);
                             if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
@@ -467,10 +470,16 @@ pub(crate) fn workshop_pointer(
         && session.vehicle.part(id).is_some_and(|part| part.attach.is_some())
     {
         let center = world_of(missile::ANCHOR, pose.x_m, pose.y_m, pose.z_m);
+        let orientation = Quat::from_euler(
+            EulerRot::XYZ,
+            (pose.rotation_x_deg as f32).to_radians(),
+            (pose.rotation_y_deg as f32).to_radians(),
+            (pose.rotation_z_deg as f32).to_radians(),
+        );
         let axes = [
-            (Vec3::X, Color::srgb(0.95, 0.25, 0.25)),
-            (Vec3::Y, Color::srgb(0.30, 0.90, 0.40)),
-            (Vec3::Z, Color::srgb(0.25, 0.55, 1.0)),
+            (orientation * Vec3::X, Color::srgb(0.95, 0.25, 0.25)),
+            (orientation * Vec3::Y, Color::srgb(0.30, 0.90, 0.40)),
+            (orientation * Vec3::Z, Color::srgb(0.25, 0.55, 1.0)),
         ];
         for (axis_index, (axis, color)) in axes.into_iter().enumerate() {
             if transform_gizmo.mode == TransformMode::Translate {
@@ -481,11 +490,12 @@ pub(crate) fn workshop_pointer(
                 let mut previous = None;
                 for step in 0..=48 {
                     let angle = std::f32::consts::TAU * step as f32 / 48.0;
-                    let point = match axis_index {
-                        0 => center + Vec3::new(0.0, angle.cos(), angle.sin()) * 1.05,
-                        1 => center + Vec3::new(angle.cos(), 0.0, angle.sin()) * 1.05,
-                        _ => center + Vec3::new(angle.cos(), angle.sin(), 0.0) * 1.05,
+                    let local_ring = match axis_index {
+                        0 => Vec3::new(0.0, angle.cos(), angle.sin()),
+                        1 => Vec3::new(angle.cos(), 0.0, angle.sin()),
+                        _ => Vec3::new(angle.cos(), angle.sin(), 0.0),
                     };
+                    let point = center + orientation * local_ring * 1.05;
                     if let Some(from) = previous {
                         gizmos.line(from, point, color);
                     }
