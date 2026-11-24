@@ -43,6 +43,9 @@ pub(crate) struct DragState {
 #[derive(Resource, Default)]
 pub(crate) struct WorkshopInput {
     pub wheel_used: bool,
+    /// True while a press has become (or is about to become) a drag; Escape then cancels the drag
+    /// instead of leaving the workshop.
+    pub drag_active: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -143,9 +146,11 @@ pub(crate) fn workshop_pointer(
     mut gizmos: Gizmos,
 ) {
     input.wheel_used = false;
+    input.drag_active = false;
     if campus.view != CampusView::Missile {
         drag.source = None;
         drag.hover = None;
+        drag.pending = None;
         return;
     }
     let owned = campus.owned_capabilities();
@@ -267,9 +272,10 @@ pub(crate) fn workshop_pointer(
     }
 
     // --- keyboard ---
-    if keys.just_pressed(KeyCode::Escape) && drag.source.is_some() {
+    if keys.just_pressed(KeyCode::Escape) && (drag.source.is_some() || drag.pending.is_some()) {
         drag.source = None;
         drag.hover = None;
+        drag.pending = None;
         campus.message = "Drag cancelled".to_string();
     }
     if drag.source.is_none() {
@@ -313,12 +319,13 @@ pub(crate) fn workshop_pointer(
         && picked.as_deref() == session.selected.as_deref()
         && let Some(param) = primary
     {
-        session.apply(
-            missile::MissileAction::Adjust(param, if lines > 0.0 { 1 } else { -1 }),
-            &owned,
-        );
+        let message = session.adjust_wheel(param, if lines > 0.0 { 1 } else { -1 });
+        if !message.is_empty() {
+            campus.message = message;
+        }
         input.wheel_used = true;
     }
+    input.drag_active = drag.source.is_some() || drag.pending.is_some();
 }
 
 /// The palette builds its own buttons so they can carry `PalettePart` and be dragged; a plain

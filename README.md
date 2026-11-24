@@ -216,8 +216,9 @@ card opens it.
 Editing is mouse-first: presets, part palette (locked parts greyed), drag a part from the palette to
 a glowing node in the 3D view or drag an existing part to move its subtree, `Delete`, `X` for
 symmetry, `Ctrl+Z` / `Ctrl+Y`, the derived part list with click-to-select, `-` / `+` on the selected
-part's adjustable values (or the wheel over the part), `UNDO` / `REDO`, `REMOVE PART` and
-`RECORD REVISION`. Stage figures and validation update immediately.
+part's adjustable values (or the wheel over the part, one undo entry per continuous gesture),
+`UNDO` / `REDO`, `REMOVE PART` and `RECORD REVISION`. Escape cancels a drag and keeps the workshop
+open; a second Escape returns to the island. Stage figures and validation update immediately.
 
 ### Research Centre
 

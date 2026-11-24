@@ -252,9 +252,14 @@ pub fn handle_input(
     missile: Res<crate::missile::MissileSession>,
     program: Res<crate::program_editor::MissileProgramSession>,
     mut procurement: ResMut<crate::procurement::Procurement>,
+    workshop: Res<crate::workshop::WorkshopInput>,
     ui_buttons: Query<&UiInteraction>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
+        if workshop.drag_active {
+            // The workshop cancels its drag this frame and keeps the board open.
+            return;
+        }
         if campus.view != CampusView::Island {
             campus.view = CampusView::Island;
             campus.message = "Returned to the island".to_string();

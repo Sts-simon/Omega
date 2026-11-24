@@ -8,6 +8,10 @@ use crate::scene::OrbitCameraRig;
 use bevy::prelude::*;
 use omega_rules::{ComputerClass, Part, PartSpec, RadarClass, SensorKind, Stage, Vehicle};
 use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
+
+/// Notches closer than this to the previous one on the same part and value form one gesture.
+const WHEEL_GESTURE: Duration = Duration::from_millis(500);
 
 pub(crate) const ANCHOR: Vec3 = Vec3::new(0.0, 0.2, 18.0);
 pub(crate) const VISUAL_SCALE: f32 = 1.6;
@@ -253,6 +257,8 @@ pub(crate) struct MissileSession {
     next_id: u32,
     undo: Vec<Vehicle>,
     redo: Vec<Vehicle>,
+    /// The continuous wheel gesture in progress: its snapshot is pushed once, on the first notch.
+    wheel_gesture: Option<((String, Param), Instant)>,
 }
 
 impl Default for MissileSession {
@@ -264,6 +270,7 @@ impl Default for MissileSession {
             next_id: 0,
             undo: Vec::new(),
             redo: Vec::new(),
+            wheel_gesture: None,
         }
     }
 }
@@ -381,6 +388,8 @@ impl MissileSession {
 
     /// Apply a workshop action. Returns the status message to show.
     pub fn apply(&mut self, action: MissileAction, owned: &BTreeSet<String>) -> String {
+        // A button edit (including +/-) closes any running wheel gesture.
+        self.wheel_gesture = None;
         match action {
             MissileAction::AddPart(template) => self.add_part(template, owned),
             MissileAction::Select { id } => {
@@ -389,22 +398,7 @@ impl MissileSession {
                 }
                 String::new()
             }
-            MissileAction::Adjust(param, direction) => {
-                let Some(id) = self.selected.clone() else {
-                    return "Select a part first".to_string();
-                };
-                let Some(part) = self.vehicle.part(&id) else {
-                    return String::new();
-                };
-                match adjusted(part.spec, param, f64::from(direction)) {
-                    Some(spec) => {
-                        self.push_undo();
-                        self.vehicle.replace_part(&id, spec);
-                        String::new()
-                    }
-                    None => "This part has no such setting".to_string(),
-                }
-            }
+            MissileAction::Adjust(param, direction) => self.adjust_selected(param, direction, true),
             MissileAction::RemovePart => {
                 let Some(id) = self.selected.clone() else {
                     return "Select a part first".to_string();
@@ -452,6 +446,53 @@ impl MissileSession {
         }
     }
 
+    /// Adjust the selected part. `snapshot` is false for the notches of a wheel gesture that is
+    /// still running: the gesture's first notch already captured the state to return to.
+    fn adjust_selected(&mut self, param: Param, direction: i8, snapshot: bool) -> String {
+        let Some(id) = self.selected.clone() else {
+            return "Select a part first".to_string();
+        };
+        let Some(part) = self.vehicle.part(&id) else {
+            return String::new();
+        };
+        match adjusted(part.spec, param, f64::from(direction)) {
+            Some(spec) => {
+                if snapshot {
+                    self.push_undo();
+                }
+                self.vehicle.replace_part(&id, spec);
+                String::new()
+            }
+            None => "This part has no such setting".to_string(),
+        }
+    }
+
+    /// One wheel notch on the selected part. Notches of the same gesture share one undo entry.
+    pub fn adjust_wheel(&mut self, param: Param, direction: i8) -> String {
+        self.adjust_wheel_at(param, direction, Instant::now())
+    }
+
+    fn adjust_wheel_at(&mut self, param: Param, direction: i8, now: Instant) -> String {
+        let Some(id) = self.selected.clone() else {
+            return "Select a part first".to_string();
+        };
+        if self.vehicle.part(&id).is_none() {
+            return String::new();
+        }
+        let key = (id, param);
+        let continuous = self
+            .wheel_gesture
+            .as_ref()
+            .is_some_and(|(last, at)| *last == key && now.saturating_duration_since(*at) < WHEEL_GESTURE);
+        let message = self.adjust_selected(param, direction, !continuous);
+        if message.is_empty() {
+            self.wheel_gesture = Some((key, now));
+        } else {
+            self.wheel_gesture = None;
+        }
+        message
+    }
+
     fn push_undo(&mut self) {
         self.undo.push(self.vehicle.clone());
         if self.undo.len() > 50 {
@@ -462,6 +503,7 @@ impl MissileSession {
 
     /// Undo the last workshop edit. The stack holds at most 50 vehicle snapshots.
     pub fn undo(&mut self) -> String {
+        self.wheel_gesture = None;
         let Some(previous) = self.undo.pop() else {
             return "Nothing to undo".to_string();
         };
@@ -472,6 +514,7 @@ impl MissileSession {
     }
 
     pub fn redo(&mut self) -> String {
+        self.wheel_gesture = None;
         let Some(next) = self.redo.pop() else {
             return "Nothing to redo".to_string();
         };
@@ -493,6 +536,7 @@ impl MissileSession {
 
     /// Remove the selected part (and its subtree). Returns the message to show.
     pub fn delete_selected(&mut self) -> String {
+        self.wheel_gesture = None;
         match self.selected.clone() {
             Some(id) if self.vehicle.part(&id).is_some() => {
                 self.push_undo();
@@ -516,6 +560,7 @@ impl MissileSession {
         target: Option<(String, omega_rules::NodeId, f64)>,
         owned: &BTreeSet<String>,
     ) -> String {
+        self.wheel_gesture = None;
         let spec = template.spec();
         if !owned.contains(spec.required_capability()) {
             return format!("Locked: research {} first", spec.required_capability());
@@ -606,6 +651,7 @@ impl MissileSession {
 
     /// Move an existing part (with its subtree) to another node.
     pub fn move_part(&mut self, id: &str, parent: &str, node: omega_rules::NodeId, angle: f64) -> String {
+        self.wheel_gesture = None;
         let Some(part) = self.vehicle.part(id) else {
             return "That part is no longer there".to_string();
         };
@@ -1196,6 +1242,38 @@ mod tests {
         assert!(session.vehicle.validate().is_ok(), "{:?}", session.vehicle.validate());
         let ids: BTreeSet<_> = session.vehicle.parts.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids.len(), session.vehicle.parts.len());
+    }
+
+    #[test]
+    fn a_wheel_gesture_is_one_undo_entry() {
+        let mut session = MissileSession::new_default();
+        select(&mut session, "motor-1");
+        let start = Instant::now();
+        let before = session.vehicle.part("motor-1").unwrap().spec;
+        session.adjust_wheel_at(Param::Length, 1, start);
+        session.adjust_wheel_at(Param::Length, 1, start + Duration::from_millis(120));
+        session.adjust_wheel_at(Param::Length, 1, start + Duration::from_millis(240));
+        assert_eq!(session.undo.len(), 1, "one snapshot for the whole gesture");
+        session.undo();
+        assert_eq!(session.vehicle.part("motor-1").unwrap().spec, before);
+        // A pause ends the gesture, so the next notch is a new entry.
+        select(&mut session, "motor-1");
+        session.adjust_wheel_at(Param::Length, 1, start + Duration::from_secs(2));
+        session.adjust_wheel_at(Param::Length, 1, start + Duration::from_secs(3));
+        assert_eq!(session.undo.len(), 2);
+        assert_eq!(session.wheel_gesture.as_ref().unwrap().0.1, Param::Length);
+    }
+
+    #[test]
+    fn a_button_edit_closes_the_wheel_gesture() {
+        let mut session = MissileSession::new_default();
+        select(&mut session, "motor-1");
+        let owned = everything_owned();
+        let start = Instant::now();
+        session.adjust_wheel_at(Param::Length, 1, start);
+        session.apply(MissileAction::Adjust(Param::Length, 1), &owned);
+        session.adjust_wheel_at(Param::Length, 1, start + Duration::from_millis(100));
+        assert_eq!(session.undo.len(), 3, "three separate edits");
     }
 
     #[test]

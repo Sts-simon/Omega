@@ -69,3 +69,33 @@ The interaction lot kept the values below; each is now covered by code and by a 
 - **Keyboard shortcuts use logical keys** for `Ctrl+Z` / `Ctrl+Y`. On the French AZERTY layout in use
   on the test machine, `Ctrl+Z` arrives as the physical `KeyW`; a `KeyCode::KeyZ` binding silently
   never fired (found in game).
+
+## 2026-11-24 — Wheel gestures, Escape and picking
+
+- **One undo entry per wheel gesture.** Notches on the same part and parameter less than 500 ms apart
+  share the snapshot of the first notch; the session closes the gesture on undo/redo, on any
+  add/move/delete/computer swap, on a `+`/`-` button edit and on the 500 ms pause. Without this, a
+  spin of the wheel filled all 50 history slots.
+- **Escape cancels a drag before leaving.** `WorkshopInput::drag_active` is published at the end of
+  the workshop system and read by `campus::handle_input`, which runs first: while a drag (or a press
+  about to become one) is active, Escape only clears it. A second Escape behaves as before.
+- **Picking shapes** stay in `picking.rs`. Bodies are ray-cast against their cylinder; wings, fins and
+  control surfaces will add a box path in the aerodynamics lot, with the same nearest-hit rule.
+
+## Open values for the aerodynamics lot
+
+These are proposals, not decisions: settle them at the end of phase 1 and record the measured
+figures in this file.
+
+- Surface areal density (kg/m²) for wing, fin set and control surface, and whether mass scales with
+  both span and chord or only area.
+- Body drag coefficient, surface form factor and the sweep penalty: one value per Mach band or a
+  single smooth factor.
+- Lift model: the reduction of the air-breathing minimum speed and the pitch-over gravity loss as a
+  function of `wing_area / reference_area`, with floors so a huge wing cannot make a design free.
+- Stability and control effects: the dispersion reduction curve and the controller error improvement;
+  whether a flight without fins can still be launched vertically.
+- Whether mission families impose hard stability/control requirements or only make the offer
+  unreachable in practice.
+- Tech costs and prerequisites for the three new capabilities; whether wings also need the cruise
+  family or only the aerodynamics node.

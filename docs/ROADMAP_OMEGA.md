@@ -121,6 +121,26 @@ and a real build interaction become possible.
 **Acceptance:** a new player builds a two-stage rocket with two radial boosters with the mouse only;
 old presets keep identical stage figures; every refusal has a message and a test.
 
+### Lot 7 — Aerodynamics: wings, fins and control surfaces (0.32.0, planned)
+
+**Purpose:** make the airframe shape matter. Cruise vehicles get wings that let the air-breathing
+engine work at a lower speed; ballistic vehicles get fins for stability and control surfaces for
+authority, all placed on the same radial nodes and mirrored with `X`.
+
+- Model: one `omega-rules::aero` aggregation (areas, sweep, stability, control authority, surface
+  drag) consumed by the existing 1-D flight integration; no guidance law, no CFD, no per-step geometry.
+- Data: `Wing`, `FinSet` and `ControlSurface` specs, `designs/vehicle.json` schema 4 with migration
+  from schema 3; a design without surfaces keeps byte-identical flight reports.
+- Workshop: aero palette row, flat-box 3D meshes, box picking in `src/picking.rs`, span/chord/sweep in
+  the inspector, leaf-only attachment with a ground-clearance warning.
+- Contracts: stability/control requirements derived from mission family and the cruise range target
+  tuned so wings are the difference between reaching it or not.
+- Full plan, accepted values and open questions: `docs/AERODYNAMICS_PLAN.md`.
+
+**Acceptance:** fins measurably improve stability and altitude settling, wings enable a cruise design
+that the wingless version cannot complete, control surfaces reduce tracking error, old designs fly
+unchanged, schema 3 migrates, and the whole lot is checked in game at 1600×960.
+
 ### Stable release (1.0.0)
 
 Publish only after all work packages pass, CI is green and the full play-through has been manually verified.
