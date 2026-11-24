@@ -60,6 +60,7 @@ pub(crate) enum TransformMode {
 pub(crate) struct TransformGizmo {
     pub mode: TransformMode,
     pub drag: Option<(usize, Vec2, Vec2)>,
+    pub before: Option<Vehicle>,
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +69,16 @@ struct NodePoint {
     node: NodeId,
     angle: f64,
     world: Vec3,
+}
+
+fn gizmo_amount(cursor: Vec2, start: Vec2, screen_axis: Vec2, mode: TransformMode, fine: bool) -> f64 {
+    if mode == TransformMode::Translate {
+        let metres = (cursor - start).dot(screen_axis.normalize_or_zero()) as f64 * 0.02;
+        if fine { metres } else { (metres / 0.1).round() * 0.1 }
+    } else {
+        let degrees = (cursor.x - start.x) as f64 * 0.5;
+        if fine { degrees } else { (degrees / 5.0).round() * 5.0 }
+    }
 }
 
 fn world_of(anchor: Vec3, x: f64, y: f64, z: f64) -> Vec3 {
@@ -245,6 +256,7 @@ pub(crate) fn workshop_pointer(
             }
             if let Some((axis, screen_axis, _)) = nearest {
                 transform_gizmo.drag = Some((axis, cursor, screen_axis.normalize_or_zero()));
+                transform_gizmo.before = Some(session.vehicle.clone());
             }
         }
         if transform_gizmo.drag.is_none() {
@@ -315,29 +327,26 @@ pub(crate) fn workshop_pointer(
         let _ = source;
     }
 
-    // --- finish a drag ---
-    if mouse.just_released(MouseButton::Left)
-        && let Some((axis, start, handle)) = transform_gizmo.drag.take()
+    // Live preview while dragging, then one history entry on release.
+    if mouse.pressed(MouseButton::Left)
+        && let Some((axis, start, screen_axis)) = transform_gizmo.drag
+        && let Some(before) = transform_gizmo.before.as_ref()
     {
-        let delta = cursor - start;
-        let amount = if transform_gizmo.mode == TransformMode::Translate {
-            let screen_axis = handle.normalize_or_zero();
-            let metres = delta.dot(screen_axis) * 0.02;
-            if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-                metres
-            } else {
-                (metres / 0.1).round() * 0.1
-            }
-        } else {
-            let degrees = delta.x * 0.5;
-            if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-                degrees
-            } else {
-                (degrees / 5.0).round() * 5.0
-            }
-        };
+        let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let amount = gizmo_amount(cursor, start, screen_axis, transform_gizmo.mode, fine);
+        session.preview_transform(before, axis, amount, transform_gizmo.mode == TransformMode::Rotate);
+    }
+    if mouse.just_released(MouseButton::Left)
+        && let Some((axis, start, screen_axis)) = transform_gizmo.drag.take()
+    {
+        let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let amount = gizmo_amount(cursor, start, screen_axis, transform_gizmo.mode, fine);
+        if let Some(before) = transform_gizmo.before.take() {
+            session.preview_transform(&before, axis, amount, transform_gizmo.mode == TransformMode::Rotate);
+            session.commit_transform(before);
+        }
         if amount.abs() > 0.001 {
-            campus.message = session.transform_selected(axis, amount, transform_gizmo.mode == TransformMode::Rotate);
+            campus.message = format!("{} {} {amount:+.2}", if transform_gizmo.mode == TransformMode::Rotate { "Rotation" } else { "Déplacement" }, ["X", "Y", "Z"][axis]);
         }
     }
 
