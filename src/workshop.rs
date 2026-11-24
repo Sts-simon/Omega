@@ -365,11 +365,7 @@ pub(crate) fn workshop_pointer(
 
 /// Show free attachment points on the selected body even when no drag is active.
 /// This makes valid mounting locations discoverable instead of hiding them until a drag starts.
-pub(crate) fn draw_attachment_markers(
-    session: Res<MissileSession>,
-    campus: Res<CampusState>,
-    mut gizmos: Gizmos,
-) {
+pub(crate) fn draw_attachment_markers(session: Res<MissileSession>, campus: Res<CampusState>, mut gizmos: Gizmos) {
     if campus.view != CampusView::Missile {
         return;
     }
