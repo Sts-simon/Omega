@@ -328,10 +328,10 @@ pub(crate) fn workshop_pointer(
         }
         transform_gizmo.drag = None;
         transform_gizmo.mode = if rotate_tool_pressed {
-            campus.message = "Rotation : faites glisser un anneau. Axes locaux de la pièce sélectionnée.".to_string();
+            campus.message = "Rotation : glissez un anneau. G : accrochage, T : pas, Maj : libre.".to_string();
             TransformMode::Rotate
         } else {
-            campus.message = "Déplacement : faites glisser une flèche. Maj : réglage fin.".to_string();
+            campus.message = "Déplacement : glissez une flèche. G : accrochage, T : pas, Maj : libre.".to_string();
             TransformMode::Translate
         };
     }
