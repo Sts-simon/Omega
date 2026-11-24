@@ -340,13 +340,21 @@ pub(crate) fn workshop_pointer(
         transform_gizmo.snap_enabled = !transform_gizmo.snap_enabled;
         campus.message = format!(
             "Accrochage {}. G : activer/désactiver, T : précision, Maj : libre.",
-            if transform_gizmo.snap_enabled { "activé" } else { "désactivé" }
+            if transform_gizmo.snap_enabled {
+                "activé"
+            } else {
+                "désactivé"
+            }
         );
     }
     if cycle_snap_pressed {
         transform_gizmo.snap_preset = (transform_gizmo.snap_preset + 1) % 3;
         let step = snap_step(transform_gizmo.mode, transform_gizmo.snap_preset);
-        let unit = if transform_gizmo.mode == TransformMode::Translate { "m" } else { "°" };
+        let unit = if transform_gizmo.mode == TransformMode::Translate {
+            "m"
+        } else {
+            "°"
+        };
         campus.message = format!("Pas d'accrochage : {step}{unit}");
     }
 
@@ -495,11 +503,19 @@ pub(crate) fn workshop_pointer(
             "{} {} : {amount:+.2}{unit}{}",
             if rotating { "Rotation" } else { "Déplacement" },
             ["X", "Y", "Z"][axis],
-            if fine { " | précision libre".to_string() } else if transform_gizmo.snap_enabled {
+            if fine {
+                " | précision libre".to_string()
+            } else if transform_gizmo.snap_enabled {
                 if rotating {
-                    format!(" | pas {}°", snap_step(transform_gizmo.mode, transform_gizmo.snap_preset))
+                    format!(
+                        " | pas {}°",
+                        snap_step(transform_gizmo.mode, transform_gizmo.snap_preset)
+                    )
                 } else {
-                    format!(" | pas {} m", snap_step(transform_gizmo.mode, transform_gizmo.snap_preset))
+                    format!(
+                        " | pas {} m",
+                        snap_step(transform_gizmo.mode, transform_gizmo.snap_preset)
+                    )
                 }
             } else {
                 " | sans accrochage".to_string()
