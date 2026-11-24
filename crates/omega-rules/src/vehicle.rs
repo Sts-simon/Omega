@@ -299,6 +299,37 @@ pub enum PartSpec {
     },
 }
 
+/// Palette grouping. Presentation metadata, owned here so the workshop cannot invent a category
+/// the rules do not know: the palette renders one section per entry of [`PartCategory::ALL`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PartCategory {
+    Propulsion,
+    Airframe,
+    Aerodynamics,
+    Sensors,
+    Avionics,
+}
+
+impl PartCategory {
+    pub const ALL: [Self; 5] = [
+        Self::Propulsion,
+        Self::Airframe,
+        Self::Aerodynamics,
+        Self::Sensors,
+        Self::Avionics,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Propulsion => "PROPULSION",
+            Self::Airframe => "AIRFRAME & PAYLOAD",
+            Self::Aerodynamics => "AERODYNAMIC SURFACES",
+            Self::Sensors => "SENSORS",
+            Self::Avionics => "AVIONICS",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct PartStats {
     pub dry_mass_kg: f64,
@@ -374,6 +405,19 @@ impl PartSpec {
             self,
             Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. }
         )
+    }
+
+    /// Palette section this part belongs to.
+    pub fn category(&self) -> PartCategory {
+        match self {
+            Self::SolidMotor { .. } | Self::FuelTank { .. } | Self::LiquidEngine { .. } | Self::AirBreathing { .. } => {
+                PartCategory::Propulsion
+            }
+            Self::Decoupler | Self::MissionModule { .. } => PartCategory::Airframe,
+            Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. } => PartCategory::Aerodynamics,
+            Self::Sensor { .. } => PartCategory::Sensors,
+            Self::Computer { .. } => PartCategory::Avionics,
+        }
     }
 
     /// Research beyond the part itself: advanced shapes and the light-structure build.
@@ -625,6 +669,45 @@ mod tests {
         let big = PartSpec::LiquidEngine { scale: 2.0 }.stats();
         assert!((big.thrust_n / small.thrust_n - 4.0).abs() < 1e-9);
         assert!(big.dry_mass_kg > 4.0 * small.dry_mass_kg * 0.9);
+    }
+
+    #[test]
+    fn every_part_family_has_one_palette_category() {
+        let parts = [
+            PartSpec::SolidMotor {
+                length_m: 1.0,
+                diameter_m: 0.4,
+                burn_time_s: 10.0,
+            },
+            PartSpec::FuelTank {
+                length_m: 1.0,
+                diameter_m: 0.4,
+            },
+            PartSpec::LiquidEngine { scale: 1.0 },
+            PartSpec::AirBreathing { scale: 1.0 },
+            PartSpec::Decoupler,
+            PartSpec::MissionModule { mass_kg: 10.0 },
+            PartSpec::Sensor {
+                kind: SensorKind::Pitot,
+            },
+            PartSpec::Computer {
+                class: ComputerClass::Basic,
+            },
+            PartSpec::Wing {
+                span_m: 1.0,
+                chord_m: 0.4,
+                sweep_deg: 0.0,
+                planform: WingPlanform::Straight,
+                profile: AirfoilProfile::Classic,
+                light: false,
+            },
+        ];
+        let used: std::collections::BTreeSet<PartCategory> = parts.iter().map(PartSpec::category).collect();
+        assert_eq!(used.len(), PartCategory::ALL.len(), "every category is reachable");
+        for category in PartCategory::ALL {
+            assert!(!category.label().is_empty());
+            assert!(used.contains(&category), "{category:?} has no part");
+        }
     }
 
     #[test]

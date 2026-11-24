@@ -40,6 +40,26 @@ pub(crate) enum PartTemplate {
 }
 
 impl PartTemplate {
+    /// Every palette entry, in the order the workshop shows them inside each category.
+    pub const ALL: [Self; 16] = [
+        Self::SolidMotor,
+        Self::FuelTank,
+        Self::LiquidEngine,
+        Self::AirBreathing,
+        Self::Decoupler,
+        Self::MissionModule,
+        Self::Wing,
+        Self::FinSet,
+        Self::ControlSurface,
+        Self::Pitot,
+        Self::Barometer,
+        Self::RadarBasic,
+        Self::RadarActive,
+        Self::ComputerBasic,
+        Self::ComputerStandard,
+        Self::ComputerAdvanced,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::SolidMotor => "SOLID MOTOR",
@@ -1528,6 +1548,21 @@ mod tests {
 
     fn select(session: &mut MissileSession, id: &str) {
         session.apply(MissileAction::Select { id: id.to_string() }, &starting());
+    }
+
+    #[test]
+    fn the_palette_covers_every_category_with_unique_labels() {
+        let mut labels = BTreeSet::new();
+        for template in PartTemplate::ALL {
+            assert!(labels.insert(template.label()), "duplicate label {}", template.label());
+        }
+        let categories: BTreeSet<omega_rules::PartCategory> =
+            PartTemplate::ALL.iter().map(|t| t.spec().category()).collect();
+        assert_eq!(
+            categories.len(),
+            omega_rules::PartCategory::ALL.len(),
+            "every palette category has at least one part"
+        );
     }
 
     #[test]

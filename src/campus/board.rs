@@ -1014,6 +1014,7 @@ fn build_missile(
     campus: &CampusState,
     session: &MissileSession,
     log: &RevisionLog,
+    procurement: &Procurement,
     scroll: f32,
 ) {
     let owned = campus.owned_capabilities();
@@ -1065,37 +1066,32 @@ fn build_missile(
                     );
                     ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
                 });
-            heading(panel, "ADD PART");
-            let rows: [&[PartTemplate]; 7] = [
-                &[PartTemplate::SolidMotor, PartTemplate::FuelTank],
-                &[PartTemplate::LiquidEngine, PartTemplate::AirBreathing],
-                &[PartTemplate::Pitot, PartTemplate::Barometer],
-                &[PartTemplate::RadarBasic, PartTemplate::RadarActive],
-                &[PartTemplate::Decoupler, PartTemplate::MissionModule],
-                &[
-                    PartTemplate::ComputerBasic,
-                    PartTemplate::ComputerStandard,
-                    PartTemplate::ComputerAdvanced,
-                ],
-                &[
-                    PartTemplate::Wing,
-                    PartTemplate::FinSet,
-                    PartTemplate::ControlSurface,
-                ],
-            ];
-            for row in rows {
-                panel
-                    .spawn(Node {
-                        width: Val::Percent(100.0),
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    })
-                    .with_children(|r| {
-                        for template in row {
-                            let unlocked = owned.contains(template.spec().required_capability());
-                            crate::workshop::spawn_palette_button(r, *template, unlocked);
-                        }
-                    });
+            // The palette is grouped by the rules' own part categories, so a new part family
+            // appears in the right section without editing this board.
+            for category in omega_rules::PartCategory::ALL {
+                let templates: Vec<PartTemplate> = PartTemplate::ALL
+                    .iter()
+                    .copied()
+                    .filter(|template| template.spec().category() == category)
+                    .collect();
+                if templates.is_empty() {
+                    continue;
+                }
+                heading(panel, category.label());
+                for row in templates.chunks(3) {
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            column_gap: Val::Px(4.0),
+                            ..default()
+                        })
+                        .with_children(|r| {
+                            for template in row {
+                                let unlocked = owned.contains(template.spec().required_capability());
+                                crate::workshop::spawn_palette_button(r, *template, unlocked);
+                            }
+                        });
+                }
             }
             ui_kit::label(
                 panel,
@@ -1294,6 +1290,61 @@ fn build_missile(
         });
         let (node, bg, interaction) = panel_node(Val::Percent(100.0));
         middle.spawn((node, bg, interaction)).with_children(|panel| {
+            ui_kit::label(panel, "CONTRACT CHECK", 12.0, ui_kit::ACCENT);
+            match procurement.selected() {
+                None => ui_kit::label(
+                    panel,
+                    "No active contract. Accept one in the CONTRACT OFFICE to see its requirements here.",
+                    9.5,
+                    ui_kit::TEXT_DIM,
+                ),
+                Some(active) => {
+                    let left = active.due_day().saturating_sub(campus.day);
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "#{} {} | due day {} ({} left)",
+                            active.offer.id,
+                            active.offer.title,
+                            active.due_day(),
+                            left
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                    let checks = omega_rules::contract_preview(vehicle, &active.offer);
+                    for check in checks.iter().take(8) {
+                        let color = match check.status {
+                            omega_rules::CheckStatus::Met => ui_kit::GOOD,
+                            omega_rules::CheckStatus::Close => ui_kit::WARN,
+                            omega_rules::CheckStatus::Missed => ui_kit::BAD,
+                            omega_rules::CheckStatus::Unproven => ui_kit::TEXT_DIM,
+                        };
+                        let unit = if check.metric == "launch_mass_kg" { " kg" } else { "" };
+                        let value = check
+                            .value
+                            .map_or("trial".to_string(), |value| format!("{value:.0}{unit}"));
+                        let comparator = match check.comparator {
+                            omega_rules::Comparator::AtLeast => ">=",
+                            omega_rules::Comparator::AtMost => "<=",
+                        };
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "{}: {value} {comparator} {:.0}{unit}  [{}]",
+                                check.label,
+                                check.limit,
+                                check.status.label()
+                            ),
+                            9.5,
+                            color,
+                        );
+                    }
+                }
+            }
+        });
+        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        middle.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "STAGE FIGURES", 12.0, ui_kit::ACCENT);
             let reports = vehicle.stage_reports();
             panel
@@ -1354,9 +1405,16 @@ fn build_missile(
                         });
                     }
                 });
+            let length = vehicle.aero().length_m;
             ui_kit::label(
                 panel,
-                format!("Total mass {:.0} kg", vehicle.total_wet_mass_kg()),
+                format!(
+                    "Total mass {:.0} kg | length {:.2} m | {} parts | {} stages",
+                    vehicle.total_wet_mass_kg(),
+                    length,
+                    vehicle.parts.len(),
+                    vehicle.stage_count()
+                ),
                 11.0,
                 ui_kit::TEXT,
             );
@@ -1395,30 +1453,6 @@ fn build_missile(
                     ui_kit::WARN,
                 );
             }
-            if let Err(issues) = vehicle.validate() {
-                for issue in issues.iter().take(4) {
-                    ui_kit::label(panel, format!("- {issue}"), 10.0, Color::srgb(0.90, 0.60, 0.55));
-                }
-            } else {
-                panel
-                    .spawn(Node::default())
-                    .with_children(|c| ui_kit::chip(c, "DESIGN VALID", ui_kit::GOOD));
-            }
-            // A warning that names a part is a shortcut: pressing it selects that part so the
-            // player can fix it instead of hunting the tree.
-            for warning in vehicle.warning_details().iter().take(3) {
-                match &warning.part {
-                    Some(id) => ui_kit::button(
-                        panel,
-                        format!("{}  [SELECT {}]", warning.message, id),
-                        UiAction::Missile(MissileAction::Select { id: id.clone() }),
-                        ButtonTone::Ghost,
-                        Val::Percent(100.0),
-                    ),
-                    None => ui_kit::label(panel, format!("- {}", warning.message), 9.5, ui_kit::WARN),
-                };
-            }
-            if false {}
         });
     });
 
@@ -1431,15 +1465,15 @@ fn build_missile(
     })
     .with_children(|right| {
         let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
-        // A design with wings, fins and control surfaces has many rows; cap the list so the
-        // selected-part inspector underneath keeps its figures and choice buttons on screen.
-        node.max_height = Val::Percent(56.0);
+        // A design with wings, fins and control surfaces has many rows; cap the tree so the
+        // selected-part inspector and the validation panel underneath keep their rows on screen.
+        node.max_height = Val::Percent(30.0);
         node.overflow = Overflow::clip_y();
         right.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "PARTS BY STAGE (DERIVED)", 12.0, ui_kit::ACCENT);
+            ui_kit::label(panel, "ASSEMBLY TREE", 12.0, ui_kit::ACCENT);
             ui_kit::label(
                 panel,
-                "Stages come from the assembly: a decoupler starts a new one.",
+                "Depth-first from the root. A decoupler starts a new stage.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
@@ -1453,7 +1487,7 @@ fn build_missile(
                         flex_direction: FlexDirection::Column,
                         flex_grow: 1.0,
                         min_height: Val::Px(0.0),
-                        row_gap: Val::Px(6.0),
+                        row_gap: Val::Px(4.0),
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
@@ -1461,28 +1495,27 @@ fn build_missile(
                     PartListScroll,
                 ))
                 .with_children(|panel| {
-                    let mut stage = usize::MAX;
-                    for (index, part) in vehicle.parts() {
-                        if index != stage {
-                            stage = index;
-                            heading(panel, format!("STAGE {}", stage + 1));
-                        }
-                        let tone = if session.selected.as_deref() == Some(part.id.as_str()) {
+                    for entry in vehicle.tree_entries() {
+                        let indent = "   ".repeat(entry.depth);
+                        let node = entry.node.map_or("root".to_string(), |node| node.label());
+                        let tone = if session.selected.as_deref() == Some(entry.id.as_str()) {
                             ButtonTone::Primary
                         } else {
                             ButtonTone::Ghost
                         };
                         ui_kit::button(
                             panel,
-                            format!("{}  {}", part.id, spec_summary(&part.spec)),
-                            UiAction::Missile(MissileAction::Select { id: part.id.clone() }),
+                            format!("{indent}{}  [{node}]  S{}", entry.id, entry.stage + 1),
+                            UiAction::Missile(MissileAction::Select { id: entry.id.clone() }),
                             tone,
                             Val::Percent(100.0),
                         );
                     }
                 });
         });
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        node.max_height = Val::Percent(38.0);
+        node.overflow = Overflow::clip_y();
         right.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "SELECTED PART", 12.0, ui_kit::ACCENT);
             match session.selected_part() {
@@ -1493,6 +1526,39 @@ fn build_missile(
                         11.0,
                         ui_kit::TEXT,
                     );
+                    let (height, radius) = omega_rules::assembly::dimensions(&part.spec);
+                    let place = part.attach.as_ref().map_or("root part".to_string(), |attach| {
+                        format!("on {} via {}", attach.parent, attach.node.label())
+                    });
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "{} | stage {} | {:.2} m x {:.2} m | {}",
+                            place,
+                            vehicle.stage_of(&part.id).unwrap_or(0) + 1,
+                            height,
+                            radius * 2.0,
+                            part.spec.category().label()
+                        ),
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                    let needed: Vec<&str> = std::iter::once(part.spec.required_capability())
+                        .chain(part.spec.extra_capabilities())
+                        .collect();
+                    let missing: Vec<String> = needed
+                        .iter()
+                        .filter(|capability| !owned.contains(**capability))
+                        .map(|capability| omega_rules::research::capability_label(capability))
+                        .collect();
+                    if !missing.is_empty() {
+                        ui_kit::label(
+                            panel,
+                            format!("Needs research: {}", missing.join(", ")),
+                            9.5,
+                            ui_kit::WARN,
+                        );
+                    }
                     let params = missile::params_of(&part.spec);
                     if params.is_empty() {
                         ui_kit::label(panel, "This part has no adjustable setting.", 10.0, ui_kit::TEXT_DIM);
@@ -1528,10 +1594,90 @@ fn build_missile(
                 }
                 None => ui_kit::label(
                     panel,
-                    "Click a part in the list above to resize or remove it.",
+                    "Click a part in the tree above to inspect, resize or remove it.",
                     10.5,
                     ui_kit::TEXT_DIM,
                 ),
+            }
+        });
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        node.flex_grow = 1.0;
+        node.min_height = Val::Px(0.0);
+        node.overflow = Overflow::clip_y();
+        right.spawn((node, bg, interaction)).with_children(|panel| {
+            let issues = vehicle.issues();
+            let errors = issues
+                .iter()
+                .filter(|issue| issue.severity == omega_rules::IssueSeverity::Error)
+                .count();
+            let warnings = issues.len() - errors;
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    align_items: AlignItems::Center,
+                    flex_wrap: FlexWrap::Wrap,
+                    ..default()
+                })
+                .with_children(|row| {
+                    ui_kit::label(row, "VALIDATION", 12.0, ui_kit::ACCENT);
+                    let (text, color) = if errors == 0 {
+                        ("DESIGN VALID".to_string(), ui_kit::GOOD)
+                    } else if errors == 1 {
+                        ("1 ERROR".to_string(), ui_kit::BAD)
+                    } else {
+                        (format!("{errors} ERRORS"), ui_kit::BAD)
+                    };
+                    ui_kit::chip(row, text, color);
+                    if warnings > 0 {
+                        ui_kit::chip(
+                            row,
+                            if warnings == 1 {
+                                "1 WARNING".to_string()
+                            } else {
+                                format!("{warnings} WARNINGS")
+                            },
+                            ui_kit::WARN,
+                        );
+                    }
+                });
+            if issues.is_empty() {
+                ui_kit::label(panel, "No errors and no warnings.", 9.5, ui_kit::TEXT_DIM);
+            }
+            // A row that names a part is a shortcut: pressing it selects that part so the player
+            // can fix it instead of hunting the tree.
+            for issue in issues.iter().take(6) {
+                let prefix = match issue.severity {
+                    omega_rules::IssueSeverity::Error => "ERROR",
+                    omega_rules::IssueSeverity::Warning => "WARN",
+                };
+                match &issue.part {
+                    Some(id) => ui_kit::button(
+                        panel,
+                        format!("{prefix}  {}  [{id}]", issue.message),
+                        UiAction::Missile(MissileAction::Select { id: id.clone() }),
+                        ButtonTone::Ghost,
+                        Val::Percent(100.0),
+                    ),
+                    None => ui_kit::label(
+                        panel,
+                        format!("{prefix}  {}", issue.message),
+                        9.5,
+                        if issue.severity == omega_rules::IssueSeverity::Error {
+                            ui_kit::BAD
+                        } else {
+                            ui_kit::WARN
+                        },
+                    ),
+                };
+            }
+            if issues.len() > 6 {
+                ui_kit::label(
+                    panel,
+                    format!("+{} more issue(s); fix these first", issues.len() - 6),
+                    9.5,
+                    ui_kit::TEXT_DIM,
+                );
             }
         });
     });
@@ -2505,7 +2651,7 @@ fn signature(
         ),
         BoardKind::Research => format!("{:?}|{}|{}", campus.research, campus.credits, campus.day),
         BoardKind::Missile => format!(
-            "{:?}|{:?}|{}|{}|{:?}|{:?}|{:?}",
+            "{:?}|{:?}|{}|{}|{:?}|{:?}|{:?}|{}|{}|{}",
             missile.vehicle,
             missile.selected,
             missile.symmetry,
@@ -2514,7 +2660,11 @@ fn signature(
             log.head().map(|revision| revision.hash.clone()),
             // Recording or clearing the A side must redraw the panel, or it keeps showing the
             // button that was just pressed.
-            missile.comparison
+            missile.comparison,
+            campus.day,
+            procurement.active().len(),
+            // The contract check follows the selected active contract.
+            procurement.selected_id().unwrap_or(0)
         ),
         BoardKind::Program => format!(
             "{:?}|{:?}|{}|{:?}",
@@ -2579,7 +2729,9 @@ pub(crate) fn sync_boards(
                 &program_ref.program,
             ),
             BoardKind::Research => build_research(root, campus_ref, research_scroll.0),
-            BoardKind::Missile => build_missile(root, campus_ref, missile_ref, &log, workshop_scroll.0),
+            BoardKind::Missile => {
+                build_missile(root, campus_ref, missile_ref, &log, procurement_ref, workshop_scroll.0)
+            }
             BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref),
             BoardKind::Trials => build_trials(
                 root,
