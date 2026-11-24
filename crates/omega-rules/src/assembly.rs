@@ -54,6 +54,20 @@ pub struct Attach {
     /// Explicit stage boundary, used by migrated designs whose stage had no decoupler.
     #[serde(default)]
     pub separation: bool,
+    /// Free translation offsets in the assembly's world axes, in metres.
+    #[serde(default)]
+    pub offset_x_m: f64,
+    #[serde(default)]
+    pub offset_y_m: f64,
+    #[serde(default)]
+    pub offset_z_m: f64,
+    /// Local Euler orientation, in degrees. Existing designs default to zero rotation.
+    #[serde(default)]
+    pub rotation_x_deg: f64,
+    #[serde(default)]
+    pub rotation_y_deg: f64,
+    #[serde(default)]
+    pub rotation_z_deg: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -258,6 +272,9 @@ pub struct PartPose {
     pub z_m: f64,
     pub height_m: f64,
     pub radius_m: f64,
+    pub rotation_x_deg: f64,
+    pub rotation_y_deg: f64,
+    pub rotation_z_deg: f64,
 }
 
 impl Vehicle {
@@ -985,10 +1002,14 @@ impl Vehicle {
                 z_m: z,
                 height_m: height,
                 radius_m: radius,
+                rotation_x_deg: part.attach.as_ref().map_or(0.0, |a| a.rotation_x_deg),
+                rotation_y_deg: part.attach.as_ref().map_or(0.0, |a| a.rotation_y_deg),
+                rotation_z_deg: part.attach.as_ref().map_or(0.0, |a| a.rotation_z_deg),
             });
             for child in self.children(&id) {
                 let (child_height, child_radius) = dimensions(&child.spec);
-                let pose = match child.attach.as_ref().map(|a| a.node) {
+                let attach = child.attach.as_ref();
+                let mut pose = match attach.map(|a| a.node) {
                     Some(NodeId::Top) => (
                         y + parent_height / 2.0 + child_height / 2.0,
                         x,
@@ -1017,6 +1038,11 @@ impl Vehicle {
                     }
                     None => (y, x, z, child_height, child_radius),
                 };
+                if let Some(attach) = attach {
+                    pose.0 += attach.offset_y_m;
+                    pose.1 += attach.offset_x_m;
+                    pose.2 += attach.offset_z_m;
+                }
                 stack.push((child.id.clone(), pose));
             }
         }
