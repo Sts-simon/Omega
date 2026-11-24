@@ -22,6 +22,13 @@ The following features are already present in the application:
 
 The recent CI run on the current `main` commit is green. This is a repository baseline, not proof that every platform or user workflow has been manually tested.
 
+### Target architecture programme
+
+`docs/ARCHITECTURE_TARGET.md` owns the subsystem architecture (Workshop, Structure, Aerodynamics,
+Propulsion, Avionics, Programming, Trials, Campaign, Research), the interfaces between them and the
+nine independent lots that build the missing systems (A0–C1). Those lots extend this roadmap; the
+maintenance and release packages above keep their own numbering.
+
 ## Definition of done for 1.0
 
 1. A new player can complete the full contract loop without consulting source code.

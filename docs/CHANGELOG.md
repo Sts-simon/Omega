@@ -1,3 +1,9 @@
+## Unreleased — Target architecture and subsystem roadmap (documentation)
+- **`docs/ARCHITECTURE_TARGET.md`.** Audits the nine target systems against the source tree (four implemented, four partial, structure absent), states that the seven categories are four mission families × three vehicle families, and fixes the ownership of every rule.
+- **Interfaces before content.** The document proposes one `design::figures` façade, `flight::simulate_with`, a `PartSpec::capabilities()` list, subsystem fields on `FlightReport`/`MissileTrial`, the session `apply()` convention and the dependency direction, each additive so existing saves, CLI output and tests keep working.
+- **Nine independent lots (A0–C1)** with dependencies, scope, acceptance criteria and a shared validation standard (fmt/clippy/tests, golden trial JSON, schema fixtures, determinism, scope). Risks recorded: save migration, evidence staleness after numeric drift, the unversioned program file, determinism, rule duplication and release tags.
+- No code, save-schema or behaviour change; the roadmap now points at the target document.
+
 ## Unreleased — Post-aerodynamics follow-ups (0.33.0)
 - **The airframe choices now pay.** Reliability and complexity had no gameplay reader: a fragile airframe (below 60 reliability) now draws at most one seeded surface fault per trial, halving control authority and recording an anomaly, while a sound design never does. The light build is therefore a real trade instead of a free mass saving.
 - **Dossiers pay for quality.** Delivery used to credit the offer's fixed fee whatever the score; the fee is now nominal at the 60 % acceptance threshold and rises to +15 % for a perfect dossier, so the added aero requirements and the batch/AB tooling have an economic payoff.
