@@ -1679,8 +1679,7 @@ pub(crate) fn sync_missile_visuals(
                     root.spawn((
                         Mesh3d(meshes.add(Cuboid::new(segment_span * 1.03, chord, 0.06))),
                         MeshMaterial3d(material.clone()),
-                        Transform::from_xyz(b.x + offset.x, mid + offset.y, b.z + offset.z)
-                            .with_rotation(rotation),
+                        Transform::from_xyz(b.x + offset.x, mid + offset.y, b.z + offset.z).with_rotation(rotation),
                     ));
                 }
                 continue;
