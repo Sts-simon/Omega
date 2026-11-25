@@ -47,6 +47,22 @@ pub(crate) struct PartListScroll;
 #[derive(Resource, Default)]
 pub(crate) struct WorkshopScroll(pub(crate) f32);
 
+/// Marks the scrolling container that holds the workshop palette.
+#[derive(Component)]
+pub(crate) struct WorkshopPaletteList;
+
+/// Scroll offset of the workshop palette, kept across board rebuilds.
+#[derive(Resource, Default)]
+pub(crate) struct WorkshopPaletteScroll(pub(crate) f32);
+
+/// Marks the scrolling container that holds the program block library.
+#[derive(Component)]
+pub(crate) struct ProgramPaletteList;
+
+/// Scroll offset of the program palette, kept across board rebuilds.
+#[derive(Resource, Default)]
+pub(crate) struct ProgramPaletteScroll(pub(crate) f32);
+
 fn root_node(kind: BoardKind) -> Node {
     let mut node = Node {
         position_type: PositionType::Absolute,
@@ -1095,22 +1111,43 @@ fn build_missile(
     log: &RevisionLog,
     procurement: &Procurement,
     scroll: f32,
+    palette_scroll: f32,
 ) {
     let owned = campus.owned_capabilities();
     let vehicle = &session.vehicle;
 
-    // Left: palette
+    // Left: palette. It scrolls on short windows so the versions panel stays reachable.
     root.spawn(Node {
         flex_direction: FlexDirection::Column,
         width: Val::Px(252.0),
+        height: Val::Percent(100.0),
+        min_height: Val::Px(0.0),
         row_gap: Val::Px(10.0),
         ..default()
     })
     .with_children(|left| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
-        left.spawn((node, bg, interaction)).with_children(|panel| {
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        node.flex_grow = 1.0;
+        node.min_height = Val::Px(0.0);
+        left.spawn((node, bg, interaction))
+        .with_children(|panel| {
             ui_kit::label(panel, "MISSILE WORKSHOP", 15.0, ui_kit::ACCENT);
             ui_kit::label(panel, vehicle.name.clone(), 10.5, ui_kit::TEXT_DIM);
+            // Only the palette scrolls; the versions footer stays outside the scroll area.
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        min_height: Val::Px(0.0),
+                        row_gap: Val::Px(6.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    ScrollPosition(Vec2::new(0.0, palette_scroll)),
+                    WorkshopPaletteList,
+                ))
+                .with_children(|panel| {
             heading(panel, "START FROM");
             panel
                 .spawn(Node {
@@ -1228,15 +1265,26 @@ fn build_missile(
                         ButtonTone::Ghost,
                     );
                 });
-            heading(panel, "VERSIONS");
-            ui_kit::label(panel, log.missile_hud_text(vehicle), 9.0, ui_kit::TEXT_DIM);
-            ui_kit::button(
-                panel,
-                "RECORD REVISION",
-                UiAction::RecordMissileRevision,
-                ButtonTone::Secondary,
-                Val::Percent(100.0),
-            );
+                });
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    flex_shrink: 0.0,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|footer| {
+                    heading(footer, "VERSIONS");
+                    ui_kit::label(footer, log.missile_hud_text(vehicle), 9.0, ui_kit::TEXT_DIM);
+                    ui_kit::button(
+                        footer,
+                        "RECORD REVISION",
+                        UiAction::RecordMissileRevision,
+                        ButtonTone::Secondary,
+                        Val::Percent(100.0),
+                    );
+                });
         });
     });
 
@@ -1900,74 +1948,110 @@ fn build_missile(
 // Workshop project card
 // ----------------------------------------------------------------------------------------------
 
-fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Vehicle, session: &MissileProgramSession) {
+fn build_program(
+    root: &mut ChildSpawnerCommands<'_>,
+    vehicle: &omega_rules::Vehicle,
+    session: &MissileProgramSession,
+    palette_scroll: f32,
+) {
     let issues = session.issues(vehicle);
 
-    // Left: block palette, gated by the hardware fitted to the vehicle.
+    // Left: block palette, gated by the hardware fitted to the vehicle. It scrolls on short
+    // windows so CLEAR PROGRAM stays reachable.
     root.spawn(Node {
         flex_direction: FlexDirection::Column,
         width: Val::Px(252.0),
+        height: Val::Percent(100.0),
+        min_height: Val::Px(0.0),
         row_gap: Val::Px(10.0),
         ..default()
     })
     .with_children(|left| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
+        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
+        node.flex_grow = 1.0;
+        node.min_height = Val::Px(0.0);
         left.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "MISSILE PROGRAM", 15.0, ui_kit::ACCENT);
             ui_kit::label(panel, vehicle.name.clone(), 10.5, ui_kit::TEXT_DIM);
-            heading(panel, "BLOCK LIBRARY");
-            // The palette follows the rules' categories, so a new block family lands in the right
-            // section without editing this board.
-            for category in omega_rules::BlockCategory::ALL {
-                let kinds: Vec<BlockKind> = BlockKind::ALL
-                    .iter()
-                    .copied()
-                    .filter(|kind| kind.category() == category)
-                    .collect();
-                if kinds.is_empty() {
-                    continue;
-                }
-                heading(panel, category.label());
-                for row in kinds.chunks(2) {
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        })
-                        .with_children(|r| {
-                            for kind in row {
-                                let tone = if kind.available(vehicle) {
-                                    ButtonTone::Secondary
-                                } else {
-                                    ButtonTone::Disabled
-                                };
-                                // A selected block is the insertion point; with nothing selected
-                                // the library appends to the thread.
-                                let action = if session.block.is_some() {
-                                    ProgramAction::Insert(*kind)
-                                } else {
-                                    ProgramAction::Append(*kind)
-                                };
-                                ui_kit::button_row_item(r, kind.label(), UiAction::Program(action), tone);
-                            }
-                        });
-                }
-            }
-            ui_kit::label(
-                panel,
-                "Greyed blocks need hardware this vehicle does not carry.",
-                9.5,
-                ui_kit::TEXT_DIM,
-            );
-            heading(panel, "PROGRAM");
-            ui_kit::button(
-                panel,
-                "CLEAR PROGRAM",
-                UiAction::Program(ProgramAction::Clear),
-                ButtonTone::Danger,
-                Val::Percent(100.0),
-            );
+            // Only the library scrolls; the clear action stays outside the scroll area.
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        min_height: Val::Px(0.0),
+                        row_gap: Val::Px(6.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    ScrollPosition(Vec2::new(0.0, palette_scroll)),
+                    ProgramPaletteList,
+                ))
+                .with_children(|panel| {
+                    heading(panel, "BLOCK LIBRARY");
+                    // The palette follows the rules' categories, so a new block family lands in the right
+                    // section without editing this board.
+                    for category in omega_rules::BlockCategory::ALL {
+                        let kinds: Vec<BlockKind> = BlockKind::ALL
+                            .iter()
+                            .copied()
+                            .filter(|kind| kind.category() == category)
+                            .collect();
+                        if kinds.is_empty() {
+                            continue;
+                        }
+                        heading(panel, category.label());
+                        for row in kinds.chunks(2) {
+                            panel
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    column_gap: Val::Px(4.0),
+                                    ..default()
+                                })
+                                .with_children(|r| {
+                                    for kind in row {
+                                        let tone = if kind.available(vehicle) {
+                                            ButtonTone::Secondary
+                                        } else {
+                                            ButtonTone::Disabled
+                                        };
+                                        // A selected block is the insertion point; with nothing selected
+                                        // the library appends to the thread.
+                                        let action = if session.block.is_some() {
+                                            ProgramAction::Insert(*kind)
+                                        } else {
+                                            ProgramAction::Append(*kind)
+                                        };
+                                        ui_kit::button_row_item(r, kind.label(), UiAction::Program(action), tone);
+                                    }
+                                });
+                        }
+                    }
+                    ui_kit::label(
+                        panel,
+                        "Greyed blocks need hardware this vehicle does not carry.",
+                        9.5,
+                        ui_kit::TEXT_DIM,
+                    );
+                });
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    flex_shrink: 0.0,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|footer| {
+                    heading(footer, "PROGRAM");
+                    ui_kit::button(
+                        footer,
+                        "CLEAR PROGRAM",
+                        UiAction::Program(ProgramAction::Clear),
+                        ButtonTone::Danger,
+                        Val::Percent(100.0),
+                    );
+                });
         });
     });
 
@@ -2972,6 +3056,7 @@ fn build_trials(
 
 /// Mouse-wheel scrolling for the workshop stage list, mirroring [`scroll_program_list`].
 pub(crate) fn scroll_part_list(
+    window: Single<&Window>,
     wheel: Res<AccumulatedMouseScroll>,
     mut scroll: ResMut<WorkshopScroll>,
     mut lists: Query<&mut ScrollPosition, With<PartListScroll>>,
@@ -2979,6 +3064,68 @@ pub(crate) fn scroll_part_list(
     let Ok(mut position) = lists.single_mut() else {
         return;
     };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    if cursor.x < window.width() - 380.0 {
+        return;
+    }
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    if scroll.0 != position.y {
+        scroll.0 = position.y;
+    }
+}
+
+/// Mouse-wheel scrolling for the workshop palette, only while the cursor is over its column.
+pub(crate) fn scroll_workshop_palette(
+    window: Single<&Window>,
+    wheel: Res<AccumulatedMouseScroll>,
+    mut scroll: ResMut<WorkshopPaletteScroll>,
+    mut lists: Query<&mut ScrollPosition, With<WorkshopPaletteList>>,
+) {
+    let Ok(mut position) = lists.single_mut() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    if cursor.x >= 280.0 {
+        return;
+    }
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    if scroll.0 != position.y {
+        scroll.0 = position.y;
+    }
+}
+
+/// Mouse-wheel scrolling for the program palette, only while the cursor is over its column.
+pub(crate) fn scroll_program_palette(
+    window: Single<&Window>,
+    wheel: Res<AccumulatedMouseScroll>,
+    mut scroll: ResMut<ProgramPaletteScroll>,
+    mut lists: Query<&mut ScrollPosition, With<ProgramPaletteList>>,
+) {
+    let Ok(mut position) = lists.single_mut() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    if cursor.x >= 280.0 {
+        return;
+    }
     if wheel.delta.y != 0.0 {
         let step = match wheel.unit {
             MouseScrollUnit::Line => 34.0,
@@ -3017,9 +3164,10 @@ pub(crate) fn scroll_research_grid(
 ///
 /// `bevy_ui` moves a node's children by `ScrollPosition` but nothing turns the wheel into an
 /// offset, so the list would stay stuck on its first blocks once a program outgrows the panel. The
-/// offset is mirrored in the session because the board is rebuilt after every edit, and the wheel
-/// always targets the list: it is the only scrollable thing in this view, whose orbit camera is off.
+/// offset is mirrored in the session because the board is rebuilt after every edit; the wheel only
+/// targets the list while the cursor is over the middle column, since the block library also scrolls.
 pub(crate) fn scroll_program_list(
+    window: Single<&Window>,
     wheel: Res<AccumulatedMouseScroll>,
     mut session: ResMut<MissileProgramSession>,
     mut lists: Query<&mut ScrollPosition, With<ProgramListScroll>>,
@@ -3027,6 +3175,12 @@ pub(crate) fn scroll_program_list(
     let Ok(mut position) = lists.single_mut() else {
         return;
     };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    if cursor.x < 280.0 {
+        return;
+    }
     if wheel.delta.y != 0.0 {
         let step = match wheel.unit {
             MouseScrollUnit::Line => 34.0,
@@ -3120,6 +3274,8 @@ pub(crate) fn sync_boards(
     log: Res<RevisionLog>,
     research_scroll: Res<ResearchScroll>,
     workshop_scroll: Res<WorkshopScroll>,
+    workshop_palette_scroll: Res<WorkshopPaletteScroll>,
+    program_palette_scroll: Res<ProgramPaletteScroll>,
     mut boards: Query<(Entity, &mut Node, &BoardKind)>,
     mut seen: Local<HashMap<BoardKind, String>>,
 ) {
@@ -3155,10 +3311,16 @@ pub(crate) fn sync_boards(
                 &program_ref.program,
             ),
             BoardKind::Research => build_research(root, campus_ref, research_scroll.0),
-            BoardKind::Missile => {
-                build_missile(root, campus_ref, missile_ref, &log, procurement_ref, workshop_scroll.0)
-            }
-            BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref),
+            BoardKind::Missile => build_missile(
+                root,
+                campus_ref,
+                missile_ref,
+                &log,
+                procurement_ref,
+                workshop_scroll.0,
+                workshop_palette_scroll.0,
+            ),
+            BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref, program_palette_scroll.0),
             BoardKind::Trials => build_trials(
                 root,
                 campus_ref,
@@ -3227,19 +3389,33 @@ pub(crate) fn update_toast(
 }
 
 pub(crate) fn update_nav_status(
+    window: Single<&Window>,
     campus: Res<CampusState>,
     procurement: Res<Procurement>,
     mut status: Query<&mut Text, With<NavStatus>>,
 ) {
     if let Ok(mut text) = status.single_mut() {
-        let value = format!(
-            "JOUR {}   |   {} crédits   |   {}/{} contrats actifs   |   {} livrés",
-            campus.day,
-            ui_kit::thousands(campus.credits),
-            procurement.active().len(),
-            campus.max_active_projects(),
-            procurement.completed().len()
-        );
+        // On a narrow window the full status would wrap under the nav buttons; split it into two
+        // short lines instead (the bar is 62 px, room for two 13 px lines).
+        let value = if window.width() < 1400.0 {
+            format!(
+                "JOUR {} · {} crédits\n{}/{} contrats · {} livrés",
+                campus.day,
+                ui_kit::thousands(campus.credits),
+                procurement.active().len(),
+                campus.max_active_projects(),
+                procurement.completed().len()
+            )
+        } else {
+            format!(
+                "JOUR {}   |   {} crédits   |   {}/{} contrats actifs   |   {} livrés",
+                campus.day,
+                ui_kit::thousands(campus.credits),
+                procurement.active().len(),
+                campus.max_active_projects(),
+                procurement.completed().len()
+            )
+        };
         if text.0 != value {
             text.0 = value;
         }

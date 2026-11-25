@@ -38,6 +38,8 @@ fn main() {
         .init_resource::<procurement::Procurement>()
         .init_resource::<campus::ResearchScroll>()
         .init_resource::<campus::WorkshopScroll>()
+        .init_resource::<campus::WorkshopPaletteScroll>()
+        .init_resource::<campus::ProgramPaletteScroll>()
         .init_resource::<workshop::DragState>()
         .init_resource::<workshop::WorkshopInput>()
         .init_resource::<workshop::TransformGizmo>()
@@ -73,6 +75,8 @@ fn main() {
                     campus::scroll_program_list,
                     campus::scroll_research_grid,
                     campus::scroll_part_list,
+                    campus::scroll_workshop_palette,
+                    campus::scroll_program_palette,
                     workshop::draw_attachment_markers,
                     workshop::draw_aero_markers,
                     missile::sync_missile_visuals,
@@ -81,7 +85,6 @@ fn main() {
                     campus::poll_trial_batch,
                     campus::update_batch_progress,
                     campus::update_nav_status,
-                    interface::sync_layout,
                 )
                     .chain(),
             )

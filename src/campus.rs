@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 mod board;
 
 pub(crate) use board::{
-    ResearchScroll, ToastText, WorkshopScroll, handle_extra_actions, poll_trial_batch, scroll_part_list,
-    scroll_program_list, scroll_research_grid, setup_boards, sync_boards, update_batch_progress, update_nav_status,
-    update_toast,
+    ProgramPaletteScroll, ResearchScroll, ToastText, WorkshopPaletteScroll, WorkshopScroll, handle_extra_actions,
+    poll_trial_batch, scroll_part_list, scroll_program_list, scroll_program_palette, scroll_research_grid,
+    scroll_workshop_palette, setup_boards, sync_boards, update_batch_progress, update_nav_status, update_toast,
 };
 
 const CAMPAIGN_SCHEMA: u32 = 2;

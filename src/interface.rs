@@ -24,9 +24,6 @@ pub(crate) enum UiAction {
 #[derive(Component)]
 pub(crate) struct UiActionButton(pub(crate) UiAction);
 
-#[derive(Component)]
-pub(crate) struct NavigationBar;
-
 pub fn setup(mut commands: Commands) {
     let nav = commands
         .spawn((
@@ -49,7 +46,6 @@ pub fn setup(mut commands: Commands) {
             },
             UiInteraction::None,
             BackgroundColor(Color::srgba(0.012, 0.024, 0.036, 0.96)),
-            NavigationBar,
         ))
         .id();
 
@@ -80,7 +76,8 @@ pub fn setup(mut commands: Commands) {
             .spawn(Node {
                 flex_grow: 1.0,
                 flex_basis: Val::Px(0.0),
-                max_height: Val::Px(46.0),
+                height: Val::Px(18.0),
+                align_items: AlignItems::Center,
                 margin: UiRect {
                     left: Val::Px(14.0),
                     right: Val::Px(14.0),
@@ -175,22 +172,5 @@ pub fn handle_actions(
             | UiAction::Program(_)
             | UiAction::Trial(_) => {}
         }
-    }
-}
-
-/// The nav bar is the only fixed chrome left, so the only layout work is keeping the status text
-/// from pushing the buttons off screen when the window is narrow.
-pub fn sync_layout(
-    window: Single<&Window>,
-    mut bars: Query<&mut Node, With<NavigationBar>>,
-    mut texts: Query<(&mut Text, &NavStatus)>,
-) {
-    for (mut text, _) in &mut texts {
-        if window.width() < 1180.0 && !text.0.contains('\n') {
-            text.0 = text.0.replace("   |   ", "\n");
-        }
-    }
-    for mut node in &mut bars {
-        node.height = Val::Px(if window.width() < 1180.0 { 78.0 } else { 62.0 });
     }
 }
