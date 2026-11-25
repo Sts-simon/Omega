@@ -8,7 +8,7 @@ Omega is a fictional, abstract game about completing military-themed design cont
 
 All values and outcomes are game mechanics. The project does not attempt to model real weapons, real targeting, guidance, navigation, seeker logic, warheads or real-world performance. This boundary is deliberate and is not a future feature.
 
-## Current baseline (0.36.0)
+## Current baseline (0.39.0)
 
 The following features are already present in the application:
 
@@ -21,6 +21,13 @@ The following features are already present in the application:
 - **Quality:** GitHub Actions checks formatting, Clippy with warnings denied and workspace tests.
 
 The recent CI run on the current `main` commit is green. This is a repository baseline, not proof that every platform or user workflow has been manually tested.
+
+### Delivered follow-up (0.39.0)
+
+- Done: the selected-part inspector exposes local X/Y/Z translation and rotation nudges, with separate values and actions for each axis.
+- Done: translation steps are 0.05 m and rotation steps are 5°; each click is one undo/redo transaction and uses the existing vehicle save schema.
+- Done: regression tests cover axis independence, undo/redo and refusing independent transforms on the root part.
+- Remaining: direct numeric text entry, per-field precision selection and a complete visual pass at 1280×720 and 1600×960.
 
 ## Definition of done for 1.0
 
