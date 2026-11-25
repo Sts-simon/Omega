@@ -2413,9 +2413,14 @@ mod tests {
 
     #[test]
     fn inspector_transform_refuses_root_part_without_creating_history() {
-        let mut session = MissileSession::new_default();
+        let mut session = MissileSession::default();
         let owned = everything_owned();
-        session.apply(
+        session.add_at(PartTemplate::SolidMotor, None, &owned);
+        session.undo.clear();
+        session.redo.clear();
+        assert!(session.selected_part().unwrap().attach.is_none());
+
+        let message = session.apply(
             MissileAction::AdjustTransform {
                 axis: 1,
                 delta: 0.05,
@@ -2423,6 +2428,7 @@ mod tests {
             },
             &owned,
         );
+        assert!(message.contains("root part"));
         assert!(session.undo().contains("Nothing to undo"));
     }
 }
