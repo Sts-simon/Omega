@@ -1041,7 +1041,6 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
     }
 }
 
-
 fn transform_axis_row(
     parent: &mut ChildSpawnerCommands<'_>,
     axis_label: &'static str,
@@ -1057,20 +1056,31 @@ fn transform_axis_row(
             ..default()
         })
         .with_children(|row| {
-            row.spawn(Node { width: Val::Px(14.0), ..default() })
-                .with_children(|label| ui_kit::label(label, axis_label, 10.0, ui_kit::ACCENT));
+            row.spawn(Node {
+                width: Val::Px(14.0),
+                ..default()
+            })
+            .with_children(|label| ui_kit::label(label, axis_label, 10.0, ui_kit::ACCENT));
             ui_kit::label(row, format!("{position:+.2} m"), 9.5, ui_kit::TEXT);
             ui_kit::button(
                 row,
                 "−",
-                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: -0.05, rotate: false }),
+                UiAction::Missile(MissileAction::AdjustTransform {
+                    axis,
+                    delta: -0.05,
+                    rotate: false,
+                }),
                 ButtonTone::Secondary,
                 Val::Px(24.0),
             );
             ui_kit::button(
                 row,
                 "+",
-                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: 0.05, rotate: false }),
+                UiAction::Missile(MissileAction::AdjustTransform {
+                    axis,
+                    delta: 0.05,
+                    rotate: false,
+                }),
                 ButtonTone::Secondary,
                 Val::Px(24.0),
             );
@@ -1078,14 +1088,22 @@ fn transform_axis_row(
             ui_kit::button(
                 row,
                 "−",
-                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: -5.0, rotate: true }),
+                UiAction::Missile(MissileAction::AdjustTransform {
+                    axis,
+                    delta: -5.0,
+                    rotate: true,
+                }),
                 ButtonTone::Secondary,
                 Val::Px(24.0),
             );
             ui_kit::button(
                 row,
                 "+",
-                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: 5.0, rotate: true }),
+                UiAction::Missile(MissileAction::AdjustTransform {
+                    axis,
+                    delta: 5.0,
+                    rotate: true,
+                }),
                 ButtonTone::Secondary,
                 Val::Px(24.0),
             );
