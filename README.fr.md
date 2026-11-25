@@ -1,6 +1,6 @@
 # Omega — Conception de véhicules militaires
 
-**Version 0.38.0** · Jeu fictif développé en Rust et Bevy.
+**Version 0.39.0** · Jeu fictif développé en Rust et Bevy.
 
 [Documentation anglaise](README.md) · [Dépôt GitHub](https://github.com/Sts-simon/Omega)
 
