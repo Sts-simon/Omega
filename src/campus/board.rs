@@ -1041,6 +1041,57 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
     }
 }
 
+
+fn transform_axis_row(
+    parent: &mut ChildSpawnerCommands<'_>,
+    axis_label: &'static str,
+    axis: usize,
+    position: f64,
+    rotation: f64,
+) {
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(3.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node { width: Val::Px(14.0), ..default() })
+                .with_children(|label| ui_kit::label(label, axis_label, 10.0, ui_kit::ACCENT));
+            ui_kit::label(row, format!("{position:+.2} m"), 9.5, ui_kit::TEXT);
+            ui_kit::button(
+                row,
+                "−",
+                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: -0.05, rotate: false }),
+                ButtonTone::Secondary,
+                Val::Px(24.0),
+            );
+            ui_kit::button(
+                row,
+                "+",
+                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: 0.05, rotate: false }),
+                ButtonTone::Secondary,
+                Val::Px(24.0),
+            );
+            ui_kit::label(row, format!("{rotation:.0}°"), 9.5, ui_kit::TEXT);
+            ui_kit::button(
+                row,
+                "−",
+                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: -5.0, rotate: true }),
+                ButtonTone::Secondary,
+                Val::Px(24.0),
+            );
+            ui_kit::button(
+                row,
+                "+",
+                UiAction::Missile(MissileAction::AdjustTransform { axis, delta: 5.0, rotate: true }),
+                ButtonTone::Secondary,
+                Val::Px(24.0),
+            );
+        });
+}
+
 fn param_row(parent: &mut ChildSpawnerCommands<'_>, param: missile::Param, value: f64) {
     parent
         .spawn(Node {
@@ -1734,24 +1785,10 @@ fn build_missile(
                         ui_kit::TEXT_DIM,
                     );
                     if let Some(attach) = part.attach.as_ref() {
-                        ui_kit::label(
-                            panel,
-                            format!(
-                                "Position : X {:+.2} | Y {:+.2} | Z {:+.2} m",
-                                attach.offset_x_m, attach.offset_y_m, attach.offset_z_m
-                            ),
-                            9.5,
-                            ui_kit::TEXT_DIM,
-                        );
-                        ui_kit::label(
-                            panel,
-                            format!(
-                                "Rotation : X {:.0}° | Y {:.0}° | Z {:.0}°",
-                                attach.rotation_x_deg, attach.rotation_y_deg, attach.rotation_z_deg
-                            ),
-                            9.5,
-                            ui_kit::TEXT_DIM,
-                        );
+                        ui_kit::label(panel, "TRANSFORMATIONS LOCALES · pas 0,05 m / 5°", 9.5, ui_kit::ACCENT);
+                        transform_axis_row(panel, "X", 0, attach.offset_x_m, attach.rotation_x_deg);
+                        transform_axis_row(panel, "Y", 1, attach.offset_y_m, attach.rotation_y_deg);
+                        transform_axis_row(panel, "Z", 2, attach.offset_z_m, attach.rotation_z_deg);
                     }
                     let needed: Vec<&str> = std::iter::once(part.spec.required_capability())
                         .chain(part.spec.extra_capabilities())
