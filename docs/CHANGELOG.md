@@ -1,3 +1,13 @@
+## 0.38.0 — Ergonomie du gizmo, angle d'aile et interface lisible
+
+- Gizmo de transformation affiné : poignées et anneaux plus faciles à saisir, aperçu pendant le glissement et une seule entrée d'annulation par geste ; l'aide de l'atelier rappelle les commandes W/R.
+- Angle d'aile réglable, avec un effet de jeu abstrait, annulable et visible dans l'inspecteur.
+- Formes d'ailes distinctes dessinées dans l'atelier (droite, flèche, delta, trapézoïdale, géométrie variable) ; les segments restent alignés quand l'aile pivote.
+- Police DejaVu Sans Mono embarquée dans `assets/fonts` : les accents français (É, È, à, é, ç…) ne s'affichent plus comme des carrés vides. La licence de la police est fournie avec le fichier.
+- Traduction française complétée : atelier, inspecteur, bilan des étages, validation, programme (blocs, tâches, bibliothèque, débogueur), essais et contrats.
+- Mise en page réparée : les boutons de blocs restent dans leur colonne, le résumé du véhicule ne déborde plus et l'aide raccourcie de l'atelier laisse le panneau VERSIONS entièrement visible.
+- Vérification graphique en jeu à 1600 × 960 ; la suite de tests, `cargo fmt` et `cargo clippy -D warnings` restent verts.
+
 ## 0.37.0 — Atelier de construction et interface française
 
 - Palette de construction filtrable par catégorie : tout, propulsion, structure, aérodynamique, capteurs et avionique. Le filtre est un état d'interface et ne modifie pas le véhicule.
