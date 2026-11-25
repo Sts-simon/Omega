@@ -1,3 +1,12 @@
+## 0.39.0 — Inspecteur de transformations précises
+
+- L'inspecteur permet maintenant de régler séparément la translation et la rotation locales sur X, Y et Z.
+- Chaque axe dispose de commandes dédiées : ±0,05 m en translation et ±5° en rotation ; les valeurs sont actualisées immédiatement dans l'atelier.
+- Chaque clic constitue une modification annulable/rétablissable, sans modifier les autres axes.
+- Les rotations restent normalisées sur 360° et les transformations sont conservées dans la sauvegarde existante.
+- Ajout de tests sur l'indépendance des axes, l'annulation/rétablissement et le refus de transformer la pièce racine.
+- Les valeurs restent des paramètres d'édition et de gameplay fictifs, sans prétention de modélisation physique réelle.
+
 ## 0.38.0 — Ergonomie du gizmo, angle d'aile et interface lisible
 
 - Gizmo de transformation affiné : poignées et anneaux plus faciles à saisir, aperçu pendant le glissement et une seule entrée d'annulation par geste ; l'aide de l'atelier rappelle les commandes W/R.

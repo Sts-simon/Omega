@@ -668,6 +668,13 @@ pub(crate) enum MissileAction {
         id: String,
     },
     Adjust(Param, i8),
+    /// Nudge one local attachment axis from the numeric inspector. Translation is in metres;
+    /// rotation is in degrees. These are editor/gameplay coordinates, not physical guidance data.
+    AdjustTransform {
+        axis: usize,
+        delta: f64,
+        rotate: bool,
+    },
     CycleAero(AeroChoice),
     /// Keep the current aerodynamic figures as the A side of a comparison.
     CompareAero,
@@ -878,6 +885,7 @@ impl MissileSession {
                 String::new()
             }
             MissileAction::Adjust(param, direction) => self.adjust_selected(param, direction, true),
+            MissileAction::AdjustTransform { axis, delta, rotate } => self.adjust_transform(axis, delta, rotate),
             MissileAction::CycleAero(choice) => self.cycle_aero(choice, owned),
             MissileAction::CompareAero => {
                 self.comparison = Some(self.vehicle.aero());
@@ -1241,6 +1249,15 @@ impl MissileSession {
         };
         attach.angle_deg = (attach.angle_deg + f64::from(direction) * 15.0).rem_euclid(360.0);
         format!("{id}: rotation {:.0}°", attach.angle_deg)
+    }
+
+    /// Apply one precise inspector nudge and record it as a single undoable edit.
+    fn adjust_transform(&mut self, axis: usize, delta: f64, rotate: bool) -> String {
+        self.wheel_gesture = None;
+        let before = self.vehicle.clone();
+        let message = self.preview_transform(&before, axis, delta, rotate);
+        self.commit_transform(before);
+        message
     }
 
     /// Preview a KSP gizmo transform from the drag's original design, without adding undo entries.
@@ -2346,5 +2363,72 @@ mod tests {
         assert!(session.vehicle.aero().stability > saved.stability);
         session.apply(MissileAction::ClearComparison, &owned);
         assert!(session.comparison.is_none());
+    }
+    #[test]
+    fn inspector_transform_nudges_are_axis_specific_and_undoable() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.add_at(
+            PartTemplate::Wing,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let wing = session.selected.clone().unwrap();
+
+        session.apply(
+            MissileAction::AdjustTransform {
+                axis: 0,
+                delta: 0.05,
+                rotate: false,
+            },
+            &owned,
+        );
+        session.apply(
+            MissileAction::AdjustTransform {
+                axis: 2,
+                delta: -5.0,
+                rotate: true,
+            },
+            &owned,
+        );
+        let attach = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert!((attach.offset_x_m - 0.05).abs() < 1e-9);
+        assert_eq!(attach.offset_y_m, 0.0);
+        assert_eq!(attach.offset_z_m, 0.0);
+        assert_eq!(attach.rotation_x_deg, 0.0);
+        assert_eq!(attach.rotation_y_deg, 0.0);
+        assert_eq!(attach.rotation_z_deg, 355.0);
+
+        session.undo();
+        let attach = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert_eq!(attach.rotation_z_deg, 0.0);
+        assert!((attach.offset_x_m - 0.05).abs() < 1e-9);
+        session.undo();
+        let attach = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert_eq!(attach.offset_x_m, 0.0);
+        session.redo();
+        let attach = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert!((attach.offset_x_m - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn inspector_transform_refuses_root_part_without_creating_history() {
+        let mut session = MissileSession::default();
+        let owned = everything_owned();
+        session.add_at(PartTemplate::SolidMotor, None, &owned);
+        session.undo.clear();
+        session.redo.clear();
+        assert!(session.selected_part().unwrap().attach.is_none());
+
+        let message = session.apply(
+            MissileAction::AdjustTransform {
+                axis: 1,
+                delta: 0.05,
+                rotate: false,
+            },
+            &owned,
+        );
+        assert!(message.contains("root part"));
+        assert!(session.undo().contains("Nothing to undo"));
     }
 }
