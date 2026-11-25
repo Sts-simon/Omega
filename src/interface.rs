@@ -57,6 +57,7 @@ pub fn setup(mut commands: Commands) {
         parent.spawn((
             Text::new("OMEGA"),
             TextFont {
+                font: ui_kit::ui_font(),
                 font_size: FontSize::Px(19.0),
                 ..default()
             },
@@ -92,6 +93,7 @@ pub fn setup(mut commands: Commands) {
                 lane.spawn((
                     Text::new(""),
                     TextFont {
+                        font: ui_kit::ui_font(),
                         font_size: FontSize::Px(11.5),
                         ..default()
                     },
@@ -102,6 +104,7 @@ pub fn setup(mut commands: Commands) {
         parent.spawn((
             Text::new(""),
             TextFont {
+                font: ui_kit::ui_font(),
                 font_size: FontSize::Px(13.0),
                 ..default()
             },
@@ -127,6 +130,7 @@ fn add_nav_button(parent: &mut ChildSpawnerCommands<'_>, label: &'static str, ta
             button.spawn((
                 Text::new(ui_kit::fr(label)),
                 TextFont {
+                    font: ui_kit::ui_font(),
                     font_size: FontSize::Px(12.5),
                     ..default()
                 },

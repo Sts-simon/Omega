@@ -14,6 +14,24 @@ pub(crate) type UiInteraction = bevy::ui::Interaction;
 
 use crate::interface::{UiAction, UiActionButton};
 use bevy::prelude::*;
+use bevy::text::FontSource;
+use std::sync::OnceLock;
+
+/// Handle of the bundled font. The embedded Bevy font is ASCII-only, so French accents rendered
+/// as empty boxes; every interface text uses this Latin-1 font instead.
+static UI_FONT: OnceLock<Handle<Font>> = OnceLock::new();
+
+/// Load the interface font before any board is built (see `PreStartup` in `main`). The font is
+/// embedded in the binary so a packaged build does not depend on an `assets` folder next to it.
+pub fn load_ui_font(mut fonts: ResMut<Assets<Font>>) {
+    let bytes = include_bytes!("../assets/fonts/DejaVuSansMono.ttf").to_vec();
+    let _ = UI_FONT.set(fonts.add(Font::from_bytes(bytes)));
+}
+
+/// Font of every interface text. Falls back to the embedded font if loading never ran.
+pub fn ui_font() -> FontSource {
+    FontSource::Handle(UI_FONT.get().cloned().unwrap_or_default())
+}
 
 pub const PANEL: Color = Color::srgba(0.016, 0.030, 0.044, 0.93);
 pub const CARD: Color = Color::srgba(0.050, 0.078, 0.104, 0.97);
@@ -84,6 +102,10 @@ pub fn fr(text: impl Into<String>) -> String {
         "AIRFRAME & PAYLOAD" => "STRUCTURE ET CHARGE",
         "AERODYNAMIC SURFACES" => "SURFACES AÉRODYNAMIQUES",
         "SENSORS" => "CAPTEURS",
+        "Sensors" => "Capteurs",
+        "New vehicle" => "Nouveau véhicule",
+        "DESIGN REVISIONS" => "VERSIONS DU MODÈLE",
+        "No missile revision recorded yet." => "Aucune version du véhicule enregistrée.",
         "AVIONICS" => "AVIONIQUE",
         "SOLID MOTOR" => "MOTEUR SOLIDE",
         "FUEL TANK" => "RÉSERVOIR",
@@ -263,6 +285,118 @@ pub fn fr(text: impl Into<String>) -> String {
             "Aucun contrat. Acceptez une offre ; vos prochains essais serviront de preuves."
         }
         "The program is empty: add blocks to a thread." => "Le programme est vide : ajoutez des blocs à une tâche.",
+        "Greyed blocks need hardware this vehicle does not carry." => {
+            "Les blocs grisés demandent un équipement absent de ce véhicule."
+        }
+        "thread start" => "début de la tâche",
+        "Empty thread. Add a block from the library." => "Tâche vide. Ajoutez un bloc depuis la bibliothèque.",
+        "Select a block to tune, reorder or remove it." => {
+            "Sélectionnez un bloc pour le régler, le déplacer ou le supprimer."
+        }
+        "This block closes the thread and has no value to tune." => {
+            "Ce bloc ferme la tâche et n'a aucune valeur à régler."
+        }
+        "No saved program yet. A copy can be loaded on any vehicle; the rules check its hardware." => {
+            "Aucun programme enregistré. Une copie se charge sur n'importe quel véhicule ; les règles vérifient son matériel."
+        }
+        "Run a trace to fly this program once and list the blocks it executed, with their times." => {
+            "Lancez un traçage pour exécuter ce programme une fois et lister les blocs exécutés, avec leurs temps."
+        }
+        "Saved to programs/missile.json on every change; saved copies live in programs/library.json." => {
+            "Enregistré dans programs/missile.json à chaque modification ; les copies vivent dans programs/library.json."
+        }
+        "WAIT SPEED" => "ATTENDRE VITESSE",
+        "WAIT PRESSURE" => "ATTENDRE PRESSION",
+        "WAIT FLAG" => "ATTENDRE INDICATEUR",
+        "TOGGLE FLAG" => "BASCULER INDICATEUR",
+        "SET FLAG" => "DÉFINIR INDICATEUR",
+        "WAIT" => "ATTENDRE",
+        "IGNITE STAGE" => "ALLUMER ÉTAGE",
+        "SEPARATE STAGE" => "SÉPARER ÉTAGE",
+        "THROTTLE" => "GAZ",
+        "HOLD SPEED" => "MAINTENIR VITESSE",
+        "HOLD PRESSURE" => "MAINTENIR PRESSION",
+        "LOCK TARGET" => "VERROUILLER CIBLE",
+        "SET MODE" => "DÉFINIR MODE",
+        "WAIT MODE" => "ATTENDRE MODE",
+        "MARK" => "MARQUE",
+        "Inputs" => "Entrées",
+        "Conditions" => "Conditions",
+        "Logic" => "Logique",
+        "States" => "États",
+        "Timers" => "Minuteries",
+        "Outputs" => "Sorties",
+        "Modes" => "Modes",
+        "Diagnostics" => "Diagnostic",
+        "Computers" => "Ordinateurs",
+        "Control modules" => "Modules de commande",
+        "Navigation" => "Navigation",
+        "Communication" => "Communication",
+        "Power" => "Énergie",
+        "Control augment" => "Module de commande",
+        "Inertial platform" => "Plateforme inertielle",
+        "Datalink" => "Liaison de données",
+        "Power cell" => "Cellule d'alimentation",
+        "Self-test suite" => "Module de diagnostic",
+        "CTRL AUGMENT" => "AUGMENT. COMMANDE",
+        "NAV PLATFORM" => "PLATEF. NAV.",
+        "DATALINK" => "LIAISON",
+        "POWER CELL" => "CELLULE",
+        "SELF-TEST" => "AUTOTEST",
+        "Returned to the island" => "Retour à l'île",
+        "Opened the contract office" => "Bureau des contrats ouvert",
+        "Opened the missile workshop" => "Atelier de conception ouvert",
+        "Opened the missile program editor" => "Programmation embarquée ouverte",
+        "Opened the trial range" => "Stand d'essai ouvert",
+        "Opened the research centre" => "Centre de recherche ouvert",
+        "EVENTS" => "ÉVÉNEMENTS",
+        "BATCH" => "SÉRIE",
+        "Nothing flown yet." => "Aucun vol effectué.",
+        "Run a seeded batch to see the distribution." => "Lancez une série de graines pour voir la distribution.",
+        "Snapshot A, edit, then COMPARE." => "Enregistrez A, modifiez, puis COMPAREZ.",
+        "A: empty. Snapshot before editing." => "A : vide. Enregistrez un cliché avant de modifier.",
+        "Same vehicle, program and seed give the same report." => {
+            "Même véhicule, même programme et même graine donnent le même rapport."
+        }
+        "Accept a contract to bind trials as evidence." => {
+            "Acceptez un contrat pour associer les essais comme preuves."
+        }
+        "Accept a family contract, fly its trial, then deliver the hash-bound dossier." => {
+            "Acceptez un contrat d'une famille, réalisez son essai, puis livrez le dossier lié à son empreinte."
+        }
+        "The seed rolls the target lock; fit a radar and a LOCK TARGET block." => {
+            "La graine décide du verrouillage ; installez un radar et un bloc VERROUILLER CIBLE."
+        }
+        "Changed since the last run." => "Modifié depuis le dernier essai.",
+        "SURFACE-TO-SURFACE" => "SOL-SOL",
+        "SURFACE-TO-AIR" => "SOL-AIR",
+        "AIR-TO-SURFACE" => "AIR-SOL",
+        "AIR-TO-AIR" => "AIR-AIR",
+        "ANTI-SHIP" => "ANTI-NAVIGATION",
+        "SHORT-RANGE" => "COURTE PORTÉE",
+        "LONG-RANGE" => "LONGUE PORTÉE",
+        "BALLISTIC" => "BALLISTIQUE",
+        "Path length" => "Longueur de trajectoire",
+        "Top speed" => "Vitesse maximale",
+        "Launch mass" => "Masse au lancement",
+        "Lift-off required" => "Décollage requis",
+        "STRAIGHT" => "DROITE",
+        "SWEPT" => "FLÈCHE",
+        "DELTA" => "DELTA",
+        "TRAPEZOIDAL" => "TRAPÉZOÏDALE",
+        "VARIABLE GEOMETRY" => "GÉOMÉTRIE VARIABLE",
+        "SYMMETRIC" => "SYMÉTRIQUE",
+        "CLASSIC" => "CLASSIQUE",
+        "LOW DRAG" => "FAIBLE TRAÎNÉE",
+        "HIGH LIFT" => "FORTE PORTANCE",
+        "EXPERIMENTAL" => "EXPÉRIMENTALE",
+        "REAR" => "ARRIÈRE",
+        "FRONT" => "AVANT",
+        "BLENDED" => "MIXTE",
+        "COMBINED" => "COMBINÉ",
+        "ASYMMETRIC" => "ASYMÉTRIQUE",
+        "INTEGRATED" => "INTÉGRÉE",
+        "FIXED" => "FIXE",
         "This vehicle has no flight computer. Add one in the workshop first." => {
             "Ce véhicule n'a pas d'ordinateur de bord. Ajoutez-en un dans l'atelier."
         }
@@ -287,11 +421,48 @@ pub fn fr(text: impl Into<String>) -> String {
     }
     let mut translated = text;
     for (from, to) in [
+        ("SYMMETRY x", "SYMÉTRIE x"),
+        ("SURFACE-TO-SURFACE", "SOL-SOL"),
+        ("SURFACE-TO-AIR", "SOL-AIR"),
+        ("AIR-TO-SURFACE", "AIR-SOL"),
+        ("AIR-TO-AIR", "AIR-AIR"),
+        ("ANTI-SHIP", "ANTI-NAVIGATION"),
+        ("SHORT-RANGE", "COURTE PORTÉE"),
+        ("LONG-RANGE", "LONGUE PORTÉE"),
+        ("Seed ", "Graine "),
+        (" development programme", " — programme de développement"),
         ("STAGE ", "ÉTAGE "),
         ("Stage ", "Étage "),
         ("DAY ", "JOUR "),
         ("Day ", "Jour "),
         ("Total mass ", "Masse totale "),
+        ("Wait flag F", "Attendre l'indicateur F"),
+        ("Wait mode M", "Attendre le mode M"),
+        ("Wait speed ", "Attendre la vitesse "),
+        ("Wait pressure ", "Attendre la pression "),
+        ("Wait ", "Attendre "),
+        ("Toggle flag F", "Basculer l'indicateur F"),
+        ("Set flag F", "Définir l'indicateur F"),
+        ("Set mode M", "Définir le mode M"),
+        ("Mark #", "Marque n°"),
+        ("Lock target (final phase)", "Verrouiller la cible (phase finale)"),
+        ("Ignite stage ", "Allumer l'étage "),
+        ("Separate stage ", "Séparer l'étage "),
+        ("Hold speed ", "Maintenir la vitesse "),
+        ("Hold ", "Maintenir "),
+        ("Throttle ", "Gaz "),
+        (" = true", " = vrai"),
+        (" = false", " = faux"),
+        ("(timeout ", "(délai "),
+        (" sits on ", " sur "),
+        (": diameter step", " : saut de diamètre"),
+        ("centre of aerodynamics is ", "le centre aérodynamique est "),
+        (
+            " ahead of the centre of gravity: unstable",
+            " devant le centre de gravité : instable",
+        ),
+        ("WARN  ", "AVERT.  "),
+        ("ERROR  ", "ERREUR  "),
         ("Mass ", "Masse "),
         ("Needs research: ", "Recherche nécessaire : "),
         ("Locked: research ", "Verrouillé : recherchez "),
@@ -314,13 +485,21 @@ pub fn fr(text: impl Into<String>) -> String {
     ] {
         translated = translated.replace(from, to);
     }
+    // " cr" also matches the start of an already French "crédits"; undo that one doubling.
+    translated = translated.replace("créditsédits", "crédits");
     translated
 }
 
 pub fn label(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>, size: f32, color: Color) {
     parent.spawn((
+        Node {
+            max_width: Val::Percent(100.0),
+            flex_shrink: 1.0,
+            ..default()
+        },
         Text::new(fr(text)),
         TextFont {
+            font: ui_font(),
             font_size: FontSize::Px(size),
             ..default()
         },
@@ -382,7 +561,10 @@ pub fn button(
             bevy::ui::FocusPolicy::Block,
             Node {
                 width,
+                max_width: Val::Percent(100.0),
+                min_width: Val::Px(0.0),
                 min_height: Val::Px(32.0),
+                flex_shrink: 1.0,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 padding: UiRect {
@@ -459,6 +641,20 @@ mod tests {
         assert_eq!(fr("WORKSHOP"), "ATELIER");
         assert_eq!(fr("ASSEMBLY TREE"), "ARBRE D'ASSEMBLAGE");
         assert_eq!(fr("REMOVE PART"), "SUPPRIMER LA PIÈCE");
+    }
+
+    #[test]
+    fn french_translation_covers_contract_titles_and_program_blocks() {
+        assert_eq!(
+            fr("SURFACE-TO-AIR development programme"),
+            "SOL-AIR — programme de développement"
+        );
+        assert_eq!(
+            fr("AIR-TO-AIR development programme"),
+            "AIR-AIR — programme de développement"
+        );
+        assert_eq!(fr("Ignite stage 2"), "Allumer l'étage 2");
+        assert_eq!(fr("9 000 crédits"), "9 000 crédits");
     }
 
     #[test]

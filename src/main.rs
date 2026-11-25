@@ -24,7 +24,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "OMEGA 0.37.0 | Conception de véhicules".to_string(),
+                title: "OMEGA 0.38.0 | Conception de véhicules".to_string(),
                 resolution: (1600, 960).into(),
                 ..default()
             }),
@@ -41,6 +41,7 @@ fn main() {
         .init_resource::<workshop::DragState>()
         .init_resource::<workshop::WorkshopInput>()
         .init_resource::<workshop::TransformGizmo>()
+        .add_systems(PreStartup, ui_kit::load_ui_font)
         .add_systems(
             Startup,
             (

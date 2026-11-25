@@ -271,11 +271,12 @@ fn contract_color(family: omega_rules::contracts::MissionFamily) -> Color {
 }
 
 fn requirement_text(requirement: &omega_rules::Requirement) -> String {
+    let label = ui_kit::fr(requirement.label.clone());
     match requirement.metric.as_str() {
-        "path_length_m" => format!("{} >= {:.0} km", requirement.label, requirement.limit / 1_000.0),
-        "max_speed_ms" => format!("{} >= {:.0} m/s", requirement.label, requirement.limit),
-        "launch_mass_kg" => format!("{} <= {:.0} kg", requirement.label, requirement.limit),
-        _ => format!("{} required", requirement.label),
+        "path_length_m" => format!("{label} ≥ {:.0} km", requirement.limit / 1_000.0),
+        "max_speed_ms" => format!("{label} ≥ {:.0} m/s", requirement.limit),
+        "launch_mass_kg" => format!("{label} ≤ {:.0} kg", requirement.limit),
+        _ => format!("{label} requis"),
     }
 }
 
@@ -368,7 +369,7 @@ fn missile_offer_card(
                             15.0,
                             ui_kit::GOOD,
                         );
-                        ui_kit::label(pay, format!("{} days", offer.deadline_days), 9.5, ui_kit::TEXT_DIM);
+                        ui_kit::label(pay, format!("{} jours", offer.deadline_days), 9.5, ui_kit::TEXT_DIM);
                     });
                 let tone = if can_accept {
                     ButtonTone::Primary
@@ -949,6 +950,37 @@ fn part_title(spec: &omega_rules::PartSpec) -> &'static str {
     }
 }
 
+fn class_fr(class: omega_rules::ComputerClass) -> &'static str {
+    use omega_rules::ComputerClass;
+    match class {
+        ComputerClass::Basic => "basique",
+        ComputerClass::Standard => "standard",
+        ComputerClass::Advanced => "avancé",
+    }
+}
+
+/// French name of a programming block kind, as listed by `Vehicle::available_blocks`.
+fn block_name_fr(kind: &str) -> &'static str {
+    match kind {
+        "ignite_stage" => "allumer l'étage",
+        "separate_stage" => "séparer l'étage",
+        "set_throttle" => "régler les gaz",
+        "hold_speed" => "maintenir la vitesse",
+        "hold_pressure" => "maintenir la pression",
+        "lock_target" => "verrouiller la cible",
+        "wait" => "attendre",
+        "wait_speed" => "attendre la vitesse",
+        "wait_pressure" => "attendre la pression",
+        "wait_flag" => "attendre un indicateur",
+        "toggle_flag" => "basculer un indicateur",
+        "set_flag" => "définir un indicateur",
+        "set_mode" => "définir un mode",
+        "wait_mode" => "attendre un mode",
+        "mark" => "marque",
+        _ => "bloc",
+    }
+}
+
 fn spec_summary(spec: &omega_rules::PartSpec) -> String {
     use omega_rules::PartSpec::*;
     match *spec {
@@ -956,15 +988,14 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
             length_m,
             diameter_m,
             burn_time_s,
-        } => format!("Solid motor {length_m:.1} m x {diameter_m:.2} m, {burn_time_s:.0} s"),
-        FuelTank { length_m, diameter_m } => format!("Fuel tank {length_m:.1} m x {diameter_m:.2} m"),
-        Avionics { module } => format!("{} module", module.label()),
-        LiquidEngine { scale } => format!("Liquid engine x{scale:.1}"),
-        AirBreathing { scale } => format!("Turbofan x{scale:.1}"),
-        Sensor { kind } => format!("{kind:?}").replace("Radar(", "Radar ").replace(')', ""),
-        Computer { class } => format!("Computer {class:?}"),
-        Decoupler => "Decoupler".to_string(),
-        MissionModule { mass_kg } => format!("Mission module {mass_kg:.0} kg"),
+        } => format!("Moteur solide · {length_m:.1} m × {diameter_m:.2} m · {burn_time_s:.0} s"),
+        FuelTank { length_m, diameter_m } => {
+            format!("Réservoir · {length_m:.1} m × {diameter_m:.2} m")
+        }
+        Avionics { .. } | Sensor { .. } | Computer { .. } | Decoupler => part_title(spec).to_string(),
+        LiquidEngine { scale } => format!("Moteur liquide · ×{scale:.1}"),
+        AirBreathing { scale } => format!("Propulseur à air · ×{scale:.1}"),
+        MissionModule { mass_kg } => format!("Module de mission · {mass_kg:.0} kg"),
         Wing {
             span_m,
             chord_m,
@@ -973,9 +1004,9 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
             profile,
             ..
         } => format!(
-            "{} wing {span_m:.2} x {chord_m:.2} m, {sweep_deg:.0} deg, {}",
-            planform.label(),
-            profile.label()
+            "Aile {} · {span_m:.2} × {chord_m:.2} m · flèche {sweep_deg:.0}° · profil {}",
+            ui_kit::fr(planform.label()),
+            ui_kit::fr(profile.label())
         ),
         FinSet {
             span_m,
@@ -983,10 +1014,14 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
             role,
             layout,
             ..
-        } => format!("{} fins {span_m:.2} x {chord_m:.2} m, {}", role.label(), layout.label()),
+        } => format!(
+            "Ailettes {} · {span_m:.2} × {chord_m:.2} m · {}",
+            ui_kit::fr(role.label()),
+            ui_kit::fr(layout.label())
+        ),
         ControlSurface {
             span_m, chord_m, kind, ..
-        } => format!("{} control {span_m:.2} x {chord_m:.2} m", kind.label()),
+        } => format!("Commande {} · {span_m:.2} × {chord_m:.2} m", ui_kit::fr(kind.label())),
     }
 }
 
@@ -1163,7 +1198,7 @@ fn build_missile(
             }
             ui_kit::label(
                 panel,
-                "Glissez une pièce vers un point d'attache lumineux. W : déplacer ; R : faire pivoter. Saisissez un axe coloré ou un anneau pour manipuler X, Y ou Z ; Maj affine le réglage. F centre la pièce ; Début cadre le véhicule. Flèches : déplacer la caméra ; X : symétrie ; Suppr : supprimer ; Ctrl+Z / Ctrl+Y : annuler / rétablir.",
+                "Glissez une pièce vers un point d'attache. W/R : déplacer ou pivoter ; F : centrer ; Début : cadrer ; X : symétrie ; Suppr : supprimer ; Ctrl+Z / Ctrl+Y : annuler / rétablir.",
                 9.5,
                 ui_kit::TEXT_DIM,
             );
@@ -1299,7 +1334,7 @@ fn build_missile(
                 ui_kit::label(
                     panel,
                     format!(
-                        "CG {:.2} m | CA {:.2} m | margin {:+.2} m (band {:.2}-{:.2} m)",
+                        "CG {:.2} m | CA {:.2} m | marge {:+.2} m (bande {:.2}-{:.2} m)",
                         aero.cg_y_m, aero.ca_y_m, aero.margin_m, low, high
                     ),
                     9.5,
@@ -1307,18 +1342,18 @@ fn build_missile(
                 );
                 panel.spawn(Node::default()).with_children(|c| {
                     let (text, color) = if aero.is_stable() {
-                        ("STABLE BAND", ui_kit::GOOD)
+                        ("BANDE STABLE", ui_kit::GOOD)
                     } else if aero.margin_m < 0.0 {
-                        ("UNSTABLE: CA AHEAD OF CG", ui_kit::BAD)
+                        ("INSTABLE : CA DEVANT LE CG", ui_kit::BAD)
                     } else {
-                        ("MARGINAL", ui_kit::WARN)
+                        ("LIMITE", ui_kit::WARN)
                     };
                     ui_kit::chip(c, text, color);
                 });
                 ui_kit::label(
                     panel,
                     format!(
-                        "Wing {:.2} m2 | fin {:.2} m2 | control {:.2} m2 | sweep {:.0} deg",
+                        "Aile {:.2} m² | ailettes {:.2} m² | commandes {:.2} m² | flèche {:.0}°",
                         aero.wing_area_m2, aero.fin_area_m2, aero.control_area_m2, aero.mean_sweep_deg
                     ),
                     9.0,
@@ -1331,7 +1366,7 @@ fn build_missile(
                     ui_kit::label(
                         panel,
                         format!(
-                            "{} {}: lift {:.2} | drag {:.2} | stability {:.2} | authority {:.2} m2 | {:.1} kg",
+                            "{} {} : portance {:.2} | traînée {:.2} | stabilité {:.2} | autorité {:.2} m² | {:.1} kg",
                             row.family, row.id, row.lift, row.drag, row.stability, row.authority, row.mass_kg
                         ),
                         8.5,
@@ -1344,7 +1379,7 @@ fn build_missile(
                 ui_kit::label(
                     panel,
                     format!(
-                        "A vs now: stability {:+.0} | control {:+.0} | lift {:+.0} | drag {:+.0} | mass {:+.0} kg",
+                        "A vs actuel : stabilité {:+.0} | commande {:+.0} | portance {:+.0} | traînée {:+.0} | masse {:+.0} kg",
                         current.stability - before.stability,
                         current.control_authority - before.control_authority,
                         current.lift - before.lift,
@@ -1449,7 +1484,7 @@ fn build_missile(
                             ui_kit::label(
                                 card,
                                 format!(
-                                    "Mass {:.0} kg (carries {:.0} kg)",
+                                    "Masse {:.0} kg (emporte {:.0} kg)",
                                     report.stage_wet_mass_kg, report.ignition_mass_kg
                                 ),
                                 10.0,
@@ -1457,16 +1492,16 @@ fn build_missile(
                             );
                             ui_kit::label(
                                 card,
-                                format!("Thrust {:.1} kN", report.thrust_n / 1000.0),
+                                format!("Poussée {:.1} kN", report.thrust_n / 1000.0),
                                 10.0,
                                 ui_kit::TEXT_DIM,
                             );
                             let burn = report
                                 .burn_time_s
-                                .map_or("tank-fed".to_string(), |b| format!("{b:.0} s"));
+                                .map_or("alimenté par les réservoirs".to_string(), |b| format!("{b:.0} s"));
                             ui_kit::label(
                                 card,
-                                format!("Burn {burn} | dv {:.0} m/s", report.delta_v_ms),
+                                format!("Combustion {burn} | Δv {:.0} m/s", report.delta_v_ms),
                                 10.0,
                                 ui_kit::TEXT_DIM,
                             );
@@ -1477,7 +1512,7 @@ fn build_missile(
             ui_kit::label(
                 panel,
                 format!(
-                    "Total mass {:.0} kg | length {:.2} m | {} parts | {} stages",
+                    "Masse totale {:.0} kg | longueur {:.2} m | {} pièces | {} étages",
                     vehicle.total_wet_mass_kg(),
                     length,
                     vehicle.parts.len(),
@@ -1490,16 +1525,16 @@ fn build_missile(
             if avionics.devices > 0 {
                 let power = if avionics.power_draw_w > 0.0 {
                     format!(
-                        "{:.0}/{:.0} W, margin {:.0} W",
+                        "{:.0}/{:.0} W, marge {:.0} W",
                         avionics.power_draw_w, avionics.power_supply_w, avionics.power_margin_w
                     )
                 } else {
-                    "bus powered".to_string()
+                    "alimenté par le bus".to_string()
                 };
                 ui_kit::label(
                     panel,
                     format!(
-                        "Electronics {} devices | {} | {} cr",
+                        "Électronique : {} équipements | {} | {} crédits",
                         avionics.devices, power, avionics.cost_cr
                     ),
                     10.0,
@@ -1514,8 +1549,8 @@ fn build_missile(
                 Some(class) => ui_kit::label(
                     panel,
                     format!(
-                        "Computer {:?}: {} thread(s), {} blocks of memory",
-                        class,
+                        "Ordinateur {} : {} tâche(s), {} blocs de mémoire",
+                        class_fr(class),
                         class.threads(),
                         class.ram_blocks()
                     ),
@@ -1529,10 +1564,14 @@ fn build_missile(
                     ui_kit::WARN,
                 ),
             }
-            let blocks: Vec<&str> = vehicle.available_blocks().into_iter().collect();
+            let blocks: Vec<&str> = vehicle
+                .available_blocks()
+                .into_iter()
+                .map(block_name_fr)
+                .collect();
             ui_kit::label(
                 panel,
-                format!("Programming blocks unlocked: {}", blocks.join(", ").replace('_', " ")),
+                format!("Blocs de programmation débloqués : {}", blocks.join(", ")),
                 10.0,
                 ui_kit::TEXT_DIM,
             );
@@ -1619,34 +1658,29 @@ fn build_missile(
             ui_kit::label(panel, "SELECTED PART", 12.0, ui_kit::ACCENT);
             match session.selected_part() {
                 Some(part) => {
-                    ui_kit::label(
-                        panel,
-                        format!("{}  ·  {}", part_title(&part.spec), spec_summary(&part.spec)),
-                        11.0,
-                        ui_kit::TEXT,
-                    );
+                    ui_kit::label(panel, spec_summary(&part.spec), 11.0, ui_kit::TEXT);
                     let (height, radius) = omega_rules::assembly::dimensions(&part.spec);
-                    let place = part.attach.as_ref().map_or("root part".to_string(), |attach| {
+                    let place = part.attach.as_ref().map_or("pièce racine".to_string(), |attach| {
                         if part.spec.is_aero() {
                             format!(
-                                "on {} via {} | {:.0}°",
+                                "sur {} via {} | {:.0}°",
                                 attach.parent,
-                                attach.node.label(),
+                                ui_kit::fr(attach.node.label()),
                                 attach.angle_deg
                             )
                         } else {
-                            format!("on {} via {}", attach.parent, attach.node.label())
+                            format!("sur {} via {}", attach.parent, ui_kit::fr(attach.node.label()))
                         }
                     });
                     ui_kit::label(
                         panel,
                         format!(
-                            "{} | stage {} | {:.2} m x {:.2} m | {}",
+                            "{} | étage {} | {:.2} m × {:.2} m | {}",
                             place,
                             vehicle.stage_of(&part.id).unwrap_or(0) + 1,
                             height,
                             radius * 2.0,
-                            part.spec.category().label()
+                            ui_kit::fr(part.spec.category().label())
                         ),
                         9.5,
                         ui_kit::TEXT_DIM,
@@ -1655,7 +1689,7 @@ fn build_missile(
                         ui_kit::label(
                             panel,
                             format!(
-                                "Move: X {:+.2} | Y {:+.2} | Z {:+.2} m",
+                                "Position : X {:+.2} | Y {:+.2} | Z {:+.2} m",
                                 attach.offset_x_m, attach.offset_y_m, attach.offset_z_m
                             ),
                             9.5,
@@ -1664,7 +1698,7 @@ fn build_missile(
                         ui_kit::label(
                             panel,
                             format!(
-                                "Rotate: X {:.0}° | Y {:.0}° | Z {:.0}°",
+                                "Rotation : X {:.0}° | Y {:.0}° | Z {:.0}°",
                                 attach.rotation_x_deg, attach.rotation_y_deg, attach.rotation_z_deg
                             ),
                             9.5,
@@ -1690,7 +1724,7 @@ fn build_missile(
                     if let Some(category) = omega_rules::avionics::category_of(&part.spec) {
                         ui_kit::label(
                             panel,
-                            format!("Electronics: {}", category.label()),
+                            format!("Électronique : {}", ui_kit::fr(category.label())),
                             9.5,
                             ui_kit::TEXT_DIM,
                         );
@@ -1698,14 +1732,14 @@ fn build_missile(
                     if let omega_rules::PartSpec::Avionics { module } = part.spec {
                         let spec = module.spec();
                         let power = if spec.power_w < 0.0 {
-                            format!("supplies {:.0} W", -spec.power_w)
+                            format!("alimente {:.0} W", -spec.power_w)
                         } else {
-                            format!("draws {:.0} W", spec.power_w)
+                            format!("demande {:.0} W", spec.power_w)
                         };
                         ui_kit::label(
                             panel,
                             format!(
-                                "{} cr | {} | complexity {:.0}%",
+                                "{} crédits | {} | complexité {:.0} %",
                                 spec.cost_cr,
                                 power,
                                 spec.complexity * 100.0
@@ -1715,27 +1749,27 @@ fn build_missile(
                         );
                         let mut effect = Vec::new();
                         if spec.authority_bonus > 0.0 {
-                            effect.push(format!("authority +{:.0}%", spec.authority_bonus * 100.0));
+                            effect.push(format!("autorité +{:.0}%", spec.authority_bonus * 100.0));
                         }
                         if spec.lock_bonus > 0.0 {
-                            effect.push(format!("lock +{:.0} pts", spec.lock_bonus * 100.0));
+                            effect.push(format!("verrouillage +{:.0} pts", spec.lock_bonus * 100.0));
                         }
                         if spec.fault_reduction > 0.0 {
-                            effect.push(format!("faults -{:.0}%", spec.fault_reduction * 100.0));
+                            effect.push(format!("pannes -{:.0}%", spec.fault_reduction * 100.0));
                         }
                         if effect.is_empty() {
-                            effect.push(format!("no flight effect, reliability {:+.2}", spec.reliability));
+                            effect.push(format!("aucun effet en vol, fiabilité {:+.2}", spec.reliability));
                         }
                         ui_kit::label(panel, effect.join(" | "), 9.5, ui_kit::TEXT_DIM);
                         let mut needs = Vec::new();
                         if module.needs_standard_computer() {
-                            needs.push("a Standard computer");
+                            needs.push("un ordinateur standard");
                         }
                         if module.needs_navigation() {
-                            needs.push("a navigation module");
+                            needs.push("un module de navigation");
                         }
                         if !needs.is_empty() {
-                            ui_kit::label(panel, format!("Needs {}", needs.join(" and ")), 9.5, ui_kit::WARN);
+                            ui_kit::label(panel, format!("Nécessite {}", needs.join(" et ")), 9.5, ui_kit::WARN);
                         }
                     }
                     let params = missile::params_of(&part.spec);
@@ -1755,17 +1789,17 @@ fn build_missile(
                         );
                     }
                     let stats = part.spec.stats();
-                    let mut line = format!("Dry {:.1} kg", stats.dry_mass_kg);
+                    let mut line = format!("Masse sèche {:.1} kg", stats.dry_mass_kg);
                     if stats.propellant_kg > 0.0 {
-                        line.push_str(&format!(" | propellant {:.1} kg", stats.propellant_kg));
+                        line.push_str(&format!(" | propergol {:.1} kg", stats.propellant_kg));
                     }
                     if stats.thrust_n > 0.0 {
-                        line.push_str(&format!(" | thrust {:.1} kN", stats.thrust_n / 1000.0));
+                        line.push_str(&format!(" | poussée {:.1} kN", stats.thrust_n / 1000.0));
                     }
                     ui_kit::label(panel, line, 10.0, ui_kit::TEXT_DIM);
                     ui_kit::button(
                         panel,
-                        "REMOVE PART",
+                        "SUPPRIMER LA PIÈCE",
                         UiAction::Missile(MissileAction::RemovePart),
                         ButtonTone::Danger,
                         Val::Percent(100.0),
@@ -1812,9 +1846,9 @@ fn build_missile(
                         ui_kit::chip(
                             row,
                             if warnings == 1 {
-                                "1 WARNING".to_string()
+                                "1 AVERTISSEMENT".to_string()
                             } else {
-                                format!("{warnings} WARNINGS")
+                                format!("{warnings} AVERTISSEMENTS")
                             },
                             ui_kit::WARN,
                         );
@@ -1950,7 +1984,7 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
         // Cap the list panel so the selected-block controls stay on screen even with a 32-block
         // program; the list scrolls instead of pushing them below the window.
         node.max_height = Val::Percent(70.0);
-        node.overflow = Overflow::clip_y();
+        node.overflow = Overflow::clip();
         middle.spawn((node, bg, interaction)).with_children(|panel| {
             ui_kit::label(panel, "THREADS", 12.0, ui_kit::ACCENT);
             panel
@@ -1986,7 +2020,7 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                         ButtonTone::Danger,
                     );
                 });
-            heading(panel, format!("THREAD {} BLOCKS", session.thread + 1));
+            heading(panel, format!("TÂCHE {} — BLOCS", session.thread + 1));
             let blocks = session
                 .program
                 .threads
@@ -2038,12 +2072,15 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                         } else {
                             ButtonTone::Ghost
                         };
+                        // Auto width plus the column's stretch keeps a block inside the
+                        // scrolling thread list; a percentage would resolve against the
+                        // scroll container's unconstrained content width and overflow it.
                         ui_kit::button(
                             list,
                             format!("{}. {}", index + 1, block.label()),
                             UiAction::Program(ProgramAction::SelectBlock(index)),
                             tone,
-                            Val::Percent(100.0),
+                            Val::Auto,
                         );
                     }
                 });
@@ -2163,7 +2200,7 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
             ui_kit::label(panel, "FLIGHT COMPUTER", 12.0, ui_kit::ACCENT);
             match (vehicle.computer(), session.limits(vehicle)) {
                 (Some(class), Some((threads, blocks))) => {
-                    ui_kit::label(panel, format!("{class:?} computer"), 11.0, ui_kit::TEXT);
+                    ui_kit::label(panel, format!("Ordinateur {}", class_fr(class)), 11.0, ui_kit::TEXT);
                     let thread_tone = if session.threads_used() > threads {
                         ui_kit::BAD
                     } else {
@@ -2183,10 +2220,10 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                         .with_children(|row| {
                             ui_kit::chip(
                                 row,
-                                format!("{} / {threads} threads", session.threads_used()),
+                                format!("{} / {threads} tâches", session.threads_used()),
                                 thread_tone,
                             );
-                            ui_kit::chip(row, format!("{} / {blocks} blocks", session.blocks_used()), block_tone);
+                            ui_kit::chip(row, format!("{} / {blocks} blocs", session.blocks_used()), block_tone);
                         });
                 }
                 _ => ui_kit::label(
@@ -2212,9 +2249,9 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                         ui_kit::chip(
                             row,
                             if errors == 1 {
-                                "1 ERROR".to_string()
+                                "1 ERREUR".to_string()
                             } else {
-                                format!("{errors} ERRORS")
+                                format!("{errors} ERREURS")
                             },
                             ui_kit::BAD,
                         );
@@ -2223,9 +2260,9 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                         ui_kit::chip(
                             row,
                             if warnings == 1 {
-                                "1 WARNING".to_string()
+                                "1 AVERTISSEMENT".to_string()
                             } else {
-                                format!("{warnings} WARNINGS")
+                                format!("{warnings} AVERTISSEMENTS")
                             },
                             ui_kit::WARN,
                         );
@@ -2245,14 +2282,14 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
             if issues.len() > 6 {
                 ui_kit::label(
                     panel,
-                    format!("+{} more issue(s)", issues.len() - 6),
+                    format!("+{} autre(s) problème(s)", issues.len() - 6),
                     9.5,
                     ui_kit::TEXT_DIM,
                 );
             }
             if let Ok(hash) = session.content_hash() {
                 let short: String = hash.as_str().chars().take(16).collect();
-                ui_kit::label(panel, format!("Program hash {short}"), 9.5, ui_kit::TEXT_DIM);
+                ui_kit::label(panel, format!("Empreinte du programme {short}"), 9.5, ui_kit::TEXT_DIM);
             }
             ui_kit::label(
                 panel,
@@ -2293,7 +2330,7 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                     .with_children(|row| {
                         ui_kit::button_row_item(
                             row,
-                            format!("LOAD {}", saved.name),
+                            format!("CHARGER {}", saved.name),
                             UiAction::Program(ProgramAction::LoadSaved(index)),
                             ButtonTone::Ghost,
                         );
@@ -2308,7 +2345,7 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
             if session.library.programs.len() > 4 {
                 ui_kit::label(
                     panel,
-                    format!("+{} more saved program(s)", session.library.programs.len() - 4),
+                    format!("+{} autre(s) programme(s)", session.library.programs.len() - 4),
                     9.0,
                     ui_kit::TEXT_DIM,
                 );
@@ -2327,7 +2364,7 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                     ui_kit::label(
                         panel,
                         format!(
-                            "{} blocks executed | {} events | {} timeout(s)",
+                            "{} blocs exécutés | {} événements | {} délai(s)",
                             report.trace.len(),
                             report.events.len(),
                             timeouts
@@ -2338,7 +2375,7 @@ fn build_program(root: &mut ChildSpawnerCommands<'_>, vehicle: &omega_rules::Veh
                     ui_kit::label(
                         panel,
                         format!(
-                            "{:.1} s flight | {:.0} m/s max | {} anomalie(s)",
+                            "{:.1} s de vol | {:.0} m/s max | {} anomalie(s)",
                             report.flight_time_s,
                             report.max_speed_ms,
                             report.anomalies.len()
@@ -2498,7 +2535,7 @@ fn build_trials(
                             ..default()
                         })
                         .with_children(|row| {
-                            ui_kit::chip(row, format!("ROLL {:.2}", probe.roll), ui_kit::NEUTRAL);
+                            ui_kit::chip(row, format!("TIRAGE {:.2}", probe.roll), ui_kit::NEUTRAL);
                             ui_kit::chip(
                                 row,
                                 if probe.success { "LOCK" } else { "NO LOCK" },
@@ -2508,7 +2545,7 @@ fn build_trials(
                     ui_kit::label(
                         panel,
                         format!(
-                            "Lock roll for this seed, under {:.0} m/s ({:.0}%).",
+                            "Tirage de verrouillage pour cette graine, sous {:.0} m/s ({:.0} %).",
                             probe.max_speed_ms,
                             probe.probability * 100.0
                         ),
@@ -2527,7 +2564,7 @@ fn build_trials(
             ui_kit::label(
                 panel,
                 format!(
-                    "Seed spread  thrust {:+.1}%  burn {:+.1}%  drag {:+.1}%",
+                    "Dispersion de la graine  poussée {:+.1} %  combustion {:+.1} %  traînée {:+.1} %",
                     (spread.thrust - 1.0) * 100.0,
                     (spread.burn - 1.0) * 100.0,
                     (spread.drag - 1.0) * 100.0
@@ -2594,8 +2631,9 @@ fn build_trials(
                 });
             if let Some((done, total)) = session.batch_progress() {
                 panel.spawn((
-                    Text::new(format!("Running {done} / {total} seeds...")),
+                    Text::new(format!("Série en cours : {done} / {total} graines...")),
                     TextFont {
+                        font: ui_kit::ui_font(),
                         font_size: FontSize::Px(10.0),
                         ..default()
                     },
@@ -3178,7 +3216,7 @@ pub(crate) fn update_toast(
     state.1 = (state.1 - time.delta_secs()).max(0.0);
     if let Ok(mut text) = text.single_mut() {
         let wanted = if state.1 > 0.0 {
-            format!("> {}", state.0)
+            format!("> {}", ui_kit::fr(state.0.clone()))
         } else {
             String::new()
         };
@@ -3195,7 +3233,7 @@ pub(crate) fn update_nav_status(
 ) {
     if let Ok(mut text) = status.single_mut() {
         let value = format!(
-            "DAY {}   |   {} cr   |   {}/{} active   |   {} done",
+            "JOUR {}   |   {} crédits   |   {}/{} contrats actifs   |   {} livrés",
             campus.day,
             ui_kit::thousands(campus.credits),
             procurement.active().len(),
