@@ -670,7 +670,11 @@ pub(crate) enum MissileAction {
     Adjust(Param, i8),
     /// Nudge one local attachment axis from the numeric inspector. Translation is in metres;
     /// rotation is in degrees. These are editor/gameplay coordinates, not physical guidance data.
-    AdjustTransform { axis: usize, delta: f64, rotate: bool },
+    AdjustTransform {
+        axis: usize,
+        delta: f64,
+        rotate: bool,
+    },
     CycleAero(AeroChoice),
     /// Keep the current aerodynamic figures as the A side of a comparison.
     CompareAero,
@@ -2372,11 +2376,19 @@ mod tests {
         let wing = session.selected.clone().unwrap();
 
         session.apply(
-            MissileAction::AdjustTransform { axis: 0, delta: 0.05, rotate: false },
+            MissileAction::AdjustTransform {
+                axis: 0,
+                delta: 0.05,
+                rotate: false,
+            },
             &owned,
         );
         session.apply(
-            MissileAction::AdjustTransform { axis: 2, delta: -5.0, rotate: true },
+            MissileAction::AdjustTransform {
+                axis: 2,
+                delta: -5.0,
+                rotate: true,
+            },
             &owned,
         );
         let attach = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
@@ -2404,10 +2416,13 @@ mod tests {
         let mut session = MissileSession::new_default();
         let owned = everything_owned();
         session.apply(
-            MissileAction::AdjustTransform { axis: 1, delta: 0.05, rotate: false },
+            MissileAction::AdjustTransform {
+                axis: 1,
+                delta: 0.05,
+                rotate: false,
+            },
             &owned,
         );
         assert!(session.undo().contains("Nothing to undo"));
     }
-
 }
