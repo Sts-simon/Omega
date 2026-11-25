@@ -3,10 +3,10 @@
 [Version française](README.fr.md) | [English](README.md)
 
 [![CI](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml/badge.svg)](https://github.com/Sts-simon/Omega/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.38.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.38.0)
+[![Version](https://img.shields.io/badge/version-0.39.0-blue.svg)](https://github.com/Sts-simon/Omega/releases/tag/v0.39.0)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-**Version 0.38.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
+**Version 0.39.0** — a fictional missile-design game built with Rust and Bevy. The player accepts
 military-themed contracts, assembles an abstract staged vehicle, edits its onboard program, runs
 reproducible simulated trials and delivers a dossier. You build a staged missile in a 3D workshop, unlock parts, families and contracts through a
 research tree that advances with a day clock, fly deterministic trials, and deliver a plan for
