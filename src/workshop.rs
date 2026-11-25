@@ -56,11 +56,27 @@ pub(crate) enum TransformMode {
 }
 
 /// KSP-style transform gizmo state. A handle drag is committed as one undoable edit on release.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub(crate) struct TransformGizmo {
     pub mode: TransformMode,
     pub drag: Option<(usize, Vec2, Vec2)>,
     pub before: Option<Vehicle>,
+    /// Grid snapping is enabled by default; Shift temporarily bypasses it.
+    pub snap_enabled: bool,
+    /// 0 = fine, 1 = normal, 2 = coarse.
+    pub snap_preset: usize,
+}
+
+impl Default for TransformGizmo {
+    fn default() -> Self {
+        Self {
+            mode: TransformMode::Translate,
+            drag: None,
+            before: None,
+            snap_enabled: true,
+            snap_preset: 1,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,10 +87,32 @@ struct NodePoint {
     world: Vec3,
 }
 
-fn gizmo_amount(cursor: Vec2, start: Vec2, screen_axis: Vec2, mode: TransformMode, fine: bool) -> f64 {
+fn snap_step(mode: TransformMode, preset: usize) -> f64 {
+    const TRANSLATION: [f64; 3] = [0.01, 0.10, 0.50];
+    const ROTATION: [f64; 3] = [1.0, 5.0, 15.0];
+    let index = preset.min(2);
     if mode == TransformMode::Translate {
-        let metres = (cursor - start).dot(screen_axis.normalize_or_zero()) as f64 * 0.02;
-        if fine { metres } else { (metres / 0.1).round() * 0.1 }
+        TRANSLATION[index]
+    } else {
+        ROTATION[index]
+    }
+}
+
+fn snap_amount(amount: f64, step: f64) -> f64 {
+    (amount / step).round() * step
+}
+
+fn gizmo_amount(
+    cursor: Vec2,
+    start: Vec2,
+    screen_axis: Vec2,
+    mode: TransformMode,
+    fine: bool,
+    snap_enabled: bool,
+    snap_preset: usize,
+) -> f64 {
+    let raw = if mode == TransformMode::Translate {
+        (cursor - start).dot(screen_axis.normalize_or_zero()) as f64 * 0.02
     } else {
         let start_angle = (start.y - screen_axis.y).atan2(start.x - screen_axis.x);
         let current_angle = (cursor.y - screen_axis.y).atan2(cursor.x - screen_axis.x);
@@ -84,9 +122,23 @@ fn gizmo_amount(cursor: Vec2, start: Vec2, screen_axis: Vec2, mode: TransformMod
         } else if radians < -std::f32::consts::PI {
             radians += std::f32::consts::TAU;
         }
-        let degrees = radians.to_degrees() as f64;
-        if fine { degrees } else { (degrees / 5.0).round() * 5.0 }
+        radians.to_degrees() as f64
+    };
+    if fine || !snap_enabled {
+        raw
+    } else {
+        snap_amount(raw, snap_step(mode, snap_preset))
     }
+}
+
+fn distance_to_segment(point: Vec2, start: Vec2, end: Vec2) -> f32 {
+    let segment = end - start;
+    let length_squared = segment.length_squared();
+    if length_squared <= f32::EPSILON {
+        return point.distance(start);
+    }
+    let t = ((point - start).dot(segment) / length_squared).clamp(0.0, 1.0);
+    point.distance(start + segment * t)
 }
 
 fn world_of(anchor: Vec3, x: f64, y: f64, z: f64) -> Vec3 {
@@ -249,6 +301,8 @@ pub(crate) fn workshop_pointer(
     let mut rotate_tool_pressed = false;
     let mut undo_pressed = false;
     let mut redo_pressed = false;
+    let mut toggle_snap_pressed = false;
+    let mut cycle_snap_pressed = false;
     for event in typed.read() {
         if event.state != ButtonState::Pressed {
             continue;
@@ -260,6 +314,8 @@ pub(crate) fn workshop_pointer(
                 (false, "r") => rotate_tool_pressed = true,
                 (true, "z") => undo_pressed = true,
                 (true, "y") => redo_pressed = true,
+                (false, "g") => toggle_snap_pressed = true,
+                (false, "t") => cycle_snap_pressed = true,
                 _ => {}
             }
         }
@@ -272,12 +328,34 @@ pub(crate) fn workshop_pointer(
         }
         transform_gizmo.drag = None;
         transform_gizmo.mode = if rotate_tool_pressed {
-            campus.message = "Rotation : faites glisser un anneau. Axes locaux de la pièce sélectionnée.".to_string();
+            campus.message = "Rotation : glissez un anneau. G : accrochage, T : pas, Maj : libre.".to_string();
             TransformMode::Rotate
         } else {
-            campus.message = "Déplacement : faites glisser une flèche. Maj : réglage fin.".to_string();
+            campus.message = "Déplacement : glissez une flèche. G : accrochage, T : pas, Maj : libre.".to_string();
             TransformMode::Translate
         };
+    }
+
+    if toggle_snap_pressed {
+        transform_gizmo.snap_enabled = !transform_gizmo.snap_enabled;
+        campus.message = format!(
+            "Accrochage {}. G : activer/désactiver, T : précision, Maj : libre.",
+            if transform_gizmo.snap_enabled {
+                "activé"
+            } else {
+                "désactivé"
+            }
+        );
+    }
+    if cycle_snap_pressed {
+        transform_gizmo.snap_preset = (transform_gizmo.snap_preset + 1) % 3;
+        let step = snap_step(transform_gizmo.mode, transform_gizmo.snap_preset);
+        let unit = if transform_gizmo.mode == TransformMode::Translate {
+            "m"
+        } else {
+            "°"
+        };
+        campus.message = format!("Pas d'accrochage : {step}{unit}");
     }
 
     // --- start a drag ---
@@ -303,8 +381,8 @@ pub(crate) fn workshop_pointer(
                         center_screen,
                         camera.world_to_viewport(camera_transform, center + direction * 1.5),
                     ) {
-                        let distance = cursor.distance(point);
-                        if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
+                        let distance = distance_to_segment(cursor, origin, point);
+                        if distance <= 14.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
                             nearest = Some((axis, point - origin, distance));
                         }
                     }
@@ -319,7 +397,7 @@ pub(crate) fn workshop_pointer(
                         let ring_point = center + orientation * local_ring * 1.05;
                         if let Ok(point) = camera.world_to_viewport(camera_transform, ring_point) {
                             let distance = cursor.distance(point);
-                            if distance <= 20.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
+                            if distance <= 26.0 && nearest.is_none_or(|(_, _, best)| distance < best) {
                                 nearest = Some((axis, center_screen.unwrap_or(cursor), distance));
                             }
                         }
@@ -410,14 +488,54 @@ pub(crate) fn workshop_pointer(
         && let Some(before) = transform_gizmo.before.as_ref()
     {
         let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-        let amount = gizmo_amount(cursor, start, screen_axis, transform_gizmo.mode, fine);
-        session.preview_transform(before, axis, amount, transform_gizmo.mode == TransformMode::Rotate);
+        let amount = gizmo_amount(
+            cursor,
+            start,
+            screen_axis,
+            transform_gizmo.mode,
+            fine,
+            transform_gizmo.snap_enabled,
+            transform_gizmo.snap_preset,
+        );
+        let rotating = transform_gizmo.mode == TransformMode::Rotate;
+        let unit = if rotating { "°" } else { " m" };
+        campus.message = format!(
+            "{} {} : {amount:+.2}{unit}{}",
+            if rotating { "Rotation" } else { "Déplacement" },
+            ["X", "Y", "Z"][axis],
+            if fine {
+                " | précision libre".to_string()
+            } else if transform_gizmo.snap_enabled {
+                if rotating {
+                    format!(
+                        " | pas {}°",
+                        snap_step(transform_gizmo.mode, transform_gizmo.snap_preset)
+                    )
+                } else {
+                    format!(
+                        " | pas {} m",
+                        snap_step(transform_gizmo.mode, transform_gizmo.snap_preset)
+                    )
+                }
+            } else {
+                " | sans accrochage".to_string()
+            }
+        );
+        session.preview_transform(before, axis, amount, rotating);
     }
     if mouse.just_released(MouseButton::Left)
         && let Some((axis, start, screen_axis)) = transform_gizmo.drag.take()
     {
         let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-        let amount = gizmo_amount(cursor, start, screen_axis, transform_gizmo.mode, fine);
+        let amount = gizmo_amount(
+            cursor,
+            start,
+            screen_axis,
+            transform_gizmo.mode,
+            fine,
+            transform_gizmo.snap_enabled,
+            transform_gizmo.snap_preset,
+        );
         if let Some(before) = transform_gizmo.before.take() {
             session.preview_transform(&before, axis, amount, transform_gizmo.mode == TransformMode::Rotate);
             session.commit_transform(before);
@@ -487,7 +605,7 @@ pub(crate) fn workshop_pointer(
             if transform_gizmo.mode == TransformMode::Translate {
                 let end = center + axis * 1.5;
                 gizmos.line(center, end, color);
-                gizmos.sphere(Isometry3d::from_translation(end), 0.11, color);
+                gizmos.sphere(Isometry3d::from_translation(end), 0.15, color);
             } else {
                 let mut previous = None;
                 for step in 0..=48 {
@@ -518,7 +636,7 @@ pub(crate) fn workshop_pointer(
         if let Some(before) = transform_gizmo.before.take() {
             session.vehicle = before;
         }
-        campus.message = "Drag cancelled".to_string();
+        campus.message = "Manipulation annulée.".to_string();
     }
     if drag.source.is_none() && transform_gizmo.drag.is_none() {
         if keys.just_pressed(KeyCode::KeyQ) {
@@ -666,4 +784,37 @@ pub(crate) fn spawn_palette_button(parent: &mut ChildSpawnerCommands<'_>, templa
         .with_children(|b| {
             crate::ui_kit::label(b, template.label(), 10.0, crate::ui_kit::TEXT);
         });
+}
+
+#[cfg(test)]
+mod transform_gizmo_tests {
+    use super::*;
+
+    #[test]
+    fn snapping_uses_three_translation_and_rotation_presets() {
+        assert_eq!(snap_step(TransformMode::Translate, 0), 0.01);
+        assert_eq!(snap_step(TransformMode::Translate, 1), 0.10);
+        assert_eq!(snap_step(TransformMode::Translate, 2), 0.50);
+        assert_eq!(snap_step(TransformMode::Rotate, 0), 1.0);
+        assert_eq!(snap_step(TransformMode::Rotate, 1), 5.0);
+        assert_eq!(snap_step(TransformMode::Rotate, 2), 15.0);
+    }
+
+    #[test]
+    fn snapping_rounds_to_nearest_increment() {
+        assert!((snap_amount(0.14, 0.10) - 0.10).abs() < 1e-9);
+        assert!((snap_amount(-12.0, 5.0) - -10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn handle_hit_test_measures_distance_to_the_whole_arrow() {
+        assert_eq!(
+            distance_to_segment(Vec2::new(50.0, 8.0), Vec2::ZERO, Vec2::new(100.0, 0.0)),
+            8.0
+        );
+        assert_eq!(
+            distance_to_segment(Vec2::new(120.0, 0.0), Vec2::ZERO, Vec2::new(100.0, 0.0)),
+            20.0
+        );
+    }
 }

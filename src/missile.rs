@@ -283,6 +283,7 @@ pub(crate) fn params_of(spec: &PartSpec) -> Vec<(Param, f64)> {
 pub(crate) enum AeroChoice {
     Planform,
     Profile,
+    Angle,
     Role,
     Layout,
     ControlKind,
@@ -294,6 +295,7 @@ impl AeroChoice {
         match self {
             Self::Planform => "PLANFORM",
             Self::Profile => "PROFILE",
+            Self::Angle => "ANGLE",
             Self::Role => "STABILISER",
             Self::Layout => "LAYOUT",
             Self::ControlKind => "SURFACE",
@@ -304,7 +306,12 @@ impl AeroChoice {
 
 pub(crate) fn choices_of(spec: &PartSpec) -> Vec<AeroChoice> {
     match *spec {
-        PartSpec::Wing { .. } => vec![AeroChoice::Planform, AeroChoice::Profile, AeroChoice::Light],
+        PartSpec::Wing { .. } => vec![
+            AeroChoice::Planform,
+            AeroChoice::Profile,
+            AeroChoice::Angle,
+            AeroChoice::Light,
+        ],
         PartSpec::FinSet { .. } => vec![AeroChoice::Role, AeroChoice::Layout, AeroChoice::Light],
         PartSpec::ControlSurface { .. } => vec![AeroChoice::ControlKind, AeroChoice::Light],
         _ => Vec::new(),
@@ -315,6 +322,7 @@ pub(crate) fn choice_value(spec: &PartSpec, choice: AeroChoice) -> String {
     match (*spec, choice) {
         (PartSpec::Wing { planform, .. }, AeroChoice::Planform) => planform.label().to_string(),
         (PartSpec::Wing { profile, .. }, AeroChoice::Profile) => profile.label().to_string(),
+        (_, AeroChoice::Angle) => "USE PART ANGLE".to_string(),
         (PartSpec::FinSet { role, .. }, AeroChoice::Role) => role.label().to_string(),
         (PartSpec::FinSet { layout, .. }, AeroChoice::Layout) => layout.label().to_string(),
         (PartSpec::ControlSurface { kind, .. }, AeroChoice::ControlKind) => kind.label().to_string(),
@@ -327,6 +335,16 @@ pub(crate) fn choice_value(spec: &PartSpec, choice: AeroChoice) -> String {
 }
 
 /// Advance one discrete design choice; `None` when the part does not offer it.
+pub(crate) fn choice_value_for_part(part: &omega_rules::PlacedPart, choice: AeroChoice) -> String {
+    if choice == AeroChoice::Angle {
+        return format!(
+            "{:+.0}°",
+            part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg)
+        );
+    }
+    choice_value(&part.spec, choice)
+}
+
 pub(crate) fn cycled(spec: PartSpec, choice: AeroChoice) -> Option<PartSpec> {
     let toggled = |light: bool| !light;
     match (spec, choice) {
@@ -1016,6 +1034,18 @@ impl MissileSession {
         let Some(part) = self.vehicle.part(&id) else {
             return "That part is no longer there".to_string();
         };
+        if choice == AeroChoice::Angle {
+            if !matches!(part.spec, PartSpec::Wing { .. }) {
+                return "The angle setting is only available on wings".to_string();
+            }
+            let current = part.attach.as_ref().map_or(0.0, |attach| attach.rotation_x_deg);
+            let next = if current >= 15.0 { -15.0 } else { current + 5.0 };
+            self.push_undo();
+            if let Some(attach) = self.vehicle.part_mut(&id).and_then(|part| part.attach.as_mut()) {
+                attach.rotation_x_deg = next;
+            }
+            return format!("{id}: ANGLE {next:+.0}°");
+        }
         match cycled(part.spec, choice) {
             Some(spec) => {
                 if let Some(missing) = spec
@@ -1445,6 +1475,9 @@ pub(crate) struct PartBox {
     pub rotation_x_deg: f32,
     pub rotation_y_deg: f32,
     pub rotation_z_deg: f32,
+    /// Wing-only planform and sweep, used by the 3D preview mesh.
+    pub planform: Option<WingPlanform>,
+    pub sweep_deg: f32,
     pub shape: Shape,
     pub color: [f32; 3],
 }
@@ -1507,6 +1540,12 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
             let part = vehicle.part(&pose.id)?;
             let spec = part.spec;
             let (shape, color) = appearance(&spec);
+            let (planform, sweep_deg) = match spec {
+                PartSpec::Wing {
+                    planform, sweep_deg, ..
+                } => (Some(planform), sweep_deg as f32),
+                _ => (None, 0.0),
+            };
             let angle = part.attach.as_ref().map_or(0.0, |attach| match attach.node {
                 omega_rules::NodeId::Radial(index) => f64::from(index) * 90.0 + attach.angle_deg,
                 _ => attach.angle_deg,
@@ -1527,6 +1566,8 @@ pub(crate) fn layout(vehicle: &Vehicle) -> Vec<PartBox> {
                 rotation_x_deg: pose.rotation_x_deg as f32,
                 rotation_y_deg: pose.rotation_y_deg as f32,
                 rotation_z_deg: pose.rotation_z_deg as f32,
+                planform,
+                sweep_deg,
                 shape,
                 color,
             })
@@ -1611,25 +1652,47 @@ pub(crate) fn sync_missile_visuals(
                 ..default()
             });
             let mid = b.y_bottom + b.height / 2.0;
-            let (mesh, _shape_rotation) = match b.shape {
-                Shape::Nozzle => (meshes.add(Cone::new(b.radius, b.height)), Quat::IDENTITY),
-                Shape::Body | Shape::Sensor | Shape::Disc => {
-                    (meshes.add(Cylinder::new(b.radius, b.height)), Quat::IDENTITY)
+            let rotation = Quat::from_euler(
+                EulerRot::XYZ,
+                b.rotation_x_deg.to_radians(),
+                (b.rotation_y_deg - b.angle).to_radians(),
+                b.rotation_z_deg.to_radians(),
+            );
+            if let Some(planform) = b.planform {
+                // Eight short sections give the preview a readable stepped planform without
+                // introducing a heavyweight mesh-generation dependency.
+                const SEGMENTS: usize = 8;
+                let segment_span = b.span.max(0.05) / SEGMENTS as f32;
+                for index in 0..SEGMENTS {
+                    let t = (index as f32 + 0.5) / SEGMENTS as f32;
+                    let taper = match planform {
+                        WingPlanform::Straight | WingPlanform::Swept => 1.0,
+                        WingPlanform::Delta => 1.0 - 0.92 * t,
+                        WingPlanform::Trapezoidal => 1.0 - 0.45 * t,
+                        WingPlanform::VariableGeometry => 1.0 - 0.28 * t,
+                    };
+                    let chord = (b.height * taper).max(0.025);
+                    let sweep_offset = (b.sweep_deg / 60.0) * b.height * 0.45 * t;
+                    let span_offset = -b.span * 0.5 + segment_span * (index as f32 + 0.5);
+                    let chord_offset = (b.height - chord) * 0.5 - sweep_offset;
+                    let offset = rotation * Vec3::new(span_offset, chord_offset, 0.0);
+                    root.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(segment_span * 1.03, chord, 0.06))),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_xyz(b.x + offset.x, mid + offset.y, b.z + offset.z).with_rotation(rotation),
+                    ));
                 }
-                Shape::Surface => (
-                    meshes.add(Cuboid::new(b.span.max(0.05), b.height.max(0.02), 0.06)),
-                    Quat::from_rotation_y(-b.angle.to_radians()),
-                ),
+                continue;
+            }
+            let mesh = match b.shape {
+                Shape::Nozzle => meshes.add(Cone::new(b.radius, b.height)),
+                Shape::Body | Shape::Sensor | Shape::Disc => meshes.add(Cylinder::new(b.radius, b.height)),
+                Shape::Surface => meshes.add(Cuboid::new(b.span.max(0.05), b.height.max(0.02), 0.06)),
             };
             root.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_xyz(b.x, mid, b.z).with_rotation(Quat::from_euler(
-                    EulerRot::XYZ,
-                    b.rotation_x_deg.to_radians(),
-                    (b.rotation_y_deg - b.angle).to_radians(),
-                    b.rotation_z_deg.to_radians(),
-                )),
+                Transform::from_xyz(b.x, mid, b.z).with_rotation(rotation),
             ));
         }
         if !boxes.is_empty() {
@@ -2210,6 +2273,61 @@ mod tests {
         assert!(refused.contains("Locked"), "experimental profile: {refused}");
         let accepted = session.apply(MissileAction::CycleAero(AeroChoice::Profile), &owned);
         assert!(accepted.contains("EXPERIMENTAL"), "{accepted}");
+    }
+
+    #[test]
+    fn wing_angle_is_editable_undoable_and_changes_gameplay_figures() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.add_at(
+            PartTemplate::Wing,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let wing = session.selected.clone().unwrap();
+        let before = session.vehicle.aero();
+
+        let message = session.apply(MissileAction::CycleAero(AeroChoice::Angle), &owned);
+        assert!(message.contains("+5°"), "{message}");
+        let attach = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert_eq!(attach.rotation_x_deg, 5.0);
+        let after = session.vehicle.aero();
+        assert!(after.lift < before.lift);
+        assert!(after.drag_index > before.drag_index);
+
+        assert_eq!(
+            choice_value_for_part(session.vehicle.part(&wing).unwrap(), AeroChoice::Angle),
+            "+5°"
+        );
+        session.undo();
+        let restored = session.vehicle.part(&wing).unwrap().attach.as_ref().unwrap();
+        assert_eq!(restored.rotation_x_deg, 0.0);
+        assert_eq!(session.vehicle.aero(), before);
+    }
+
+    #[test]
+    fn wing_planform_is_preserved_in_the_visual_layout() {
+        let mut session = MissileSession::new_default();
+        let owned = everything_owned();
+        session.add_at(
+            PartTemplate::Wing,
+            Some(("motor-1".into(), omega_rules::NodeId::Radial(0), 0.0)),
+            &owned,
+        );
+        let wing_id = session.selected.clone().unwrap();
+        let first = layout(&session.vehicle)
+            .into_iter()
+            .find(|part| part.id == wing_id)
+            .unwrap();
+        assert_eq!(first.planform, Some(WingPlanform::Swept));
+        assert_eq!(first.sweep_deg, 20.0);
+
+        session.apply(MissileAction::CycleAero(AeroChoice::Planform), &owned);
+        let changed = layout(&session.vehicle)
+            .into_iter()
+            .find(|part| part.id == wing_id)
+            .unwrap();
+        assert_eq!(changed.planform, Some(WingPlanform::Delta));
     }
 
     #[test]
