@@ -8,7 +8,7 @@ Omega is a fictional, abstract game about completing military-themed design cont
 
 All values and outcomes are game mechanics. The project does not attempt to model real weapons, real targeting, guidance, navigation, seeker logic, real warheads or real-world performance. The explosive charge is an abstract payload with a game yield. This boundary is deliberate and is not a future feature.
 
-## Current baseline (0.45.0)
+## Current baseline (0.47.0, release candidate)
 
 The following features are already present in the application:
 
@@ -25,12 +25,14 @@ The following features are already present in the application:
 
 The recent CI run on the current `main` commit is green. This is a repository baseline, not proof that every platform or user workflow has been manually tested.
 
-### Delivered follow-up (0.39.0)
+### Delivered follow-up (0.46.0 – 0.47.0)
 
-- Done: the selected-part inspector exposes local X/Y/Z translation and rotation nudges, with separate values and actions for each axis.
-- Done: translation steps are 0.05 m and rotation steps are 5°; each click is one undo/redo transaction and uses the existing vehicle save schema.
-- Done: regression tests cover axis independence, undo/redo and refusing independent transforms on the root part.
-- Remaining: direct numeric text entry, per-field precision selection and a complete visual pass at 1280×720 and 1600×960.
+- Done: `omega-rules::balance` audits part mass, propellant, cost, power, complexity and reliability, each part's advantage and limitation, the contract board and the research economy from the same rules the game uses; `omega --balance-report` prints it and `docs/BALANCE.md` is its versioned copy. The workshop inspector shows the selected part's balance sheet.
+- Done: contract offers from difficulty 4 require `research:advanced_validation`, enforced both when a board is generated and when an offer is validated; tests cover the difficulty → reward → budget → goal progression, family/profile variety, the secondary bonus and the research cost.
+- Done: a save file that no longer matches its manifest falls back to its previous generation through `SaveSlot::recover_backup`, which updates the manifest and rewrites atomically; an interrupted-write test replays the failure and the recovery.
+- Done: a regression test runs a complete loop from offer acceptance to trial, revision, submission and delivery.
+- Done: window defaults (1600 × 960, minimum 1280 × 720), French labels for stale/secondary/submitted revisions, version-stamped PDF and HTML reports, and a Linux packaging script with an installation guide.
+- Remaining: a complete visual pass of the workshop, inspector, contract and trial screens at 1280 × 720 and 1600 × 960. The per-axis ± buttons delivered for 0.39 were replaced by the numeric inspector in 0.40 and removed in 0.47. 0.47.0 is a release candidate; 1.0.0 still waits for a reliable, manually verified full loop.
 
 ## Definition of done for 1.0
 

@@ -1,3 +1,21 @@
+## 0.47.0 — Finition et version candidate
+
+- **Fenêtre.** Résolution par défaut 1600 × 960 et taille minimale 1280 × 720 imposée par la fenêtre ; le titre affiche la version du binaire.
+- **Rapports d'essai.** Les exports PDF et HTML reprennent la version du paquet (`CARGO_PKG_VERSION`) au lieu d'un numéro codé en dur, et l'entête du dossier de livraison suit la même règle.
+- **Interface française.** `STALE`, `SECONDARY` et `HEAD rev` s'affichent désormais en `OBSOLÈTE`, `SECONDAIRE` et `VERSION ACTIVE rév.`, avec des tests sur la table de traduction, les états de révision et les messages de refus de livraison et d'échéance dépassée.
+- **Audit d'équilibrage.** `omega --balance-report` reste la seule source de `docs/BALANCE.md` et le rapport est retrouvé tel quel par diff.
+- **Distribution.** Script `scripts/package-linux.sh` (archive de la version en cours avec binaire, documents et licence) et guide `docs/INSTALLATION.md` (prérequis, archive, dépannage).
+- **Nettoyage.** L'ancien inspecteur par boutons ± et son action `AdjustTransform`, sans appelant depuis la saisie numérique de la 0.40.0, sont supprimés.
+- **Vérifications.** `cargo fmt --all -- --check`, `cargo check --workspace`, clippy avec warnings refusés et les **405 tests** du workspace passent (153 application, 19 `omega-data`, 162 `omega-rules`, 71 `omega-sim-core`). Le jeu a été lancé sur un écran X11 : écran titre affiché, chargement d'une campagne vers la vue de l'île. L'atelier, l'inspecteur et les contrats restent à parcourir visuellement à 1280 × 720 et 1600 × 960 ; la 1.0.0 attend donc encore une passe manuelle complète.
+
+## 0.46.0 — Cohérence et équilibrage
+
+- **Audit d'équilibrage.** Le module `omega-rules::balance` produit un bilan par pièce (masse sèche, propergol, coût fictif, puissance, complexité, fiabilité), un avantage et une limite, puis un tableau de contrats et l'économie de recherche, tous calculés par les mêmes fonctions que le jeu. `omega --balance-report` l'imprime et `docs/BALANCE.md` est sa copie versionnée.
+- **Bilan dans l'atelier.** L'inspecteur affiche `BILAN DE LA PIÈCE` avec les valeurs chiffrées, l'avantage et la limite de la pièce sélectionnée.
+- **Contrats.** Les offres de difficulté 4 et plus exigent la technologie `research:advanced_validation` : la génération du tableau et la validation d'une offre partagent la même règle. La progression difficulté → récompense → budget → objectifs, la variété des familles et des profils, le bonus secondaire et le coût de la recherche sont couverts par des tests.
+- **Sauvegardes.** `SaveSlot::recover_backup` restaure la génération précédente d'un fichier (`<fichier>.bak`) en mettant le manifeste à jour dans la même opération ; la lecture d'un slot ne l'utilise qu'après l'échec de la vérification, et un test rejoue l'écriture interrompue puis la reprise.
+- **Boucle complète.** Un test déroule une nouvelle campagne de l'acceptation d'une offre à l'essai, la révision, la soumission et la livraison.
+
 ## 0.45.0 — Contrats et progression
 
 - **Contrats détaillés.** Chaque offre porte désormais un contexte fictif, une famille de mission et de véhicule, une difficulté, un budget de conception, une échéance, une récompense et les sections demandées du dossier technique. Les anciennes sauvegardes restent lisibles : les nouveaux champs ont une valeur par défaut et une offre sans budget ou sans objectif conserve son ancien mode de livraison.
