@@ -76,6 +76,259 @@ impl VehicleFamily {
             Self::ShortRange => None,
         }
     }
+
+    /// Classify a design for contract compatibility. A vehicle with an air-breathing engine is a
+    /// cruiser; otherwise a multi-stage stack is the ballistic family and a single stage is the
+    /// short-range family. This is a gameplay rule, not a real classification.
+    pub fn of_vehicle(vehicle: &crate::assembly::Vehicle) -> Self {
+        if vehicle
+            .parts
+            .iter()
+            .any(|part| matches!(part.spec, crate::vehicle::PartSpec::AirBreathing { .. }))
+        {
+            Self::Cruise
+        } else if vehicle.stage_count() >= 2 {
+            Self::Ballistic
+        } else {
+            Self::ShortRange
+        }
+    }
+}
+
+/// A mission package layered over the broad mission family. Two offers in the same family can
+/// demand opposite flight profiles, so one airframe cannot satisfy both.
+/// The board shows a readable sample of a family's profiles: one low/high or short/long pair.
+pub const MAX_PROFILES_PER_FAMILY: usize = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractProfile {
+    DeepStrike,
+    LowObservableRaid,
+    PrecisionStrike,
+    AirSuperiority,
+    LongRangeIntercept,
+    PointDefence,
+    AreaDefence,
+    TheatreStrike,
+    SeaSkimmer,
+}
+
+impl ContractProfile {
+    pub const ALL: [Self; 9] = [
+        Self::DeepStrike,
+        Self::LowObservableRaid,
+        Self::PrecisionStrike,
+        Self::AirSuperiority,
+        Self::LongRangeIntercept,
+        Self::PointDefence,
+        Self::AreaDefence,
+        Self::TheatreStrike,
+        Self::SeaSkimmer,
+    ];
+
+    pub fn for_family(family: MissionFamily) -> &'static [Self] {
+        match family {
+            MissionFamily::AirToAir => &[Self::AirSuperiority, Self::LongRangeIntercept],
+            MissionFamily::AirToSurface => &[Self::LowObservableRaid, Self::DeepStrike, Self::PrecisionStrike],
+            MissionFamily::SurfaceToAir => &[Self::PointDefence, Self::AreaDefence],
+            MissionFamily::SurfaceToSurface => &[Self::TheatreStrike, Self::SeaSkimmer],
+        }
+    }
+
+    pub fn available_for_family(family: MissionFamily, owned: &BTreeSet<String>) -> Vec<Self> {
+        Self::for_family(family)
+            .iter()
+            .copied()
+            .filter(|profile| profile.is_available(owned))
+            .collect()
+    }
+
+    pub fn mission_family(self) -> MissionFamily {
+        match self {
+            Self::AirSuperiority | Self::LongRangeIntercept => MissionFamily::AirToAir,
+            Self::DeepStrike | Self::LowObservableRaid | Self::PrecisionStrike => MissionFamily::AirToSurface,
+            Self::PointDefence | Self::AreaDefence => MissionFamily::SurfaceToAir,
+            Self::TheatreStrike | Self::SeaSkimmer => MissionFamily::SurfaceToSurface,
+        }
+    }
+
+    pub fn vehicle_family(self) -> VehicleFamily {
+        match self {
+            Self::DeepStrike | Self::AreaDefence | Self::TheatreStrike => VehicleFamily::Ballistic,
+            Self::LowObservableRaid | Self::LongRangeIntercept | Self::SeaSkimmer => VehicleFamily::Cruise,
+            Self::PrecisionStrike | Self::AirSuperiority | Self::PointDefence => VehicleFamily::ShortRange,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::DeepStrike => "DEEP STRIKE",
+            Self::LowObservableRaid => "VEIL RAID",
+            Self::PrecisionStrike => "PRECISION STRIKE",
+            Self::AirSuperiority => "AIR SUPERIORITY",
+            Self::LongRangeIntercept => "LONG-RANGE INTERCEPT",
+            Self::PointDefence => "POINT DEFENCE",
+            Self::AreaDefence => "AREA DEFENCE",
+            Self::TheatreStrike => "THEATRE STRIKE",
+            Self::SeaSkimmer => "SEA SKIMMER",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::DeepStrike => "Deep strike programme",
+            Self::LowObservableRaid => "Low-observable raid",
+            Self::PrecisionStrike => "Precision strike package",
+            Self::AirSuperiority => "Air superiority round",
+            Self::LongRangeIntercept => "Long-range intercept",
+            Self::PointDefence => "Point-defence interceptor",
+            Self::AreaDefence => "Area-defence interceptor",
+            Self::TheatreStrike => "Theatre strike programme",
+            Self::SeaSkimmer => "Sea-skimmer programme",
+        }
+    }
+
+    pub fn client(self) -> &'static str {
+        match self {
+            Self::DeepStrike => "Meridian Strategic Systems",
+            Self::LowObservableRaid => "Veil Systems Directorate",
+            Self::PrecisionStrike => "Kestrel Munitions Board",
+            Self::AirSuperiority => "Aster Defence Directorate",
+            Self::LongRangeIntercept => "Halcyon Air Command",
+            Self::PointDefence => "Northstar Defence Office",
+            Self::AreaDefence => "Cinder Range Authority",
+            Self::TheatreStrike => "Orion Procurement Bureau",
+            Self::SeaSkimmer => "Tethys Naval Bureau",
+        }
+    }
+
+    pub fn brief(self) -> &'static str {
+        match self {
+            Self::DeepStrike => "A high-apogee, long-range round that trades stealth for reach.",
+            Self::LowObservableRaid => "A low-flying raid package: the trial must stay discreet.",
+            Self::PrecisionStrike => "A compact short-range round with a tightly sized charge.",
+            Self::AirSuperiority => "A light, agile round that must acquire its target and turn hard.",
+            Self::LongRangeIntercept => "A patient cruiser that loiters low before a long intercept.",
+            Self::PointDefence => "A quick-reaction round for close-in defence.",
+            Self::AreaDefence => "A high-altitude interceptor that watches a wide sector.",
+            Self::TheatreStrike => "A heavy two-stage round with a large payload and a high apogee.",
+            Self::SeaSkimmer => "A wave-top cruise package that must remain hard to spot.",
+        }
+    }
+
+    /// Minimum explosive charge mass the dossier must prove.
+    pub fn payload_kg(self) -> f64 {
+        match self {
+            Self::DeepStrike => 110.0,
+            Self::LowObservableRaid => 45.0,
+            Self::PrecisionStrike => 25.0,
+            Self::AirSuperiority => 12.0,
+            Self::LongRangeIntercept => 20.0,
+            Self::PointDefence => 8.0,
+            Self::AreaDefence => 30.0,
+            Self::TheatreStrike => 150.0,
+            Self::SeaSkimmer => 70.0,
+        }
+    }
+
+    /// Minimum abstract game yield, which rewards better charge grades.
+    pub fn yield_kg(self) -> f64 {
+        match self {
+            Self::DeepStrike => 140.0,
+            Self::LowObservableRaid => 55.0,
+            Self::PrecisionStrike => 32.0,
+            Self::AirSuperiority => 16.0,
+            Self::LongRangeIntercept => 26.0,
+            Self::PointDefence => 10.0,
+            Self::AreaDefence => 38.0,
+            Self::TheatreStrike => 170.0,
+            Self::SeaSkimmer => 88.0,
+        }
+    }
+
+    /// Low-altitude profiles require a high discretion score.
+    pub fn discretion_min(self) -> Option<f64> {
+        match self {
+            Self::LowObservableRaid => Some(62.0),
+            Self::PrecisionStrike => Some(50.0),
+            Self::AirSuperiority => Some(50.0),
+            Self::LongRangeIntercept => Some(58.0),
+            Self::PointDefence => Some(55.0),
+            Self::SeaSkimmer => Some(68.0),
+            _ => None,
+        }
+    }
+
+    /// High-apogee profiles require the trial to reach this altitude.
+    pub fn ceiling_min(self) -> Option<f64> {
+        match self {
+            Self::DeepStrike => Some(8_000.0),
+            Self::AreaDefence => Some(9_000.0),
+            Self::TheatreStrike => Some(10_000.0),
+            _ => None,
+        }
+    }
+
+    pub fn range_factor(self) -> f64 {
+        match self {
+            Self::DeepStrike => 1.15,
+            Self::LowObservableRaid => 1.10,
+            Self::PrecisionStrike => 0.85,
+            Self::AirSuperiority => 0.80,
+            Self::LongRangeIntercept => 1.20,
+            Self::PointDefence => 0.75,
+            Self::AreaDefence => 0.95,
+            Self::TheatreStrike => 1.25,
+            Self::SeaSkimmer => 1.10,
+        }
+    }
+
+    pub fn reward_factor(self) -> f64 {
+        match self {
+            Self::DeepStrike => 1.15,
+            Self::LowObservableRaid => 1.10,
+            Self::PrecisionStrike => 0.95,
+            Self::AirSuperiority => 1.00,
+            Self::LongRangeIntercept => 1.20,
+            Self::PointDefence => 0.90,
+            Self::AreaDefence => 1.05,
+            Self::TheatreStrike => 1.30,
+            Self::SeaSkimmer => 1.15,
+        }
+    }
+
+    pub fn deadline_bonus(self) -> i16 {
+        match self {
+            Self::TheatreStrike => -2,
+            Self::PointDefence => 2,
+            Self::PrecisionStrike => 1,
+            _ => 0,
+        }
+    }
+
+    /// Profile-specific emphasis on the design dossier.
+    pub fn design_bonus(self) -> i16 {
+        match self {
+            Self::DeepStrike | Self::TheatreStrike => 8,
+            Self::LowObservableRaid | Self::SeaSkimmer => 6,
+            Self::AreaDefence => 5,
+            Self::PrecisionStrike => 4,
+            _ => 0,
+        }
+    }
+
+    /// Profile-specific emphasis on the onboard program.
+    pub fn program_bonus(self) -> i16 {
+        match self {
+            Self::LowObservableRaid => 8,
+            Self::AirSuperiority | Self::LongRangeIntercept => 7,
+            Self::SeaSkimmer => 5,
+            Self::PointDefence => 4,
+            Self::DeepStrike => 3,
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,16 +370,88 @@ pub struct ContractOffer {
     pub id: u32,
     pub mission_family: MissionFamily,
     pub vehicle_family: VehicleFamily,
+    /// Mission package that adds payload, discretion or apogee requirements. `None` is kept for
+    /// offers saved before profiles existed; such an offer keeps the older family-only rubric.
+    #[serde(default)]
+    pub profile: Option<ContractProfile>,
     pub title: String,
     pub client: String,
     pub brief: String,
+    /// Fictional background shown on the offer card and in the technical dossier.
+    #[serde(default)]
+    pub context: String,
     pub requirements: ContractRequirements,
+    /// Fictional design budget checked against the workshop's abstract cost figure.
+    #[serde(default)]
+    pub design_budget_cr: u64,
+    /// Combined design constraints the delivered airframe must satisfy.
+    #[serde(default)]
+    pub primary_goals: Vec<DesignGoal>,
+    /// Optional stretch goals; satisfying all of them pays the bonus.
+    #[serde(default)]
+    pub secondary_goals: Vec<DesignGoal>,
+    #[serde(default)]
+    pub secondary_bonus_cr: u64,
+    /// Sections the client expects in the technical dossier.
+    #[serde(default)]
+    pub requested_dossier: Vec<String>,
     pub reward_credits: u64,
     pub deadline_days: u16,
     pub difficulty: u8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignGoalMetric {
+    MassKg,
+    Reliability,
+    Complexity,
+}
+
+/// An integer-valued design goal. Values are compared with the workshop's abstract metrics, not
+/// real engineering measurements.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesignGoal {
+    pub id: String,
+    pub label: String,
+    pub metric: DesignGoalMetric,
+    pub limit: u32,
+    pub at_most: bool,
+}
+
+impl DesignGoal {
+    pub fn text(&self) -> String {
+        let comparator = if self.at_most { "≤" } else { "≥" };
+        let unit = match self.metric {
+            DesignGoalMetric::MassKg => "kg",
+            DesignGoalMetric::Reliability | DesignGoalMetric::Complexity => "/100",
+        };
+        format!("{} {comparator} {} {unit}", self.label, self.limit)
+    }
+}
+
+/// Standard sections of a delivered dossier, in presentation order.
+pub fn standard_dossier_sections() -> Vec<String> {
+    [
+        "Vue générale du véhicule",
+        "Arbre d'assemblage",
+        "Équipements",
+        "Paramètres de conception",
+        "Programme embarqué",
+        "Résultats des essais",
+        "Exigences validées",
+        "Anomalies éventuelles",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
 impl ContractOffer {
+    pub fn profile_label(&self) -> &'static str {
+        self.profile.map_or("GENERAL", ContractProfile::label)
+    }
+
     /// Every research capability this offer needs. An offer without them is not put on the board,
     /// and accepting one that slipped through from an older save is refused by name.
     pub fn required_family_capabilities(&self) -> Vec<&'static str> {
@@ -141,11 +466,21 @@ impl ContractOffer {
         self.required_family_capabilities()
             .iter()
             .all(|capability| owned.contains(*capability))
+            && self
+                .requirements
+                .required_capabilities
+                .iter()
+                .all(|capability| owned.contains(capability))
     }
 
     pub fn validate(&self) -> Result<(), String> {
         if self.id == 0 {
             return Err("contract id must be non-zero".to_string());
+        }
+        if let Some(profile) = self.profile
+            && (profile.mission_family() != self.mission_family || profile.vehicle_family() != self.vehicle_family)
+        {
+            return Err("contract profile does not match its mission and vehicle families".to_string());
         }
         if self.title.trim().is_empty() || self.client.trim().is_empty() || self.brief.trim().is_empty() {
             return Err("contract title, client and brief must not be empty".to_string());
@@ -238,37 +573,48 @@ impl ContractRng {
         min + (self.next_u64() % u64::from(max - min + 1)) as u32
     }
 
-    fn choose<T: Copy>(&mut self, values: &[T]) -> T {
-        values[(self.next_u64() % values.len() as u64) as usize]
-    }
-}
-
-impl MissionFamily {
-    fn client(self) -> &'static str {
-        match self {
-            Self::AirToAir => "Aster Defence Directorate",
-            Self::AirToSurface => "Meridian Strategic Systems",
-            Self::SurfaceToAir => "Northstar Defence Office",
-            Self::SurfaceToSurface => "Orion Procurement Bureau",
+    fn shuffle<T>(&mut self, values: &mut [T]) {
+        for index in (1..values.len()).rev() {
+            let other = self.range(0, index as u32) as usize;
+            values.swap(index, other);
         }
     }
 }
 
-fn make_offer(id: u32, mission_family: MissionFamily, vehicle_family: VehicleFamily, difficulty: u8) -> ContractOffer {
+impl ContractProfile {
+    pub fn is_available(self, owned: &BTreeSet<String>) -> bool {
+        self.vehicle_family()
+            .capability()
+            .is_none_or(|capability| owned.contains(capability))
+    }
+}
+
+fn make_offer(id: u32, mission_family: MissionFamily, profile: ContractProfile, difficulty: u8) -> ContractOffer {
     let d = u64::from(difficulty);
+    let base_reward = 4_000 + d * 2_500;
+    let reward_credits = (base_reward as f64 * profile.reward_factor()).round() as u64;
+    let deadline = (35_i32 - i32::from(difficulty) * 3 + i32::from(profile.deadline_bonus())).max(12) as u16;
+    let reliability = 30 + i32::from(difficulty) * 4;
+    let complexity = 95 - i32::from(difficulty) * 2;
+    let secondary_reliability = (reliability + 8).min(95);
+    let secondary_complexity = (complexity - 8).max(25);
+    let mass_limit = 1_200_u32.saturating_sub(u32::from(difficulty) * 80);
     ContractOffer {
         id: id.max(1),
         mission_family,
-        vehicle_family,
-        title: format!("{} development programme", mission_family.label()),
-        client: mission_family.client().to_string(),
-        brief: format!(
-            "Submit a validated fictional {} vehicle programme. The review evaluates design completeness, software quality and repeatable simulation evidence.",
-            vehicle_family.label().to_lowercase()
+        vehicle_family: profile.vehicle_family(),
+        profile: Some(profile),
+        title: profile.title().to_string(),
+        client: profile.client().to_string(),
+        brief: profile.brief().to_string(),
+        context: format!(
+            "{} asks for a {} package. The programme is fictional; every figure is a game rating.",
+            profile.client(),
+            profile.label().to_lowercase()
         ),
         requirements: ContractRequirements {
-            min_design_score: (55 + difficulty * 5).min(95),
-            min_program_score: (50 + difficulty * 6).min(95),
+            min_design_score: (55 + i32::from(difficulty) * 5 + i32::from(profile.design_bonus())).clamp(0, 95) as u8,
+            min_program_score: (50 + i32::from(difficulty) * 6 + i32::from(profile.program_bonus())).clamp(0, 95) as u8,
             min_trial_score: (55 + difficulty * 5).min(95),
             required_capabilities: if difficulty >= 4 {
                 vec!["research:advanced_validation".to_string()]
@@ -276,13 +622,55 @@ fn make_offer(id: u32, mission_family: MissionFamily, vehicle_family: VehicleFam
                 Vec::new()
             },
         },
-        reward_credits: 4_000 + d * 2_500,
-        deadline_days: 35_u16.saturating_sub(u16::from(difficulty) * 3),
+        design_budget_cr: 12_000 + d * 2_000,
+        primary_goals: vec![
+            DesignGoal {
+                id: "RELIABILITY".to_string(),
+                label: "Reliability".to_string(),
+                metric: DesignGoalMetric::Reliability,
+                limit: reliability as u32,
+                at_most: false,
+            },
+            DesignGoal {
+                id: "COMPLEXITY".to_string(),
+                label: "Complexity".to_string(),
+                metric: DesignGoalMetric::Complexity,
+                limit: complexity as u32,
+                at_most: true,
+            },
+            DesignGoal {
+                id: "MASS".to_string(),
+                label: "Mass".to_string(),
+                metric: DesignGoalMetric::MassKg,
+                limit: mass_limit,
+                at_most: true,
+            },
+        ],
+        secondary_goals: vec![
+            DesignGoal {
+                id: "RELIABILITY_BONUS".to_string(),
+                label: "Elite reliability".to_string(),
+                metric: DesignGoalMetric::Reliability,
+                limit: secondary_reliability as u32,
+                at_most: false,
+            },
+            DesignGoal {
+                id: "COMPLEXITY_BONUS".to_string(),
+                label: "Clean design".to_string(),
+                metric: DesignGoalMetric::Complexity,
+                limit: secondary_complexity as u32,
+                at_most: true,
+            },
+        ],
+        secondary_bonus_cr: reward_credits / 5,
+        requested_dossier: standard_dossier_sections(),
+        reward_credits,
+        deadline_days: deadline,
         difficulty,
     }
 }
 
-/// Generate one offer for each mission family, then shuffle the board deterministically.
+/// Generate up to two profile offers for each mission family, then shuffle the board deterministically.
 pub fn generate_contract_board(seed: u64, first_id: u32) -> Vec<ContractOffer> {
     let all: BTreeSet<String> = [
         "family:ballistic",
@@ -297,65 +685,69 @@ pub fn generate_contract_board(seed: u64, first_id: u32) -> Vec<ContractOffer> {
     generate_available_board(seed, first_id, &all)
 }
 
-/// One offer per mission family the player has researched, in a deterministic shuffled order.
+/// Up to two profile offers per mission family the player has researched, in a deterministic
+/// shuffled order.
 /// Unresearched families are simply absent from the board; a cruise offer also needs the cruise
 /// family, and a hard surface-to-surface offer needs the anti-ship family (difficulty is clamped
 /// so an available family never produces an offer it cannot staff).
 pub fn generate_available_board(seed: u64, first_id: u32, owned: &BTreeSet<String>) -> Vec<ContractOffer> {
     let mut rng = ContractRng::new(seed);
     let mut families = MissionFamily::ALL;
-    for index in (1..families.len()).rev() {
-        let other = rng.range(0, index as u32) as usize;
-        families.swap(index, other);
-    }
-    let vehicle_families: Vec<VehicleFamily> = VehicleFamily::ALL
-        .into_iter()
-        .filter(|family| family.capability().is_none_or(|capability| owned.contains(capability)))
-        .collect();
-
+    rng.shuffle(&mut families);
     let mut offers = Vec::new();
     for mission_family in families {
-        // Each family rolls its own difficulty and vehicle before the board is filtered, so a
-        // seeded board stays deterministic per family.
-        let mut difficulty = rng.range(1, 5) as u8;
-        while difficulty > 1 && !owned.contains(mission_family.capability(difficulty)) {
-            difficulty -= 1;
-        }
-        if !owned.contains(mission_family.capability(difficulty)) {
+        // Each family rolls its own difficulty before the board is filtered, so a seeded board
+        // stays deterministic per family.
+        let difficulty = difficulty_with(&mut rng, mission_family, owned);
+        if !can_staff(mission_family, difficulty, owned) {
             continue;
         }
-        let vehicle_family = if vehicle_families.is_empty() {
-            VehicleFamily::ShortRange
-        } else {
-            rng.choose(&vehicle_families)
-        };
-        offers.push(make_offer(
-            first_id.wrapping_add(offers.len() as u32).max(1),
-            mission_family,
-            vehicle_family,
-            difficulty,
-        ));
+        let mut profiles = ContractProfile::available_for_family(mission_family, owned);
+        rng.shuffle(&mut profiles);
+        for profile in profiles.into_iter().take(MAX_PROFILES_PER_FAMILY) {
+            let offer = make_offer(
+                first_id.wrapping_add(offers.len() as u32).max(1),
+                mission_family,
+                profile,
+                difficulty,
+            );
+            if offer.is_available(owned) {
+                offers.push(offer);
+            }
+        }
     }
     offers
 }
 
-/// One fresh offer for a mission family, used when newly researched families join the board.
-pub fn offer_for_family(seed: u64, id: u32, mission_family: MissionFamily, owned: &BTreeSet<String>) -> ContractOffer {
-    let mut rng = ContractRng::new(seed ^ u64::from(id));
-    let vehicle_families: Vec<VehicleFamily> = VehicleFamily::ALL
-        .into_iter()
-        .filter(|family| family.capability().is_none_or(|capability| owned.contains(capability)))
-        .collect();
+fn difficulty_with(rng: &mut ContractRng, mission_family: MissionFamily, owned: &BTreeSet<String>) -> u8 {
     let mut difficulty = rng.range(1, 5) as u8;
-    while difficulty > 1 && !owned.contains(mission_family.capability(difficulty)) {
+    while difficulty > 1 && !can_staff(mission_family, difficulty, owned) {
         difficulty -= 1;
     }
-    let vehicle_family = if vehicle_families.is_empty() {
-        VehicleFamily::ShortRange
-    } else {
-        rng.choose(&vehicle_families)
-    };
-    make_offer(id, mission_family, vehicle_family, difficulty)
+    difficulty
+}
+
+/// A mission family can only staff an offer when its family capability is owned and the hard
+/// validation research required from difficulty 4 is also present. Keeping this rule in one
+/// place makes the board's difficulty progression match `ContractOffer::is_available`.
+fn can_staff(mission_family: MissionFamily, difficulty: u8, owned: &BTreeSet<String>) -> bool {
+    owned.contains(mission_family.capability(difficulty))
+        && (difficulty < 4 || owned.contains("research:advanced_validation"))
+}
+
+/// Pick a difficulty compatible with the researched mission family.
+fn difficulty_for(seed: u64, mission_family: MissionFamily, owned: &BTreeSet<String>) -> u8 {
+    difficulty_with(&mut ContractRng::new(seed), mission_family, owned)
+}
+
+/// One fresh offer for a specific profile, used to top up the board after a delivery.
+pub fn offer_for_profile(seed: u64, id: u32, profile: ContractProfile, owned: &BTreeSet<String>) -> ContractOffer {
+    make_offer(
+        id,
+        profile.mission_family(),
+        profile,
+        difficulty_for(seed ^ u64::from(id), profile.mission_family(), owned),
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -445,6 +837,21 @@ pub struct MissileTrial {
     /// Abstract control authority the design had during the trial (0..100).
     #[serde(default)]
     pub control_authority: f64,
+    /// Family the design belonged to during the trial. `None` marks evidence from an old save.
+    #[serde(default)]
+    pub vehicle_family: Option<VehicleFamily>,
+    /// Highest altitude reached by the trial, in metres.
+    #[serde(default)]
+    pub max_altitude_m: f64,
+    /// Derived low-observability score (0..100): low flight is discreet, high apogee is not.
+    #[serde(default)]
+    pub discretion: f64,
+    /// Explosive charge mass carried during the trial.
+    #[serde(default)]
+    pub payload_kg: f64,
+    /// Abstract game yield of that charge, after its grade multiplier.
+    #[serde(default)]
+    pub payload_yield_kg: f64,
 }
 
 impl MissileTrial {
@@ -469,6 +876,11 @@ impl MissileTrial {
             stability: report.aero.stability,
             lift: report.aero.lift,
             control_authority: report.aero.control_authority,
+            vehicle_family: Some(report.vehicle_family),
+            max_altitude_m: report.max_altitude_m,
+            discretion: report.discretion,
+            payload_kg: report.payload_kg,
+            payload_yield_kg: report.payload_yield_kg,
         }
     }
 
@@ -494,6 +906,10 @@ impl MissileTrial {
             proof("STABILITY", self.stability, 2.0),
             proof("LIFT", self.lift, 2.0),
             proof("AUTHORITY", self.control_authority, 2.0),
+            proof("PAYLOAD", self.payload_kg, self.payload_kg * 0.01),
+            proof("YIELD", self.payload_yield_kg, self.payload_yield_kg * 0.01),
+            proof("DISCRETION", self.discretion, 2.0),
+            proof("CEILING", self.max_altitude_m, 2.0),
         ]
     }
 }
@@ -524,10 +940,11 @@ impl ContractOffer {
     /// an air-to-air or surface-to-air contract also requires a target lock.
     pub fn missile_requirements(&self) -> Vec<Requirement> {
         let d = f64::from(self.difficulty);
+        let range_factor = self.profile.map_or(1.0, ContractProfile::range_factor);
         let (range_m, speed_ms, mass_kg) = match self.vehicle_family {
-            VehicleFamily::Ballistic => ((26.0 + 4.0 * d) * 1_000.0, 550.0 + 40.0 * d, 700.0),
-            VehicleFamily::Cruise => ((30.0 + 5.0 * d) * 1_000.0, 170.0 + 10.0 * d, 420.0),
-            VehicleFamily::ShortRange => ((10.0 + 3.0 * d) * 1_000.0, 240.0 + 20.0 * d, 300.0),
+            VehicleFamily::Ballistic => ((26.0 + 4.0 * d) * range_factor * 1_000.0, 550.0 + 40.0 * d, 700.0),
+            VehicleFamily::Cruise => ((30.0 + 5.0 * d) * range_factor * 1_000.0, 170.0 + 10.0 * d, 420.0),
+            VehicleFamily::ShortRange => ((10.0 + 3.0 * d) * range_factor * 1_000.0, 240.0 + 20.0 * d, 300.0),
         };
         let mut requirements = vec![
             missile_requirement(
@@ -558,7 +975,12 @@ impl ContractOffer {
                 true,
             ),
             missile_requirement("LIFTOFF", "Lift-off", "lifted_off", Comparator::AtLeast, 1.0, 2.0, true),
-            missile_requirement(
+        ];
+        // A short-range or cruise profile may be a single-stage design; only the ballistic family
+        // is expected to prove stage separation. Legacy offers without a profile keep their old
+        // unconditional requirement so their stored rubrics do not change.
+        if self.profile.is_none() || matches!(self.vehicle_family, VehicleFamily::Ballistic) {
+            requirements.push(missile_requirement(
                 "SEPARATION",
                 "Stage separation",
                 "separated",
@@ -566,8 +988,8 @@ impl ContractOffer {
                 1.0,
                 1.0,
                 true,
-            ),
-        ];
+            ));
+        }
         if matches!(
             self.mission_family,
             MissionFamily::AirToAir | MissionFamily::SurfaceToAir
@@ -619,7 +1041,55 @@ impl ContractOffer {
                 false,
             ));
         }
+        if let Some(profile) = self.profile {
+            requirements.push(missile_requirement(
+                "PAYLOAD",
+                "Explosive charge",
+                "payload_kg",
+                Comparator::AtLeast,
+                profile.payload_kg(),
+                1.5,
+                true,
+            ));
+            requirements.push(missile_requirement(
+                "YIELD",
+                "Charge yield",
+                "payload_yield_kg",
+                Comparator::AtLeast,
+                profile.yield_kg(),
+                1.0,
+                true,
+            ));
+            if let Some(limit) = profile.discretion_min() {
+                requirements.push(missile_requirement(
+                    "DISCRETION",
+                    "Discretion",
+                    "discretion",
+                    Comparator::AtLeast,
+                    limit,
+                    1.5,
+                    true,
+                ));
+            }
+            if let Some(limit) = profile.ceiling_min() {
+                requirements.push(missile_requirement(
+                    "CEILING",
+                    "Apogee",
+                    "max_altitude_m",
+                    Comparator::AtLeast,
+                    limit,
+                    1.5,
+                    true,
+                ));
+            }
+        }
         requirements
+    }
+
+    /// A profile-bearing contract only accepts evidence flown by its own vehicle family. Old
+    /// offers without a profile keep the permissive behaviour of the earlier rubric.
+    pub fn accepts_trial(&self, trial: &MissileTrial) -> bool {
+        self.profile.is_none() || trial.vehicle_family.is_none_or(|family| family == self.vehicle_family)
     }
 
     /// Build the delivery dossier from the trial evidence gathered for this design and program.
@@ -627,7 +1097,11 @@ impl ContractOffer {
     /// when none matches, so an edited vehicle or program invalidates the dossier.
     pub fn missile_dossier(&self, trials: &[MissileTrial], vehicle: &ContentHash, program: &ContentHash) -> Dossier {
         let requirements = self.missile_requirements();
-        let evidence: Vec<Evidence> = trials.iter().flat_map(MissileTrial::evidence).collect();
+        let evidence: Vec<Evidence> = trials
+            .iter()
+            .filter(|trial| self.accepts_trial(trial))
+            .flat_map(MissileTrial::evidence)
+            .collect();
         build_dossier(self.id, &requirements, &evidence, vehicle, Some(program))
     }
 
@@ -648,6 +1122,7 @@ mod tests {
         let mut offer = generate_contract_board(1, 1).remove(0);
         offer.mission_family = mission_family;
         offer.vehicle_family = vehicle_family;
+        offer.profile = None;
         offer.difficulty = 1;
         offer.requirements.min_trial_score = 0;
         offer
@@ -669,6 +1144,8 @@ mod tests {
             avionics: crate::avionics::AvionicsSummary::default(),
             surface_fault: false,
             trace: Vec::new(),
+            final_flags: [false; crate::program::FLAGS],
+            final_mode: 0,
             first_ignition_twr: Some(2.0),
             lifted_off: true,
             max_speed_ms: speed,
@@ -681,11 +1158,129 @@ mod tests {
                 success: lock,
                 speed_ms: speed,
             }),
+            max_altitude_m: 0.0,
+            discretion: 100.0,
+            vehicle_family: VehicleFamily::Ballistic,
+            payload_kg: 0.0,
+            payload_yield_kg: 0.0,
         }
     }
 
     fn trial(vehicle: &ContentHash, program: &ContentHash, report: &FlightReport) -> MissileTrial {
         MissileTrial::from_report(vehicle.clone(), program.clone(), 1, 1, report)
+    }
+
+    fn profile_offer(profile: ContractProfile) -> ContractOffer {
+        let mut offer = make_offer(1, profile.mission_family(), profile, 1);
+        offer.requirements.min_trial_score = 0;
+        offer
+    }
+
+    #[test]
+    fn a_single_stage_short_range_trial_clears_its_profile() {
+        let offer = profile_offer(ContractProfile::PrecisionStrike);
+        let vehicle = ContentHash::of_bytes(b"short-range vehicle");
+        let program = ContentHash::of_bytes(b"short-range program");
+        let mut flight = report(20_000.0, 400.0, 250.0, false);
+        flight.events.clear();
+        flight.vehicle_family = VehicleFamily::ShortRange;
+        flight.payload_kg = 40.0;
+        flight.payload_yield_kg = 40.0;
+        flight.max_altitude_m = 400.0;
+        flight.discretion = crate::flight::discretion_from_altitude(400.0);
+        let trial = trial(&vehicle, &program, &flight);
+        assert!(!trial.separated);
+        let dossier = offer.missile_dossier(&[trial], &vehicle, &program);
+        assert!(offer.accepts_dossier(&dossier), "{dossier:?}");
+    }
+
+    #[test]
+    fn short_range_and_cruise_profiles_do_not_require_stage_separation() {
+        for profile in [
+            ContractProfile::PrecisionStrike,
+            ContractProfile::AirSuperiority,
+            ContractProfile::PointDefence,
+        ] {
+            let ids: Vec<String> = profile_offer(profile)
+                .missile_requirements()
+                .into_iter()
+                .map(|requirement| requirement.id)
+                .collect();
+            assert!(!ids.contains(&"SEPARATION".to_string()), "{profile:?}: {ids:?}");
+        }
+        let deep = profile_offer(ContractProfile::DeepStrike);
+        assert!(
+            deep.missile_requirements()
+                .iter()
+                .any(|requirement| requirement.id == "SEPARATION")
+        );
+    }
+
+    #[test]
+    fn mission_profiles_ask_for_opposite_flight_envelopes() {
+        let low = profile_offer(ContractProfile::LowObservableRaid);
+        let high = profile_offer(ContractProfile::DeepStrike);
+        let ids = |offer: &ContractOffer| -> Vec<String> {
+            offer
+                .missile_requirements()
+                .into_iter()
+                .map(|requirement| requirement.id)
+                .collect()
+        };
+        let low_ids = ids(&low);
+        assert!(low_ids.contains(&"PAYLOAD".to_string()));
+        assert!(low_ids.contains(&"DISCRETION".to_string()));
+        assert!(!low_ids.contains(&"CEILING".to_string()));
+        let high_ids = ids(&high);
+        assert!(high_ids.contains(&"PAYLOAD".to_string()));
+        assert!(high_ids.contains(&"CEILING".to_string()));
+        assert!(!high_ids.contains(&"DISCRETION".to_string()));
+
+        let vehicle = ContentHash::of_bytes(b"vehicle");
+        let program = ContentHash::of_bytes(b"program");
+        let mut flight = report(200_000.0, 1_000.0, 200.0, true);
+        flight.max_altitude_m = 500.0;
+        flight.discretion = crate::flight::discretion_from_altitude(500.0);
+        flight.payload_kg = 200.0;
+        flight.payload_yield_kg = 200.0;
+        let mut low_trial = trial(&vehicle, &program, &flight);
+        // Ignore the family gate here: the point is that the altitude profile alone separates
+        // the two contracts.
+        low_trial.vehicle_family = None;
+        let row = |dossier: &Dossier, id: &str| {
+            dossier
+                .matrix
+                .iter()
+                .find(|row| row.requirement_id == id)
+                .unwrap_or_else(|| panic!("{id} row missing"))
+                .status
+        };
+        let low_dossier = low.missile_dossier(std::slice::from_ref(&low_trial), &vehicle, &program);
+        assert!(matches!(
+            row(&low_dossier, "DISCRETION"),
+            crate::requirement::RequirementStatus::Verified { .. }
+        ));
+        let high_dossier = high.missile_dossier(std::slice::from_ref(&low_trial), &vehicle, &program);
+        assert!(matches!(
+            row(&high_dossier, "CEILING"),
+            crate::requirement::RequirementStatus::Failed { .. }
+        ));
+    }
+
+    #[test]
+    fn a_contract_refuses_evidence_from_the_wrong_vehicle_family() {
+        let offer = profile_offer(ContractProfile::LowObservableRaid);
+        let vehicle = ContentHash::of_bytes(b"vehicle");
+        let program = ContentHash::of_bytes(b"program");
+        let mut flight = report(200_000.0, 1_000.0, 200.0, true);
+        flight.vehicle_family = VehicleFamily::Ballistic;
+        let ballistic = trial(&vehicle, &program, &flight);
+        assert!(!offer.accepts_trial(&ballistic));
+        let mut cruise_flight = flight;
+        cruise_flight.vehicle_family = VehicleFamily::Cruise;
+        assert!(offer.accepts_trial(&trial(&vehicle, &program, &cruise_flight)));
+        let dossier = offer.missile_dossier(&[ballistic], &vehicle, &program);
+        assert!(matches!(dossier.decision, DossierDecision::Rejected { .. }));
     }
 
     #[test]
@@ -942,7 +1537,10 @@ mod tests {
             "family:cruise",
         ]);
         let board = generate_available_board(5, 1, &researched);
-        assert_eq!(board.len(), MissionFamily::ALL.len());
+        assert_eq!(board.len(), 2 * MissionFamily::ALL.len());
+        for family in MissionFamily::ALL {
+            assert_eq!(board.iter().filter(|offer| offer.mission_family == family).count(), 2);
+        }
         for offer in &board {
             assert!(offer.is_available(&researched), "{offer:?}");
         }
@@ -966,11 +1564,45 @@ mod tests {
     }
 
     #[test]
+    fn hard_offers_only_appear_after_hard_validation_is_researched() {
+        let starting = owned(&[
+            "family:ballistic",
+            "family:surface_to_air",
+            "family:air_to_air",
+            "family:cruise",
+        ]);
+        for seed in 1..30 {
+            for offer in generate_available_board(seed, 1, &starting) {
+                assert!(
+                    offer.difficulty <= 3,
+                    "a hard offer escaped without its research: {offer:?}"
+                );
+                assert!(offer.is_available(&starting));
+            }
+        }
+        let mut with_validation = starting.clone();
+        with_validation.insert("research:advanced_validation".to_string());
+        with_validation.insert("family:anti_ship".to_string());
+        assert!(with_validation.contains("research:advanced_validation"));
+        let hard_exists = (1..60).any(|seed| {
+            generate_available_board(seed, 1, &with_validation)
+                .iter()
+                .any(|offer| offer.difficulty >= 4)
+        });
+        assert!(hard_exists, "advanced validation must actually unlock hard offers");
+        for seed in 1..10 {
+            for offer in generate_available_board(seed, 1, &with_validation) {
+                assert!(offer.is_available(&with_validation));
+            }
+        }
+    }
+
+    #[test]
     fn board_is_deterministic_and_covers_every_mission_family() {
         let first = generate_contract_board(42, 100);
         let second = generate_contract_board(42, 100);
         assert_eq!(first, second);
-        assert_eq!(first.len(), MissionFamily::ALL.len());
+        assert_eq!(first.len(), 2 * MissionFamily::ALL.len());
         for family in MissionFamily::ALL {
             assert!(first.iter().any(|offer| offer.mission_family == family));
         }
@@ -1015,5 +1647,115 @@ mod tests {
         let mut offer = generate_contract_board(3, 1).remove(0);
         offer.requirements.min_trial_score = 101;
         assert!(offer.validate().is_err());
+    }
+
+    #[test]
+    fn offers_carry_a_context_budget_combined_goals_and_a_requested_dossier() {
+        let offer = generate_contract_board(9, 1).remove(0);
+        assert!(!offer.context.is_empty());
+        assert!(offer.design_budget_cr > 1_000);
+        assert!(
+            offer
+                .primary_goals
+                .iter()
+                .any(|goal| goal.metric == DesignGoalMetric::MassKg)
+        );
+        assert!(
+            offer
+                .primary_goals
+                .iter()
+                .any(|goal| goal.metric == DesignGoalMetric::Reliability)
+        );
+        assert!(
+            offer
+                .primary_goals
+                .iter()
+                .any(|goal| goal.metric == DesignGoalMetric::Complexity)
+        );
+        assert!(!offer.secondary_goals.is_empty());
+        assert!(offer.secondary_bonus_cr > 0);
+        assert_eq!(offer.requested_dossier.len(), 8);
+        assert!(offer.validate().is_ok(), "{offer:?}");
+    }
+
+    #[test]
+    fn difficulty_raises_rewards_and_pressure_without_gaps() {
+        for profile in ContractProfile::ALL {
+            let offers: Vec<ContractOffer> = (1..=5)
+                .map(|difficulty| make_offer(1, profile.mission_family(), profile, difficulty))
+                .collect();
+            for pair in offers.windows(2) {
+                let (easy, hard) = (&pair[0], &pair[1]);
+                assert!(hard.reward_credits > easy.reward_credits, "{profile:?}");
+                assert!(hard.secondary_bonus_cr >= easy.secondary_bonus_cr, "{profile:?}");
+                assert!(hard.design_budget_cr > easy.design_budget_cr, "{profile:?}");
+                assert!(hard.deadline_days <= easy.deadline_days, "{profile:?}");
+                assert!(hard.requirements.min_design_score >= easy.requirements.min_design_score);
+                assert!(hard.requirements.min_program_score >= easy.requirements.min_program_score);
+                assert!(hard.requirements.min_trial_score >= easy.requirements.min_trial_score);
+                let goal = |offer: &ContractOffer, metric| {
+                    offer
+                        .primary_goals
+                        .iter()
+                        .find(|goal| goal.metric == metric)
+                        .unwrap()
+                        .limit
+                };
+                assert!(goal(hard, DesignGoalMetric::Reliability) >= goal(easy, DesignGoalMetric::Reliability));
+                assert!(goal(hard, DesignGoalMetric::Complexity) <= goal(easy, DesignGoalMetric::Complexity));
+                assert!(goal(hard, DesignGoalMetric::MassKg) <= goal(easy, DesignGoalMetric::MassKg));
+            }
+        }
+    }
+
+    #[test]
+    fn every_family_has_several_distinct_profiles_and_vehicle_families() {
+        for mission_family in MissionFamily::ALL {
+            let profiles = ContractProfile::for_family(mission_family);
+            assert!(profiles.len() >= 2, "{mission_family:?}");
+            let mut vehicle_families = Vec::new();
+            for profile in profiles {
+                let offer = make_offer(1, mission_family, *profile, 3);
+                assert_eq!(offer.mission_family, mission_family);
+                assert!(offer.validate().is_ok(), "{offer:?}");
+                if !vehicle_families.contains(&offer.vehicle_family) {
+                    vehicle_families.push(offer.vehicle_family);
+                }
+            }
+            assert!(!vehicle_families.is_empty());
+        }
+        // The three airframe families are all reachable from the profile table, not just one.
+        let all_vehicle_families: Vec<_> = ContractProfile::ALL
+            .iter()
+            .map(|profile| make_offer(1, profile.mission_family(), *profile, 3).vehicle_family)
+            .collect();
+        for family in VehicleFamily::ALL {
+            assert!(all_vehicle_families.contains(&family), "{family:?}");
+        }
+    }
+
+    #[test]
+    fn secondary_goals_are_stricter_and_pay_only_as_a_bonus() {
+        for difficulty in 1..=5 {
+            let offer = make_offer(
+                1,
+                MissionFamily::SurfaceToSurface,
+                ContractProfile::DeepStrike,
+                difficulty,
+            );
+            let primary = offer
+                .primary_goals
+                .iter()
+                .find(|goal| goal.metric == DesignGoalMetric::Reliability)
+                .unwrap();
+            let secondary = offer
+                .secondary_goals
+                .iter()
+                .find(|goal| goal.metric == DesignGoalMetric::Reliability)
+                .unwrap();
+            assert!(secondary.limit >= primary.limit);
+            assert_eq!(offer.secondary_bonus_cr, offer.reward_credits / 5);
+            assert!(offer.secondary_bonus_cr < offer.reward_credits);
+        }
     }
 }

@@ -8,7 +8,7 @@ Omega is a Rust 2024 and Bevy game built around a fictional, abstract contract l
 
 The game layer owns presentation, player progression and persistence. Reusable rules and data crates remain independent of Bevy so they can be tested without launching the application.
 
-The project intentionally does not implement real-world weapon engineering, guidance or navigation laws, tracking algorithms, seeker logic, warhead models or real-world performance validation. Simulation values are game parameters.
+The project intentionally does not implement real-world weapon engineering, guidance or navigation laws, tracking algorithms, seeker logic, real-warhead models or real-world performance validation. An explosive charge is an abstract payload mass with a game yield; simulation values are game parameters.
 
 ## Workspace
 
@@ -25,11 +25,15 @@ Own the campaign state and facility navigation. The current views are the island
 
 ### `procurement.rs`
 
-Owns the contract office integration: available offers, accepted and completed contracts, active-contract capacity, deadlines, trial evidence, dossier state and delivery. Evidence is bound to the relevant vehicle/program inputs; changes to those inputs make dependent evidence stale.
+Owns the contract office integration: available offers, accepted and completed contracts, active-contract capacity, deadlines, trial evidence, dossier state and delivery. Offers carry a mission profile (payload, yield, discretion or apogee demand), and a profile-bearing contract only records trials flown by the matching vehicle family. Evidence is bound to the relevant vehicle/program inputs; changes to those inputs make dependent evidence stale. Delivery also records a structural design fingerprint (name and part ids removed, tree and attachment transforms kept) so one airframe cannot be sold to two contracts by renaming it or its parts.
 
 ### `missile.rs`
 
 Owns the workshop editing session and the Bevy presentation of the staged vehicle. It handles part selection, stage changes, parameter editing, presets, validation feedback and the 3D preview. The authoritative serializable vehicle model lives in `omega-rules`.
+
+### `inspector.rs`
+
+Owns the numeric selected-part inspector: the six local transform fields (three offsets in metres and three rotations in degrees), keyboard entry and cancellation, the four precision steps used by `-`/`+`, axis and group resets, and restoration of the initial mounting. Committed values go through `MissileSession::set_transform_values`, so validation happens before the vehicle is touched and one user action is one undo entry. The module also refreshes field text when a gizmo drag changes the vehicle. It does not change the save schema.
 
 ### `program_editor.rs`
 
@@ -71,7 +75,7 @@ A separate Bevy-free scientific library. It is retained for independent use and 
 
 ## Persistence layout
 
-The application stores its active campaign under `saves/slot_1/`. The manifest indexes the files in the slot and records their hashes.
+The title screen manages six campaign slots under `saves/slot_1/` to `saves/slot_6/`. Selecting a slot makes it active; the manifest indexes the files in that slot and records their hashes. No gameplay file is written while the title screen has no active slot.
 
 | File | Purpose |
 |---|---|
@@ -116,21 +120,50 @@ and the dossier already consume, so those rules and their figures are unchanged.
 cycles, occupied nodes, unknown parents, multiple roots, an engine without a tank in its stage and a
 computer outside the last stage; `warnings()` reports diameter steps without blocking the design.
 
+`PlacedPart::size_scale` (default 1) lets the fixed-section parts match a wider body. It multiplies
+only the radius returned by `PlacedPart::dimensions()`; `poses()`, the node-diameter warning,
+picking and the mesh all use that one method. `PartSpec::NoseCone` is a normal placed part with a
+length, base diameter and `NoseShape`; nothing generates a cap implicitly. The nose closes the top
+node once placed, and `node_status` refuses a child above it.
+
 `src/missile.rs` keeps only the session (selection by part id, palette additions, parameter edits),
 the 3D layout built from `Vehicle::poses()` and the revision diff. Save files carry
-`schema_version: 5`; deserialization accepts a schema-3 or schema-4 graph or the old stage list and
-rewrites it as 5, and refuses a newer schema with an error instead of guessing.
+`schema_version: 7`; deserialization accepts a schema-3 to schema-6 graph or the old stage list and
+rewrites it as 7, and refuses a newer schema with an error instead of guessing.
 
-## Workshop screen (0.34.0)
+Since 0.42, symmetry metadata stays inside the existing `PlacedPart::symmetry` string. A new set is
+encoded as `<key>-<kind><index>` (`r`, `b`, `a`), while an old `<key>` decodes as a radial first
+copy; `Vehicle::symmetry_members`, `symmetry_kind_of` and `symmetry_placements` are the only readers.
+Bodies expose eight evenly spaced radial mounts, with `radial_angle` shared by poses, layout,
+picking and the placement preview. The session propagates a parameter edit to every member, and
+maps a gizmo translation/rotation delta through the set's rotation or mirror before applying it to
+each copy. `link_symmetry` reassociates existing parts; `break_symmetry` clears the link without
+touching geometry.
 
-The workshop is one screen with four panels and one 3D view: a category-grouped palette, an
-indented assembly tree, a selected-part inspector and a validation panel, plus the middle column
-with the aerodynamic sheet, the contract check and the stage figures.
+`src/subassembly.rs` stores an exported forest with relative parent indices, transforms,
+separation flags and mounting sizes. `Subassembly::capture` walks selected subtrees,
+`MissileSession::apply_subassembly` replays the inner edges before mounting each root, and the
+library itself lives in the slot file `designs/subassemblies.json`. Standalone exports are plain
+JSON files under `exports/subassemblies/`, deliberately outside the slot so another design or
+campaign can import them. Duplication follows the same rule locally: cloned parts keep their inner
+parent links and are attached to free mounts of the original parent.
+
+## Workshop screen (0.34.0, extended in 0.42.0)
+
+The workshop is one screen with four panels and one 3D view: a category-grouped palette (with the
+subassembly library at its foot), an indented assembly tree, a selected-part inspector and a
+dedicated assembly-control panel, plus the middle column with the aerodynamic sheet, the contract
+check and the stage figures. Dragging a palette entry previews a transparent real-size mesh at the
+nearest free mount; the preview material turns green or red with mount validity, and a red mount
+cannot be released. The ghost and the node markers are presentation only; the rules still decide.
 
 Every panel reads a rule, none owns one:
 
 - the palette order comes from `PartCategory::ALL` and `PartSpec::category()`;
-- the tree comes from `Vehicle::tree_entries()` (depth-first, parent, node, derived stage);
+- the tree comes from `Vehicle::tree_entries()` (depth-first, parent, node, derived stage), filtered by the session's collapsed set and decorated with part counts, locks, hides and group names;
+- selection, collapse, hide, lock, group names, favourites, recents and the palette query are session-only editor state, so they redraw a board without changing the schema-7 vehicle;
+- hover and the 3D palette preview live outside the session (`WorkshopHover`, `PalettePreview`): hovering must not mark the design dirty, and the preview renders on its own camera and render layer to a target texture;
+- the camera rig stores its orbital target and an optional interpolated `CameraGoal`; `F`/`Home`/view keys and the palette camera buttons all feed the same goal, while free mode changes what a drag or the wheel moves;
 - errors and warnings come from `Vehicle::issues()` (`IssueSeverity`, message, optional part id),
   with `validate()` kept as the error-only string view;
 - the contract rows come from `omega_rules::compliance::contract_preview`, which reuses
@@ -165,21 +198,88 @@ part it concerns so the workshop can select it. The workshop draws CG (yellow), 
 acceptable band and the surface plates from the same figures, quotes the selected surface's
 contribution (`aero::breakdown`) and lists the surface fault risk of a fragile airframe.
 
-## Program editor (0.36.0)
+## Program editor (0.36.0, extended in 0.43.0)
 
-`crates/omega-rules/src/program.rs` owns the whole language: 15 blocks, eight categories, four
+`crates/omega-rules/src/program.rs` owns the whole language: 21 blocks, eight categories, four
 flags, a mode register, eight diagnostic marks and the validation. `program_issues()` returns one
 `ProgramIssue` per problem with a severity, a thread and a block, so the editor can colour and point
 at the fault; `validate_program()` is the error-only string view the flight and the trials keep
 using. Connection rules live there too: `Lock target` must close its chain and a stage cannot be
 ignited after it was separated.
 
+`Block` is recursive: `If`, `Repeat` and `RepeatWhile` carry their own `Vec<Block>` bodies, `Break`
+closes the nearest loop and `Call` names a `Routine`. `Program` also carries `routines` and a
+`ProgramLayout` (zoom, pan, per-block positions and named groups), both `#[serde(default)]` so old
+JSON loads unchanged. `block_count()` counts nested bodies and routines, so memory validation covers
+what the flight can actually execute; `MAX_CALL_DEPTH` and `MAX_LOOP_ITERATIONS` keep execution
+bounded.
+
 `Vehicle::available_blocks()` maps the fitted hardware to the block kinds, and the palette groups
 `BlockKind::ALL` by `BlockCategory::ALL`, so the editor has no rule of its own. The flight executes
-input and condition blocks as gates with a timeout; `FlightConfig::trace` records a `BlockTrace` per
-executed block into `FlightReport::trace`, which is the debugger's only input. The named library is
-`ProgramLibrary` (12 entries, unique names); `src/program_editor.rs` writes it to
-`programs/library.json` through the same save slot as the working program.
+input and condition blocks as gates with a timeout; each thread owns a stack of `ExecFrame`s so a
+branch, loop pass or routine call returns to exactly the frame that pushed it. `FlightConfig::trace`
+records a `BlockTrace` per executed block into `FlightReport::trace`, including the flag/mode state
+after the block; this is the debugger's only input. `src/campus/program_canvas.rs` renders the cards
+from `ProgramLayout`, moves the live nodes during a drag and persists positions on release; the
+board signature includes the selection and debug cursor so a click or a playback step redraws it.
+The named program library is `ProgramLibrary` (12 entries, unique names); `src/program_editor.rs`
+writes it to `programs/library.json` through the same save slot as the working program.
+
+## Trial laboratory (0.44.0)
+
+`src/lab.rs` is the analysis layer between `omega-rules::flight` and the screen. It turns a
+`FlightReport` into `DesignMetrics` (mass, fictional cost, stability, authority, complexity,
+reliability), `PhaseSummary` slices, `TrialStats`, classified `AnomalyInsight` values and a
+`ComplianceSnapshot` built from the active contract's dossier. `analyze_report_anomalies` and
+`analyze_failure` attach the component id or the program `BlockFocus` when one can be identified;
+the board dispatches those anchors to the workshop or the editor. `compare_rows` is the single
+source of the A/B table, so absolute and percentage values cannot diverge between screens.
+
+`TrialSession` owns `TrialHistory`. Every completed run or batch appends a `TrialHistoryEntry`
+containing the full `Vehicle` and `Program` snapshots, seed range, profile, revision context,
+program version, hashes, metrics, stats, phases, anomalies, events, optional compliance snapshot
+and the id it was relaunched from. `src/save.rs` maps the history to `trials/history.json`; loading
+a slot resets or reloads it. `stale_reason` compares the stored hashes with the current semantic
+hashes, so a moved program card never invalidates a proof while a design or program edit does.
+Relaunch uses `entry_config` and the stored snapshots, not the current workshop state.
+
+`src/trial_export.rs` writes `reports/*.html`, `*.csv` and `*.pdf` under the active slot. HTML and
+PDF embed their own charts (inline SVG and a vector line chart respectively) and repeat the
+campaign history plus the revision change summary; no external renderer or asset is required.
+Exports read the selected campaign and never write to the campaign files.
+
+## Contracts and progression (0.45.0)
+
+`omega-rules::contracts::ContractOffer` remains the persisted offer shape. The 0.45 fields
+(`context`, `design_budget_cr`, `primary_goals`, `secondary_goals`, `secondary_bonus_cr`,
+`requested_dossier`) use `#[serde(default)]`, so old campaign schemas load without migration.
+Goals are integer ratings (`DesignGoalMetric::{MassKg, Reliability, Complexity}`) to keep the
+offer `Eq` and the save comparison deterministic. The application evaluates them with the same
+`src/lab.rs::DesignMetrics` used by the trial dashboard; `goal_statuses` and `budget_ok` are the
+single source for the offer card, active dossier and delivery gate.
+
+`Procurement::deliver` now takes the submitted revision id. It refuses a design over budget or
+missing a primary goal, computes the secondary bonus, and records `revision_id` and
+`secondary_bonus` on `CompletedContract`. Successful deliveries call
+`trial_export::export_contract_dossier`, which writes `contrat-<id>-dossier-<hash8>.pdf` under the
+active slot's `reports/` directory. The pure `contract_dossier_lines` builder is separate from the
+PDF writer so the content can be tested without touching a save slot. It reuses
+`Vehicle::tree_entries`, the board's French part summaries and `TrialHistory` entries filtered by
+vehicle and program hash.
+
+`src/revisions.rs::RevisionLog` keeps schema 3. `submitted` is a persisted optional revision id;
+`compare`, `naming_target` and `naming_draft` are `#[serde(skip)]` UI state. A rename changes only
+the label. A comparison calls the existing `missile::vehicle_diff` from one revision to another and
+stores the pair. A restore copies the selected revision's vehicle into `MissileSession` and commits
+it as a new revision (`Restored from …`), preserving the original history and parent chain. The
+workshop keyboard reader owns naming while the workshop is open; the footer also offers explicit
+validate/cancel buttons. Trial campaigns remain associated by `TrialHistoryEntry::revision_id`, so
+the footer can count evidence for each revision.
+
+The research board derives tiers with a memoised prerequisite walk, previews every grant through
+`PartTemplate::ALL`/`PartSpec::required_capability`, and labels non-part grants with
+`research::capability_label`. The available-technology strip is a presentation of the same
+`default_tree`, not a second tree, so adding a technology still requires a real grant.
 
 ## Onboard electronics (0.35.0)
 

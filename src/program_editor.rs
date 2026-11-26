@@ -12,7 +12,11 @@ use crate::save::{self, SaveFile};
 use bevy::prelude::*;
 use omega_rules::Vehicle;
 use omega_rules::flight::{FlightConfig, FlightReport, simulate};
-use omega_rules::program::{Block, BlockCategory, Program, ProgramIssue, ProgramLibrary, program_issues};
+use omega_rules::program::{
+    Block, BlockCategory, BlockKey, Condition, MAX_CONDITION_TIMEOUT_S, Program, ProgramGroup, ProgramIssue,
+    ProgramLibrary, Routine, program_issues,
+};
+use std::collections::BTreeSet;
 
 /// A block the editor can append, independent of the parameter values in the program itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,11 +36,17 @@ pub(crate) enum BlockKind {
     SetMode,
     WaitMode,
     Mark,
+    If,
+    WaitUntil,
+    Repeat,
+    RepeatWhile,
+    Break,
+    Call,
 }
 
 impl BlockKind {
     /// Library order, one run per category.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 21] = [
         Self::WaitSpeed,
         Self::WaitPressure,
         Self::WaitFlag,
@@ -52,6 +62,12 @@ impl BlockKind {
         Self::SetMode,
         Self::WaitMode,
         Self::Mark,
+        Self::If,
+        Self::WaitUntil,
+        Self::Repeat,
+        Self::RepeatWhile,
+        Self::Break,
+        Self::Call,
     ];
 
     pub fn label(self) -> &'static str {
@@ -71,6 +87,12 @@ impl BlockKind {
             Self::SetMode => "SET MODE",
             Self::WaitMode => "WAIT MODE",
             Self::Mark => "MARK",
+            Self::If => "IF / ELSE",
+            Self::WaitUntil => "WAIT UNTIL",
+            Self::Repeat => "REPEAT N",
+            Self::RepeatWhile => "REPEAT WHILE",
+            Self::Break => "BREAK",
+            Self::Call => "CALL ROUTINE",
         }
     }
 
@@ -109,6 +131,26 @@ impl BlockKind {
                 timeout_s: 10.0,
             },
             Self::Mark => Block::Mark { mark: 0 },
+            Self::If => Block::If {
+                condition: Condition::SpeedAtLeast { speed_ms: 250.0 },
+                then_blocks: Vec::new(),
+                else_blocks: Vec::new(),
+            },
+            Self::WaitUntil => Block::WaitUntil {
+                condition: Condition::SpeedAtLeast { speed_ms: 250.0 },
+                timeout_s: 20.0,
+            },
+            Self::Repeat => Block::Repeat {
+                times: 3,
+                body: Vec::new(),
+            },
+            Self::RepeatWhile => Block::RepeatWhile {
+                condition: Condition::FlagIs { flag: 0, value: true },
+                timeout_s: 30.0,
+                body: Vec::new(),
+            },
+            Self::Break => Block::Break,
+            Self::Call => Block::Call { routine: String::new() },
         }
     }
 
@@ -118,22 +160,45 @@ impl BlockKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Branch {
+    Then,
+    Else,
+    Body,
+}
+
+impl Branch {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Then => "THEN",
+            Self::Else => "ELSE",
+            Self::Body => "BODY",
+        }
+    }
+}
+
+/// One step from a thread down into a nested control body. `branch` is the branch of the parent
+/// that contains this block; the first step always uses `Body`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PathStep {
+    pub(crate) index: usize,
+    pub(crate) branch: Branch,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ProgramAction {
     Append(BlockKind),
     /// Insert after the selected block, which is how a connection is created in the middle of a
     /// thread.
     Insert(BlockKind),
-    /// Copy the selected block just after itself.
-    Duplicate,
     RemoveSelected,
     SelectThread(usize),
     AddThread,
     RemoveThread,
-    SelectBlock(usize),
     MoveUp,
     MoveDown,
     /// `-1` or `+1` on the selected block's main value.
     Adjust(i8),
+    AdjustTimeout(i8),
     /// `-1` or `+1` on the selected block's boolean value (flags only).
     Flip,
     Clear,
@@ -143,6 +208,34 @@ pub(crate) enum ProgramAction {
     DeleteSaved(usize),
     /// Fly the current program with a block trace and keep the report for the debugger panel.
     Debug,
+    SelectPath {
+        thread: usize,
+        path: Vec<PathStep>,
+    },
+    ToggleSelection {
+        thread: usize,
+        block: usize,
+    },
+    CopySelection,
+    PasteSelection,
+    DuplicateSelection,
+    RemoveSelection,
+    Align,
+    GroupSelection,
+    ClearGroups,
+    FocusBranch(Branch),
+    CycleCondition,
+    CreateRoutine,
+    DeleteRoutine(usize),
+    AppendCall(usize),
+    CycleCall,
+    DebugStep(i8),
+    ToggleDebugPlay,
+    CycleDebugSpeed,
+    ResetDebug,
+    ZoomCanvas(i8),
+    ResetCanvas,
+    ToggleMultiSelect,
 }
 
 #[derive(Resource)]
@@ -150,6 +243,14 @@ pub(crate) struct MissileProgramSession {
     pub program: Program,
     pub thread: usize,
     pub block: Option<usize>,
+    /// Path to the selected block; empty when nothing is selected, otherwise at least one step.
+    pub(crate) path: Vec<PathStep>,
+    /// Top-level multi-selection used by the canvas and bulk actions.
+    pub(crate) selection: BTreeSet<BlockKey>,
+    pub(crate) clipboard: Vec<Block>,
+    /// Where a palette insert goes when a control block is selected.
+    pub(crate) branch_focus: Option<Branch>,
+    pub(crate) multi_select: bool,
     /// Vertical scroll of the block list, kept across board rebuilds so a long program does not
     /// jump back to its first block after every edit.
     pub(crate) scroll: f32,
@@ -158,6 +259,11 @@ pub(crate) struct MissileProgramSession {
     pub(crate) debug: Option<FlightReport>,
     /// Set when the library changed, so the board system writes the library file once.
     pub(crate) library_dirty: bool,
+    /// Debug playback cursor (index into the traced blocks) and playback state.
+    pub(crate) debug_cursor: usize,
+    pub(crate) debug_playing: bool,
+    /// 0 = 0.5x, 1 = 1x, 2 = 2x, 3 = 4x.
+    pub(crate) debug_speed: u8,
 }
 
 impl Default for MissileProgramSession {
@@ -165,13 +271,22 @@ impl Default for MissileProgramSession {
         Self {
             program: Program {
                 threads: vec![Vec::new()],
+                ..Program::default()
             },
             thread: 0,
             block: None,
+            path: Vec::new(),
+            selection: BTreeSet::new(),
+            clipboard: Vec::new(),
+            branch_focus: None,
+            multi_select: false,
             scroll: 0.0,
             library: ProgramLibrary::default(),
             debug: None,
             library_dirty: false,
+            debug_cursor: 0,
+            debug_playing: false,
+            debug_speed: 1,
         }
     }
 }
@@ -180,11 +295,87 @@ fn round(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
+fn is_control_block(block: &Block) -> bool {
+    matches!(
+        block,
+        Block::If { .. } | Block::Repeat { .. } | Block::RepeatWhile { .. }
+    )
+}
+
+fn branch_body(block: &Block, branch: Branch) -> Option<&[Block]> {
+    match (block, branch) {
+        (Block::If { then_blocks, .. }, Branch::Then) => Some(then_blocks),
+        (Block::If { else_blocks, .. }, Branch::Else) => Some(else_blocks),
+        (Block::Repeat { body, .. }, Branch::Body) => Some(body),
+        (Block::RepeatWhile { body, .. }, Branch::Body) => Some(body),
+        _ => None,
+    }
+}
+
+fn branch_body_mut(block: &mut Block, branch: Branch) -> Option<&mut Vec<Block>> {
+    match (block, branch) {
+        (Block::If { then_blocks, .. }, Branch::Then) => Some(then_blocks),
+        (Block::If { else_blocks, .. }, Branch::Else) => Some(else_blocks),
+        (Block::Repeat { body, .. }, Branch::Body) => Some(body),
+        (Block::RepeatWhile { body, .. }, Branch::Body) => Some(body),
+        _ => None,
+    }
+}
+
+fn selected_in<'a>(blocks: &'a [Block], path: &[PathStep]) -> Option<&'a Block> {
+    let mut body = blocks;
+    let mut selected = None;
+    for (depth, step) in path.iter().enumerate() {
+        if depth > 0 {
+            body = branch_body(selected?, step.branch)?;
+        }
+        selected = body.get(step.index);
+    }
+    selected
+}
+
+fn body_mut<'a>(body: &'a mut Vec<Block>, path: &[PathStep]) -> Option<&'a mut Vec<Block>> {
+    if path.len() <= 1 {
+        return Some(body);
+    }
+    let parent = body.get_mut(path[0].index)?;
+    let child = branch_body_mut(parent, path[1].branch)?;
+    body_mut(child, &path[1..])
+}
+
 fn cycle(value: u8, direction: i8, count: u8) -> u8 {
     if direction < 0 {
         (value + count - 1) % count
     } else {
         (value + 1) % count
+    }
+}
+
+fn adjusted_condition(condition: Condition, direction: i8) -> Condition {
+    let step = f64::from(direction);
+    match condition {
+        Condition::SpeedAtLeast { speed_ms } => Condition::SpeedAtLeast {
+            speed_ms: round((speed_ms + 25.0 * step).clamp(10.0, 1_500.0)),
+        },
+        Condition::PressureAtMost { hpa } => Condition::PressureAtMost {
+            hpa: round((hpa + 25.0 * step).clamp(50.0, 1_013.25)),
+        },
+        Condition::FlagIs { flag, value } => Condition::FlagIs {
+            flag: cycle(flag, direction, omega_rules::FLAGS as u8),
+            value,
+        },
+        Condition::ModeIs { mode } => Condition::ModeIs {
+            mode: cycle(mode, direction, omega_rules::MODES),
+        },
+    }
+}
+
+fn cycled_condition(condition: Condition) -> Condition {
+    match condition {
+        Condition::SpeedAtLeast { .. } => Condition::PressureAtMost { hpa: 900.0 },
+        Condition::PressureAtMost { .. } => Condition::FlagIs { flag: 0, value: true },
+        Condition::FlagIs { .. } => Condition::ModeIs { mode: 1 },
+        Condition::ModeIs { .. } => Condition::SpeedAtLeast { speed_ms: 250.0 },
     }
 }
 
@@ -244,6 +435,38 @@ fn adjusted(block: Block, direction: i8, stages: usize) -> Option<Block> {
         Block::Mark { mark } => Some(Block::Mark {
             mark: cycle(mark, direction, omega_rules::MARKS),
         }),
+        Block::If {
+            condition,
+            then_blocks,
+            else_blocks,
+        } => Some(Block::If {
+            condition: adjusted_condition(condition, direction),
+            then_blocks,
+            else_blocks,
+        }),
+        Block::WaitUntil { condition, timeout_s } => Some(Block::WaitUntil {
+            condition: adjusted_condition(condition, direction),
+            timeout_s,
+        }),
+        Block::Repeat { times, body } => Some(Block::Repeat {
+            times: if direction < 0 {
+                times.saturating_sub(1)
+            } else {
+                times.saturating_add(1)
+            },
+            body,
+        }),
+        Block::RepeatWhile {
+            condition,
+            timeout_s,
+            body,
+        } => Some(Block::RepeatWhile {
+            condition: adjusted_condition(condition, direction),
+            timeout_s,
+            body,
+        }),
+        Block::Break => None,
+        Block::Call { routine } => Some(Block::Call { routine }),
         Block::LockTarget => None,
     }
 }
@@ -257,13 +480,38 @@ fn flipped(block: Block) -> Option<Block> {
             timeout_s,
         }),
         Block::SetFlag { flag, value } => Some(Block::SetFlag { flag, value: !value }),
+        Block::If {
+            condition: Condition::FlagIs { flag, value },
+            then_blocks,
+            else_blocks,
+        } => Some(Block::If {
+            condition: Condition::FlagIs { flag, value: !value },
+            then_blocks,
+            else_blocks,
+        }),
+        Block::WaitUntil {
+            condition: Condition::FlagIs { flag, value },
+            timeout_s,
+        } => Some(Block::WaitUntil {
+            condition: Condition::FlagIs { flag, value: !value },
+            timeout_s,
+        }),
+        Block::RepeatWhile {
+            condition: Condition::FlagIs { flag, value },
+            timeout_s,
+            body,
+        } => Some(Block::RepeatWhile {
+            condition: Condition::FlagIs { flag, value: !value },
+            timeout_s,
+            body,
+        }),
         _ => None,
     }
 }
 
 /// `false` for blocks whose only parameter is their position in the thread.
 pub fn adjustable(block: &Block) -> bool {
-    !matches!(block, Block::LockTarget)
+    !matches!(block, Block::LockTarget | Block::Break | Block::Call { .. })
 }
 
 impl MissileProgramSession {
@@ -293,7 +541,48 @@ impl MissileProgramSession {
     }
 
     pub fn selected_block(&self) -> Option<&Block> {
-        self.program.threads.get(self.thread)?.get(self.block?)
+        if self.path.is_empty() {
+            return self.program.threads.get(self.thread)?.get(self.block?);
+        }
+        let blocks = self.program.threads.get(self.thread)?;
+        selected_in(blocks, &self.path)
+    }
+
+    fn select_path(&mut self, thread: usize, path: Vec<PathStep>) -> Result<(), String> {
+        if path.is_empty() {
+            self.block = None;
+            self.path.clear();
+            return Ok(());
+        }
+        if thread >= self.program.threads.len() {
+            return Err("No such thread".to_string());
+        }
+        self.thread = thread;
+        let blocks = self
+            .program
+            .threads
+            .get(thread)
+            .ok_or_else(|| "No such thread".to_string())?;
+        if selected_in(blocks, &path).is_none() {
+            return Err("No such block".to_string());
+        }
+        self.block = Some(path[0].index);
+        self.path = path;
+        self.branch_focus = None;
+        Ok(())
+    }
+
+    /// Mutable body containing the selected block. `None` when the selection is stale.
+    fn selected_container_mut(&mut self) -> Option<(&mut Vec<Block>, usize)> {
+        let thread = self.thread;
+        let path = self.path.clone();
+        if path.is_empty() {
+            return None;
+        }
+        let blocks = self.program.threads.get_mut(thread)?;
+        let index = path.last()?.index;
+        let container = body_mut(blocks, &path)?;
+        Some((container, index))
     }
 
     fn current_thread_mut(&mut self) -> &mut Vec<Block> {
@@ -324,13 +613,93 @@ impl MissileProgramSession {
                 self.blocks_used()
             ));
         }
-        let block = kind.default_block();
-        let thread = self.current_thread_mut();
-        let index = index.map_or(thread.len(), |index| {
-            if index >= thread.len() { thread.len() } else { index + 1 }
-        });
-        thread.insert(index, block);
-        self.block = Some(index);
+        if self.program.threads.is_empty() {
+            self.program.threads.push(Vec::new());
+        }
+        if self.thread >= self.program.threads.len() {
+            self.thread = 0;
+        }
+        let mut block = kind.default_block();
+        if let Block::Call { routine } = &mut block
+            && routine.is_empty()
+            && let Some(first) = self.program.routines.first()
+        {
+            *routine = first.name.clone();
+        }
+        let path = self.path.clone();
+        let branch_target = self
+            .branch_focus
+            .filter(|_| self.selected_block().is_some_and(is_control_block));
+        let (body_path, selected_branch) = if let Some(branch) = branch_target {
+            let mut body_path = path.clone();
+            body_path.push(PathStep { index: 0, branch });
+            (body_path, branch)
+        } else if path.len() > 1 {
+            (path.clone(), path.last().map_or(Branch::Body, |step| step.branch))
+        } else {
+            (vec![], Branch::Body)
+        };
+        let thread_index = self.thread;
+        let top_level = body_path.is_empty();
+        let blocks = self
+            .program
+            .threads
+            .get_mut(thread_index)
+            .ok_or_else(|| "No such thread".to_string())?;
+        let container = if body_path.is_empty() {
+            blocks
+        } else {
+            body_mut(blocks, &body_path).ok_or_else(|| "The selected branch no longer exists.".to_string())?
+        };
+        let index = if branch_target.is_some() {
+            container.len()
+        } else {
+            index.map_or(container.len(), |index| {
+                if index >= container.len() {
+                    container.len()
+                } else {
+                    index + 1
+                }
+            })
+        };
+        container.insert(index, block);
+        if top_level {
+            self.shift_layout(thread_index, index, 1);
+        }
+        // Keep the new block selected, pointing into the body that now contains it.
+        let mut new_path = if branch_target.is_some() {
+            let mut path = path.clone();
+            path.push(PathStep {
+                index,
+                branch: selected_branch,
+            });
+            path
+        } else if path.len() > 1 {
+            let mut path = path.clone();
+            if let Some(last) = path.last_mut() {
+                last.index = index;
+            }
+            path
+        } else {
+            vec![PathStep {
+                index,
+                branch: Branch::Body,
+            }]
+        };
+        if new_path.is_empty() {
+            new_path.push(PathStep {
+                index,
+                branch: Branch::Body,
+            });
+        }
+        self.block = Some(new_path[0].index);
+        self.path = new_path;
+        self.selection = [BlockKey {
+            thread: thread_index,
+            block: self.block.unwrap_or(index),
+        }]
+        .into_iter()
+        .collect();
         Ok(format!(
             "Added '{}' to thread {} position {}",
             kind.label(),
@@ -342,7 +711,14 @@ impl MissileProgramSession {
     /// Apply an editor action. `Ok` means the program changed and must be saved; `Err` is a refusal
     /// shown to the player.
     pub fn apply(&mut self, action: ProgramAction, vehicle: &Vehicle) -> Result<String, String> {
-        if !matches!(action, ProgramAction::Debug) {
+        if !matches!(
+            &action,
+            ProgramAction::Debug
+                | ProgramAction::DebugStep(_)
+                | ProgramAction::ToggleDebugPlay
+                | ProgramAction::CycleDebugSpeed
+                | ProgramAction::ResetDebug
+        ) {
             self.debug = None;
         }
         let Some((thread_limit, _)) = self.limits(vehicle) else {
@@ -351,30 +727,8 @@ impl MissileProgramSession {
         match action {
             ProgramAction::Append(kind) => self.insert_at(kind, None, vehicle),
             ProgramAction::Insert(kind) => {
-                let after = self.block;
+                let after = self.path.last().map(|step| step.index).or(self.block);
                 self.insert_at(kind, after, vehicle)
-            }
-            ProgramAction::Duplicate => {
-                let Some(index) = self.block else {
-                    return Err("Select a block first.".to_string());
-                };
-                let Some(block) = self
-                    .program
-                    .threads
-                    .get(self.thread)
-                    .and_then(|t| t.get(index))
-                    .copied()
-                else {
-                    return Err("Select a block first.".to_string());
-                };
-                let kind = BlockKind::ALL
-                    .into_iter()
-                    .find(|kind| {
-                        let default = kind.default_block();
-                        std::mem::discriminant(&default) == std::mem::discriminant(&block)
-                    })
-                    .ok_or_else(|| "This block cannot be copied.".to_string())?;
-                self.insert_at(kind, Some(index), vehicle)
             }
             ProgramAction::AddThread => {
                 if self.program.threads.len() + 1 > thread_limit {
@@ -393,6 +747,27 @@ impl MissileProgramSession {
                 self.program.threads.remove(index);
                 self.thread = index.min(self.program.threads.len() - 1);
                 self.block = None;
+                self.path.clear();
+                self.selection.clear();
+                self.branch_focus = None;
+                self.program
+                    .layout
+                    .positions
+                    .retain(|position| position.thread != index);
+                for position in &mut self.program.layout.positions {
+                    if position.thread > index {
+                        position.thread -= 1;
+                    }
+                }
+                for group in &mut self.program.layout.groups {
+                    group.members.retain(|member| member.thread != index);
+                    for member in &mut group.members {
+                        if member.thread > index {
+                            member.thread -= 1;
+                        }
+                    }
+                }
+                self.program.layout.groups.retain(|group| !group.members.is_empty());
                 Ok(format!("Thread {} removed", index + 1))
             }
             ProgramAction::SelectThread(index) => {
@@ -402,88 +777,146 @@ impl MissileProgramSession {
                 self.scroll = 0.0;
                 self.thread = index;
                 self.block = None;
+                self.path.clear();
+                self.selection.clear();
+                self.branch_focus = None;
                 Ok(String::new())
             }
-            ProgramAction::SelectBlock(index) => {
-                if self.program.threads.get(self.thread).is_none_or(|t| index >= t.len()) {
+            ProgramAction::SelectPath { thread, path } => {
+                self.selection.clear();
+                if let Some(step) = path.first() {
+                    self.selection.insert(BlockKey {
+                        thread,
+                        block: step.index,
+                    });
+                }
+                self.select_path(thread, path)?;
+                Ok(String::new())
+            }
+            ProgramAction::ToggleSelection { thread, block } => {
+                if self.program.threads.get(thread).is_none_or(|rows| block >= rows.len()) {
                     return Err("No such block".to_string());
                 }
-                self.block = Some(index);
+                self.thread = thread;
+                let key = BlockKey { thread, block };
+                if !self.selection.remove(&key) {
+                    self.selection.insert(key);
+                }
+                self.block = self.selection.iter().next_back().map(|key| key.block);
+                if let Some(key) = self.selection.iter().next_back() {
+                    if key.thread == self.thread {
+                        self.path = vec![PathStep {
+                            index: key.block,
+                            branch: Branch::Body,
+                        }];
+                    }
+                } else {
+                    self.path.clear();
+                }
                 Ok(String::new())
             }
             ProgramAction::RemoveSelected => {
-                let Some(index) = self.block else {
+                let Some((container, index)) = self.selected_container_mut() else {
                     return Err("Select a block first.".to_string());
                 };
-                let thread = self.current_thread_mut();
-                if index >= thread.len() {
+                if index >= container.len() {
                     return Err("Select a block first.".to_string());
                 }
-                thread.remove(index);
-                self.block = if thread.is_empty() {
-                    None
-                } else {
-                    Some(index.min(thread.len() - 1))
-                };
+                container.remove(index);
+                self.after_removal(index);
                 Ok("Block removed".to_string())
             }
             ProgramAction::MoveUp | ProgramAction::MoveDown => {
                 let Some(index) = self.block else {
                     return Err("Select a block first.".to_string());
                 };
-                let target = if action == ProgramAction::MoveUp {
-                    index.checked_sub(1)
-                } else {
-                    Some(index + 1)
+                let Some((container, current)) = self.selected_container_mut() else {
+                    return Err("Select a block first.".to_string());
                 };
-                let thread = self.current_thread_mut();
-                let Some(target) = target.filter(|t| *t < thread.len()) else {
+                let target = if action == ProgramAction::MoveUp {
+                    current.checked_sub(1)
+                } else {
+                    Some(current + 1)
+                };
+                let Some(target) = target.filter(|t| *t < container.len()) else {
                     return Ok(String::new());
                 };
-                thread.swap(index, target);
-                self.block = Some(target);
+                container.swap(current, target);
+                if self.path.len() == 1 {
+                    self.swap_layout(self.thread, current, target);
+                }
+                if let Some(last) = self.path.last_mut() {
+                    last.index = target;
+                }
+                self.block = Some(self.path.first().map_or(index, |step| step.index));
                 Ok(String::new())
             }
             ProgramAction::Adjust(direction) => {
-                let Some(index) = self.block else {
+                let stages = vehicle.stage_count();
+                let Some((container, index)) = self.selected_container_mut() else {
                     return Err("Select a block first.".to_string());
                 };
-                let stages = vehicle.stage_count();
-                let thread = self.current_thread_mut();
-                let Some(block) = thread.get(index).copied() else {
+                let Some(block) = container.get(index).cloned() else {
                     return Err("Select a block first.".to_string());
                 };
                 match adjusted(block, direction, stages) {
                     Some(changed) => {
-                        thread[index] = changed;
+                        container[index] = changed;
                         Ok(String::new())
                     }
-                    None => Err("'Lock target' has no adjustable value.".to_string()),
+                    None => Err("This block has no adjustable value.".to_string()),
+                }
+            }
+            ProgramAction::AdjustTimeout(direction) => {
+                let Some((container, index)) = self.selected_container_mut() else {
+                    return Err("Select a condition block first.".to_string());
+                };
+                let Some(block) = container.get_mut(index) else {
+                    return Err("Select a condition block first.".to_string());
+                };
+                let step = 5.0 * f64::from(direction);
+                match block {
+                    Block::WaitUntil { timeout_s, .. } => {
+                        *timeout_s = round((*timeout_s + step).clamp(0.0, MAX_CONDITION_TIMEOUT_S));
+                        Ok(format!("Timeout {timeout_s:.0} s"))
+                    }
+                    Block::RepeatWhile { timeout_s, .. } => {
+                        *timeout_s = round((*timeout_s + step).clamp(0.0, MAX_CONDITION_TIMEOUT_S));
+                        Ok(format!("Timeout {timeout_s:.0} s"))
+                    }
+                    _ => Err("This block has no timeout to tune.".to_string()),
                 }
             }
             ProgramAction::Flip => {
-                let Some(index) = self.block else {
+                let Some((container, index)) = self.selected_container_mut() else {
                     return Err("Select a block first.".to_string());
                 };
-                let thread = self.current_thread_mut();
-                let Some(block) = thread.get(index).copied() else {
+                let Some(block) = container.get(index).cloned() else {
                     return Err("Select a block first.".to_string());
                 };
                 match flipped(block) {
                     Some(changed) => {
-                        thread[index] = changed;
+                        container[index] = changed;
                         Ok(String::new())
                     }
-                    None => Err("Only the flag blocks carry a boolean value.".to_string()),
+                    None => Err("Only flag conditions carry a boolean value.".to_string()),
                 }
             }
             ProgramAction::Clear => {
                 self.program = Program {
                     threads: vec![Vec::new()],
+                    ..Program::default()
                 };
                 self.thread = 0;
                 self.block = None;
+                self.path.clear();
+                self.selection.clear();
+                self.branch_focus = None;
+                self.multi_select = false;
                 self.scroll = 0.0;
+                self.debug = None;
+                self.debug_cursor = 0;
+                self.debug_playing = false;
                 Ok("Program cleared".to_string())
             }
             ProgramAction::SaveCopy => {
@@ -499,7 +932,11 @@ impl MissileProgramSession {
                 self.program = saved.program;
                 self.thread = 0;
                 self.block = None;
+                self.path.clear();
+                self.selection.clear();
+                self.branch_focus = None;
                 self.scroll = 0.0;
+                self.debug = None;
                 Ok(format!("Loaded saved program '{}'", saved.name))
             }
             ProgramAction::DeleteSaved(index) => {
@@ -507,12 +944,477 @@ impl MissileProgramSession {
                 self.library_dirty = true;
                 Ok(message)
             }
+            ProgramAction::CopySelection => {
+                self.clipboard.clear();
+                let keys: Vec<BlockKey> = if self.selection.is_empty() {
+                    self.block
+                        .map(|block| BlockKey {
+                            thread: self.thread,
+                            block,
+                        })
+                        .into_iter()
+                        .collect()
+                } else {
+                    self.selection.iter().copied().collect()
+                };
+                for key in &keys {
+                    if let Some(block) = self
+                        .program
+                        .threads
+                        .get(key.thread)
+                        .and_then(|rows| rows.get(key.block))
+                    {
+                        self.clipboard.push(block.clone());
+                    }
+                }
+                if self.clipboard.is_empty() {
+                    return Err("Select a block first.".to_string());
+                }
+                Ok(format!("{} block(s) copied", self.clipboard.len()))
+            }
+            ProgramAction::PasteSelection => {
+                if self.clipboard.is_empty() {
+                    return Err("Clipboard is empty.".to_string());
+                }
+                if self.blocks_used() + self.clipboard.len() > vehicle.computer().map_or(0, |c| c.ram_blocks()) {
+                    return Err("Not enough computer memory for the clipboard.".to_string());
+                }
+                let count = self.clipboard.len();
+                let thread = self.thread;
+                let clipboard = self.clipboard.clone();
+                let rows = self.current_thread_mut();
+                let start = rows.len();
+                rows.extend(clipboard);
+                self.selection = (start..start + count).map(|block| BlockKey { thread, block }).collect();
+                self.block = Some(start);
+                self.path = vec![PathStep {
+                    index: start,
+                    branch: Branch::Body,
+                }];
+                Ok(format!("{count} block(s) pasted"))
+            }
+            ProgramAction::DuplicateSelection => {
+                if self.path.len() > 1 {
+                    if self.blocks_used() + 1 > vehicle.computer().map_or(0, |c| c.ram_blocks()) {
+                        return Err("Not enough computer memory.".to_string());
+                    }
+                    let Some((container, index)) = self.selected_container_mut() else {
+                        return Err("Select a block first.".to_string());
+                    };
+                    let Some(block) = container.get(index).cloned() else {
+                        return Err("Select a block first.".to_string());
+                    };
+                    container.insert(index + 1, block);
+                    if let Some(last) = self.path.last_mut() {
+                        last.index = index + 1;
+                    }
+                    return Ok("Block duplicated".to_string());
+                }
+                let keys: Vec<BlockKey> = if self.selection.is_empty() {
+                    self.block
+                        .map(|block| BlockKey {
+                            thread: self.thread,
+                            block,
+                        })
+                        .into_iter()
+                        .collect()
+                } else {
+                    self.selection.iter().copied().collect()
+                };
+                if keys.is_empty() {
+                    return Err("Select a block first.".to_string());
+                }
+                if self.blocks_used() + keys.len() > vehicle.computer().map_or(0, |c| c.ram_blocks()) {
+                    return Err("Not enough computer memory to duplicate the selection.".to_string());
+                }
+                let thread = self.thread;
+                let mut created: Vec<BlockKey> = Vec::new();
+                for key in keys.iter().rev() {
+                    if key.thread != thread {
+                        continue;
+                    }
+                    let Some(block) = self
+                        .program
+                        .threads
+                        .get(thread)
+                        .and_then(|rows| rows.get(key.block))
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    let rows = self.current_thread_mut();
+                    rows.insert(key.block + 1, block);
+                    for created_key in &mut created {
+                        if created_key.block > key.block {
+                            created_key.block += 1;
+                        }
+                    }
+                    self.shift_layout(thread, key.block + 1, 1);
+                    created.push(BlockKey {
+                        thread,
+                        block: key.block + 1,
+                    });
+                }
+                self.selection = created.into_iter().collect();
+                self.block = self.selection.iter().next().map(|key| key.block);
+                if let Some(block) = self.block {
+                    self.path = vec![PathStep {
+                        index: block,
+                        branch: Branch::Body,
+                    }];
+                }
+                Ok(format!("{} block(s) duplicated", self.selection.len()))
+            }
+            ProgramAction::RemoveSelection => {
+                if self.selection.len() <= 1 {
+                    return self.remove_selected();
+                }
+                let keys: Vec<BlockKey> = self.selection.iter().copied().collect();
+                let mut ordered = keys.clone();
+                ordered.sort_by(|a, b| b.thread.cmp(&a.thread).then(b.block.cmp(&a.block)));
+                for key in &ordered {
+                    if let Some(rows) = self.program.threads.get_mut(key.thread)
+                        && key.block < rows.len()
+                    {
+                        rows.remove(key.block);
+                    }
+                }
+                // Removal shifts the following blocks; move their saved positions with them so the
+                // canvas does not leave a hole where the deleted card used to be.
+                self.program.layout.positions.retain_mut(|position| {
+                    let removed = keys
+                        .iter()
+                        .filter(|key| key.thread == position.thread)
+                        .collect::<Vec<_>>();
+                    if removed.iter().any(|key| key.block == position.block) {
+                        return false;
+                    }
+                    position.block -= removed.iter().filter(|key| key.block < position.block).count();
+                    true
+                });
+                for group in &mut self.program.layout.groups {
+                    group.members.retain_mut(|member| {
+                        if keys.contains(member) {
+                            return false;
+                        }
+                        member.block -= keys
+                            .iter()
+                            .filter(|key| key.thread == member.thread && key.block < member.block)
+                            .count();
+                        true
+                    });
+                }
+                self.program.layout.groups.retain(|group| !group.members.is_empty());
+                self.selection.clear();
+                self.block = None;
+                self.path.clear();
+                Ok(format!("{} block(s) removed", keys.len()))
+            }
+            ProgramAction::Align => {
+                for thread in 0..self.program.threads.len() {
+                    self.arrange_thread(thread);
+                }
+                Ok("Blocks aligned".to_string())
+            }
+            ProgramAction::GroupSelection => {
+                let members: Vec<BlockKey> = if self.selection.is_empty() {
+                    self.block
+                        .map(|block| BlockKey {
+                            thread: self.thread,
+                            block,
+                        })
+                        .into_iter()
+                        .collect()
+                } else {
+                    self.selection.iter().copied().collect()
+                };
+                if members.is_empty() {
+                    return Err("Select a block first.".to_string());
+                }
+                let index = self.program.layout.groups.len() + 1;
+                self.program.layout.groups.push(ProgramGroup {
+                    name: format!("Group {index}"),
+                    members,
+                });
+                Ok(format!("Group {index} created"))
+            }
+            ProgramAction::ClearGroups => {
+                self.program.layout.groups.clear();
+                Ok("Groups cleared".to_string())
+            }
+            ProgramAction::FocusBranch(branch) => {
+                if !self.selected_block().is_some_and(is_control_block) {
+                    return Err("Select an IF, REPEAT or REPEAT WHILE block first.".to_string());
+                }
+                self.branch_focus = Some(branch);
+                Ok(format!("Palette now appends to {} ", branch.label()))
+            }
+            ProgramAction::CycleCondition => {
+                let Some((container, index)) = self.selected_container_mut() else {
+                    return Err("Select a control block first.".to_string());
+                };
+                let Some(block) = container.get_mut(index) else {
+                    return Err("Select a control block first.".to_string());
+                };
+                match block {
+                    Block::If { condition, .. }
+                    | Block::WaitUntil { condition, .. }
+                    | Block::RepeatWhile { condition, .. } => {
+                        *condition = cycled_condition(*condition);
+                        Ok("Condition type changed".to_string())
+                    }
+                    _ => Err("This block has no condition.".to_string()),
+                }
+            }
+            ProgramAction::CreateRoutine => {
+                let members: Vec<BlockKey> = if self.selection.is_empty() {
+                    self.block
+                        .map(|block| BlockKey {
+                            thread: self.thread,
+                            block,
+                        })
+                        .into_iter()
+                        .collect()
+                } else {
+                    self.selection.iter().copied().collect()
+                };
+                let blocks: Vec<Block> = members
+                    .iter()
+                    .filter_map(|key| {
+                        self.program
+                            .threads
+                            .get(key.thread)
+                            .and_then(|rows| rows.get(key.block))
+                            .cloned()
+                    })
+                    .collect();
+                if blocks.is_empty() {
+                    return Err("Select blocks to capture as a routine.".to_string());
+                }
+                if self.blocks_used() + blocks.len() > vehicle.computer().map_or(0, |computer| computer.ram_blocks()) {
+                    return Err("Not enough computer memory for this routine.".to_string());
+                }
+                let index = self.program.routines.len() + 1;
+                let mut name = format!("Routine {index}");
+                let mut suffix = 1;
+                while self.program.routines.iter().any(|routine| routine.name == name) {
+                    name = format!("Routine {index}-{suffix}");
+                    suffix += 1;
+                }
+                self.program.routines.push(Routine {
+                    name: name.clone(),
+                    blocks,
+                });
+                Ok(format!("Routine '{name}' created"))
+            }
+            ProgramAction::DeleteRoutine(index) => {
+                if index >= self.program.routines.len() {
+                    return Err("No such routine".to_string());
+                }
+                let removed = self.program.routines.remove(index);
+                Ok(format!("Routine '{}' removed", removed.name))
+            }
+            ProgramAction::AppendCall(index) => {
+                let Some(routine) = self.program.routines.get(index).map(|routine| routine.name.clone()) else {
+                    return Err("No such routine".to_string());
+                };
+                let message = self.insert_at(BlockKind::Call, None, vehicle)?;
+                let Some((container, block_index)) = self.selected_container_mut() else {
+                    return Err(message);
+                };
+                if let Some(Block::Call { routine: called }) = container.get_mut(block_index) {
+                    *called = routine;
+                }
+                Ok(message)
+            }
+            ProgramAction::CycleCall => {
+                if self.program.routines.is_empty() {
+                    return Err("Create a routine first.".to_string());
+                }
+                let names: Vec<String> = self
+                    .program
+                    .routines
+                    .iter()
+                    .map(|routine| routine.name.clone())
+                    .collect();
+                let Some((container, index)) = self.selected_container_mut() else {
+                    return Err("Select a CALL block first.".to_string());
+                };
+                let Some(Block::Call { routine }) = container.get_mut(index) else {
+                    return Err("Select a CALL block first.".to_string());
+                };
+                let current = names.iter().position(|name| name == routine).unwrap_or(0);
+                *routine = names[(current + 1) % names.len()].clone();
+                Ok(format!("Call routine '{routine}'"))
+            }
+            ProgramAction::DebugStep(direction) => {
+                let Some(report) = &self.debug else {
+                    return Err("Run a trace first.".to_string());
+                };
+                self.debug_playing = false;
+                if direction < 0 {
+                    self.debug_cursor = self.debug_cursor.saturating_sub(1);
+                } else {
+                    self.debug_cursor = (self.debug_cursor + 1).min(report.trace.len().saturating_sub(1));
+                }
+                Ok(format!("Step {} / {}", self.debug_cursor + 1, report.trace.len()))
+            }
+            ProgramAction::ToggleDebugPlay => {
+                if self.debug.is_none() {
+                    return Err("Run a trace first.".to_string());
+                }
+                self.debug_playing = !self.debug_playing;
+                Ok(if self.debug_playing {
+                    "Playback running"
+                } else {
+                    "Playback paused"
+                }
+                .to_string())
+            }
+            ProgramAction::CycleDebugSpeed => {
+                self.debug_speed = (self.debug_speed + 1) % 4;
+                Ok(format!("Playback speed {}", self.debug_speed_multiplier()))
+            }
+            ProgramAction::ResetDebug => {
+                self.debug_cursor = 0;
+                self.debug_playing = false;
+                Ok("Playback reset".to_string())
+            }
+            ProgramAction::ZoomCanvas(direction) => {
+                let zoom = (self.program.layout.zoom + 0.1 * f32::from(direction)).clamp(0.5, 2.0);
+                self.program.layout.zoom = zoom;
+                Ok(format!("Canvas zoom {:.0}%", zoom * 100.0))
+            }
+            ProgramAction::ResetCanvas => {
+                self.program.layout.zoom = 1.0;
+                self.program.layout.pan_x = 0.0;
+                self.program.layout.pan_y = 0.0;
+                Ok("Canvas view reset".to_string())
+            }
+            ProgramAction::ToggleMultiSelect => {
+                self.multi_select = !self.multi_select;
+                if !self.multi_select {
+                    self.selection.clear();
+                }
+                Ok(if self.multi_select {
+                    "Multi-selection on: click blocks to add or remove them".to_string()
+                } else {
+                    "Multi-selection off".to_string()
+                })
+            }
             ProgramAction::Debug => self.debug(vehicle),
         }
     }
 
     /// Fly the current program once with a block trace. Failures are the normal validation issues,
     /// so the panel explains exactly what to fix before a trial.
+    fn remove_selected(&mut self) -> Result<String, String> {
+        let Some((container, index)) = self.selected_container_mut() else {
+            return Err("Select a block first.".to_string());
+        };
+        if index >= container.len() {
+            return Err("Select a block first.".to_string());
+        }
+        container.remove(index);
+        self.after_removal(index);
+        Ok("Block removed".to_string())
+    }
+
+    fn after_removal(&mut self, index: usize) {
+        if self.path.len() == 1 {
+            let len = self.program.threads.get(self.thread).map_or(0, Vec::len);
+            if len == 0 {
+                self.block = None;
+                self.path.clear();
+            } else {
+                let next = index.min(len - 1);
+                self.block = Some(next);
+                self.path[0].index = next;
+            }
+            for position in &mut self.program.layout.positions {
+                if position.thread == self.thread && position.block > index {
+                    position.block -= 1;
+                }
+            }
+            for group in &mut self.program.layout.groups {
+                group
+                    .members
+                    .retain(|member| !(member.thread == self.thread && member.block == index));
+                for member in &mut group.members {
+                    if member.thread == self.thread && member.block > index {
+                        member.block -= 1;
+                    }
+                }
+            }
+            self.program.layout.groups.retain(|group| !group.members.is_empty());
+        } else {
+            while !self.path.is_empty() {
+                let Some(rows) = self.program.threads.get(self.thread) else {
+                    break;
+                };
+                if selected_in(rows, &self.path).is_some() {
+                    break;
+                }
+                self.path.pop();
+            }
+            self.block = self.path.first().map(|step| step.index);
+        }
+        self.selection.clear();
+        if let Some(block) = self.block {
+            self.selection.insert(BlockKey {
+                thread: self.thread,
+                block,
+            });
+        }
+    }
+
+    /// Move saved top-level positions when a block is inserted or removed before them.
+    fn shift_layout(&mut self, thread: usize, from: usize, delta: isize) {
+        for position in &mut self.program.layout.positions {
+            if position.thread == thread && position.block >= from {
+                position.block = position.block.saturating_add_signed(delta);
+            }
+        }
+        for group in &mut self.program.layout.groups {
+            for member in &mut group.members {
+                if member.thread == thread && member.block >= from {
+                    member.block = member.block.saturating_add_signed(delta);
+                }
+            }
+        }
+    }
+
+    fn swap_layout(&mut self, thread: usize, a: usize, b: usize) {
+        let left = self.program.layout.position(BlockKey { thread, block: a });
+        let right = self.program.layout.position(BlockKey { thread, block: b });
+        if let Some((x, y)) = right {
+            self.program.layout.set_position(BlockKey { thread, block: a }, x, y);
+        }
+        if let Some((x, y)) = left {
+            self.program.layout.set_position(BlockKey { thread, block: b }, x, y);
+        }
+    }
+
+    /// Lay the selected thread's top-level blocks on a regular vertical rail.
+    fn arrange_thread(&mut self, thread: usize) {
+        let len = self.program.threads.get(thread).map_or(0, Vec::len);
+        for block in 0..len {
+            self.program.layout.set_position(
+                BlockKey { thread, block },
+                60.0 + thread as f32 * 380.0,
+                110.0 + block as f32 * 92.0,
+            );
+        }
+        self.program
+            .layout
+            .positions
+            .retain(|position| position.thread != thread || position.block < len);
+    }
+
+    pub fn debug_speed_multiplier(&self) -> f32 {
+        [0.5, 1.0, 2.0, 4.0][self.debug_speed.min(3) as usize]
+    }
+
     fn debug(&mut self, vehicle: &Vehicle) -> Result<String, String> {
         if self.program.threads.iter().all(Vec::is_empty) {
             return Err("The program is empty: add blocks to a thread.".to_string());
@@ -524,12 +1426,14 @@ impl MissileProgramSession {
         let report = simulate(vehicle, &self.program, config).map_err(|issues| issues.join(" | "))?;
         let executed = report.trace.len();
         self.debug = Some(report);
+        self.debug_cursor = 0;
+        self.debug_playing = true;
         Ok(format!("Debug run: {executed} block(s) executed"))
     }
 
     /// Stable content hash, ready to bind trial evidence to this exact program.
     pub fn content_hash(&self) -> Result<omega_data::ContentHash, String> {
-        omega_data::hash_serializable(&self.program)
+        omega_data::hash_serializable(&self.program.semantic_copy())
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
@@ -564,23 +1468,30 @@ pub(crate) fn persist_library(session: &MissileProgramSession) -> Result<(), Str
     library_bytes(session).and_then(|bytes| save::write(SaveFile::ProgramLibrary, &bytes))
 }
 
-pub(crate) fn load_program(mut session: ResMut<MissileProgramSession>) {
-    match save::read(SaveFile::MissileProgram) {
-        Ok(Some(bytes)) => match MissileProgramSession::from_bytes(&bytes) {
-            Ok(loaded) => *session = loaded,
+impl MissileProgramSession {
+    pub(crate) fn load_active(&mut self) {
+        *self = Self::default();
+        match save::read(SaveFile::MissileProgram) {
+            Ok(Some(bytes)) => match Self::from_bytes(&bytes) {
+                Ok(loaded) => *self = loaded,
+                Err(error) => warn!("Could not read the saved missile program: {error}"),
+            },
+            Ok(None) => {}
             Err(error) => warn!("Could not read the saved missile program: {error}"),
-        },
-        Ok(None) => {}
-        Err(error) => warn!("Could not read the saved missile program: {error}"),
-    }
-    match save::read(SaveFile::ProgramLibrary) {
-        Ok(Some(bytes)) => match serde_json::from_slice::<ProgramLibrary>(&bytes) {
-            Ok(library) => session.library = library,
+        }
+        match save::read(SaveFile::ProgramLibrary) {
+            Ok(Some(bytes)) => match serde_json::from_slice::<ProgramLibrary>(&bytes) {
+                Ok(library) => self.library = library,
+                Err(error) => warn!("Could not read the saved program library: {error}"),
+            },
+            Ok(None) => {}
             Err(error) => warn!("Could not read the saved program library: {error}"),
-        },
-        Ok(None) => {}
-        Err(error) => warn!("Could not read the saved program library: {error}"),
+        }
     }
+}
+
+pub(crate) fn load_program(mut session: ResMut<MissileProgramSession>) {
+    session.load_active();
 }
 
 /// The highest severity found in a list, for the panel chip.
@@ -689,7 +1600,18 @@ mod tests {
             .apply(ProgramAction::Append(BlockKind::Throttle), &vehicle)
             .unwrap();
         session.apply(ProgramAction::Append(BlockKind::Wait), &vehicle).unwrap();
-        session.apply(ProgramAction::SelectBlock(0), &vehicle).unwrap();
+        session
+            .apply(
+                ProgramAction::SelectPath {
+                    thread: 0,
+                    path: vec![PathStep {
+                        index: 0,
+                        branch: Branch::Body,
+                    }],
+                },
+                &vehicle,
+            )
+            .unwrap();
         for _ in 0..20 {
             session.apply(ProgramAction::Adjust(1), &vehicle).unwrap();
         }
@@ -754,11 +1676,22 @@ mod tests {
         let mut session = MissileProgramSession::default();
         session.apply(ProgramAction::Append(BlockKind::Wait), &vehicle).unwrap();
         session.apply(ProgramAction::Append(BlockKind::Wait), &vehicle).unwrap();
-        session.apply(ProgramAction::SelectBlock(0), &vehicle).unwrap();
+        session
+            .apply(
+                ProgramAction::SelectPath {
+                    thread: 0,
+                    path: vec![PathStep {
+                        index: 0,
+                        branch: Branch::Body,
+                    }],
+                },
+                &vehicle,
+            )
+            .unwrap();
         session.apply(ProgramAction::Insert(BlockKind::Mark), &vehicle).unwrap();
         assert_eq!(session.blocks_used(), 3);
         assert!(matches!(session.program.threads[0][1], Block::Mark { .. }));
-        session.apply(ProgramAction::Duplicate, &vehicle).unwrap();
+        session.apply(ProgramAction::DuplicateSelection, &vehicle).unwrap();
         assert_eq!(session.blocks_used(), 4);
         assert!(matches!(session.program.threads[0][2], Block::Mark { .. }));
     }
@@ -853,5 +1786,134 @@ mod tests {
         assert_eq!(warnings, 1, "{issues:?}");
         session.apply(ProgramAction::Append(BlockKind::Wait), &vehicle).unwrap();
         assert!(validate_program(&session.program, &vehicle).is_empty());
+    }
+
+    fn select_path(session: &mut MissileProgramSession, thread: usize, path: Vec<PathStep>, vehicle: &Vehicle) {
+        session
+            .apply(ProgramAction::SelectPath { thread, path }, vehicle)
+            .unwrap();
+    }
+
+    #[test]
+    fn branches_receive_palette_inserts_and_stay_editable() {
+        let vehicle = vehicle_of(ComputerClass::Advanced);
+        let mut session = MissileProgramSession::default();
+        session.apply(ProgramAction::Append(BlockKind::If), &vehicle).unwrap();
+        session
+            .apply(ProgramAction::FocusBranch(Branch::Then), &vehicle)
+            .unwrap();
+        session.apply(ProgramAction::Append(BlockKind::Mark), &vehicle).unwrap();
+        assert!(matches!(
+            &session.program.threads[0][0],
+            Block::If { then_blocks, .. } if then_blocks.len() == 1
+        ));
+        select_path(
+            &mut session,
+            0,
+            vec![PathStep {
+                index: 0,
+                branch: Branch::Body,
+            }],
+            &vehicle,
+        );
+        session
+            .apply(ProgramAction::FocusBranch(Branch::Else), &vehicle)
+            .unwrap();
+        session.apply(ProgramAction::Append(BlockKind::Wait), &vehicle).unwrap();
+        assert!(matches!(
+            &session.program.threads[0][0],
+            Block::If { else_blocks, .. } if else_blocks.len() == 1
+        ));
+        // A nested control can focus its own body without returning to the card first.
+        session
+            .apply(ProgramAction::Append(BlockKind::Repeat), &vehicle)
+            .unwrap();
+        assert!(matches!(
+            &session.program.threads[0][0],
+            Block::If { else_blocks, .. }
+                if else_blocks.len() == 2 && matches!(else_blocks[1], Block::Repeat { body: ref b, .. } if b.is_empty())
+        ));
+        select_path(
+            &mut session,
+            0,
+            vec![
+                PathStep {
+                    index: 0,
+                    branch: Branch::Body,
+                },
+                PathStep {
+                    index: 1,
+                    branch: Branch::Else,
+                },
+            ],
+            &vehicle,
+        );
+        session
+            .apply(ProgramAction::FocusBranch(Branch::Body), &vehicle)
+            .unwrap();
+        session.apply(ProgramAction::Append(BlockKind::Mark), &vehicle).unwrap();
+        assert!(matches!(
+            &session.program.threads[0][0],
+            Block::If { else_blocks, .. }
+                if matches!(else_blocks[1], Block::Repeat { body: ref b, .. } if b.len() == 1)
+        ));
+        assert_eq!(session.blocks_used(), 5);
+    }
+
+    #[test]
+    fn selection_can_be_copied_duplicated_and_captured_as_a_routine() {
+        let vehicle = vehicle_of(ComputerClass::Advanced);
+        let mut session = MissileProgramSession::default();
+        session.apply(ProgramAction::Append(BlockKind::Wait), &vehicle).unwrap();
+        session.apply(ProgramAction::Append(BlockKind::Mark), &vehicle).unwrap();
+        session.selection = [BlockKey { thread: 0, block: 0 }, BlockKey { thread: 0, block: 1 }]
+            .into_iter()
+            .collect();
+        session.apply(ProgramAction::CreateRoutine, &vehicle).unwrap();
+        assert_eq!(session.program.routines.len(), 1);
+        assert_eq!(session.program.routines[0].blocks.len(), 2);
+
+        session.apply(ProgramAction::AppendCall(0), &vehicle).unwrap();
+        assert!(matches!(
+            session.program.threads[0].last(),
+            Some(Block::Call { routine }) if routine == "Routine 1"
+        ));
+
+        select_path(
+            &mut session,
+            0,
+            vec![PathStep {
+                index: 0,
+                branch: Branch::Body,
+            }],
+            &vehicle,
+        );
+        session.apply(ProgramAction::CopySelection, &vehicle).unwrap();
+        session.apply(ProgramAction::PasteSelection, &vehicle).unwrap();
+        assert_eq!(session.blocks_used(), 6, "routines count toward computer memory");
+        assert_eq!(session.clipboard.len(), 1);
+
+        session.apply(ProgramAction::Align, &vehicle).unwrap();
+        assert_eq!(
+            session.program.layout.position(BlockKey { thread: 0, block: 0 }),
+            Some((60.0, 110.0))
+        );
+    }
+
+    #[test]
+    fn debug_playback_can_pause_step_and_replay_from_the_start() {
+        let vehicle = basic();
+        let mut session = MissileProgramSession::default();
+        session.apply(ProgramAction::Append(BlockKind::Wait), &vehicle).unwrap();
+        session.apply(ProgramAction::Debug, &vehicle).unwrap();
+        assert!(session.debug_playing);
+        session.apply(ProgramAction::ToggleDebugPlay, &vehicle).unwrap();
+        assert!(!session.debug_playing);
+        session.apply(ProgramAction::DebugStep(1), &vehicle).unwrap();
+        assert!(session.debug_cursor <= session.debug.as_ref().unwrap().trace.len());
+        session.apply(ProgramAction::CycleDebugSpeed, &vehicle).unwrap();
+        assert_eq!(session.debug_speed, 2);
+        session.apply(ProgramAction::ResetDebug, &vehicle).unwrap();
+        assert_eq!(session.debug_cursor, 0);
     }
 }

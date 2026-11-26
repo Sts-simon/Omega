@@ -14,14 +14,16 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Current `designs/vehicle.json` schema. 1-2 were the flat stage lists of the early workshops;
-/// 3 added the attachment graph, 4 the aerodynamic surfaces, 5 mission electronics and 6
-/// per-part three-axis transforms (older files load with zero offsets and rotations).
-pub const VEHICLE_SCHEMA: u32 = 6;
+/// 3 added the attachment graph, 4 the aerodynamic surfaces, 5 mission electronics, 6 per-part
+/// three-axis transforms and 7 diameter adapters (older files load with the missing fields at
+/// their defaults).
+pub const VEHICLE_SCHEMA: u32 = 7;
 /// A design may not grow beyond this many derived stages (the old workshop limit).
 pub const MAX_STAGES: usize = 4;
 
 /// Attachment points a part offers. `Top` and `Bottom` are on the central axis; `Radial(i)` are the
-/// four evenly spaced body mounts, numbered clockwise and stored with the design.
+/// evenly spaced body mounts (eight per body since 0.42), numbered clockwise and stored with the
+/// design. Existing four-copy sets keep their old positions on the first four mounts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeId {
@@ -42,6 +44,133 @@ impl NodeId {
     pub fn is_radial(self) -> bool {
         matches!(self, Self::Radial(_))
     }
+}
+
+/// How a symmetry set is generated and how a later edit reaches its copies.
+///
+/// * `Radial` rotates the whole set around the parent's long axis (2 to 8 copies depending on
+///   the body's radial mounts). This is the historical linked symmetry of the workshop.
+/// * `Axial` mirrors across the fore/aft plane: the copy sits on the opposite mount around the
+///   lateral axis, so a fin set placed on the left gets its right-hand counterpart.
+/// * `Bilateral` mirrors across the left/right plane: the copy sits on the opposite mount around
+///   the fore/aft axis, so a surface that sweeps forward is paired with one that sweeps backward.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymmetryKind {
+    #[default]
+    Radial,
+    Axial,
+    Bilateral,
+}
+
+impl SymmetryKind {
+    pub const ALL: [Self; 3] = [Self::Radial, Self::Bilateral, Self::Axial];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Radial => "radiale",
+            Self::Bilateral => "bilaterale",
+            Self::Axial => "axiale",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Radial => "RADIALE",
+            Self::Bilateral => "BILATERALE",
+            Self::Axial => "AXIALE",
+        }
+    }
+
+    /// Letter encoded in the symmetry group id. Existing `sym-<n>` groups decode as radial.
+    pub fn code(self) -> char {
+        match self {
+            Self::Radial => 'r',
+            Self::Bilateral => 'b',
+            Self::Axial => 'a',
+        }
+    }
+
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Radial => Self::Bilateral,
+            Self::Bilateral => Self::Axial,
+            Self::Axial => Self::Radial,
+        }
+    }
+}
+
+/// Split a stored symmetry group id into its shared key, its kind and the copy index.
+///
+/// New groups are written as `<key>-<kind><index>` (for example `sym-4-b1`); the key is shared
+/// by every copy. Schema-7 files written before 0.42 only contain `<key>` and decode as radial
+/// index 0, so every old save keeps its linked set without a schema migration.
+pub fn decode_symmetry(group: &str) -> (String, SymmetryKind, u8) {
+    let Some((key, suffix)) = group.rsplit_once('-') else {
+        return (group.to_string(), SymmetryKind::Radial, 0);
+    };
+    let mut chars = suffix.chars();
+    let Some(code) = chars.next() else {
+        return (group.to_string(), SymmetryKind::Radial, 0);
+    };
+    let Ok(index) = chars.as_str().parse::<u8>() else {
+        return (group.to_string(), SymmetryKind::Radial, 0);
+    };
+    let kind = match code {
+        'a' => SymmetryKind::Axial,
+        'b' => SymmetryKind::Bilateral,
+        'r' => SymmetryKind::Radial,
+        _ => return (group.to_string(), SymmetryKind::Radial, 0),
+    };
+    (key.to_string(), kind, index)
+}
+
+/// Build the id of one copy of a symmetry set.
+pub fn encode_symmetry(key: &str, kind: SymmetryKind, index: u8) -> String {
+    format!("{key}-{}{index}", kind.code())
+}
+
+/// Angle of one radial slot in degrees. Slots 0..3 keep the historical 0/90/180/270 positions and
+/// the four slots added in 0.42 sit between them, so a saved design never moves when loaded.
+fn radial_slot_angle(slots: u8, index: u8) -> f64 {
+    let slots = slots.max(1);
+    if slots >= 8 {
+        match index % 8 {
+            0 => 0.0,
+            1 => 90.0,
+            2 => 180.0,
+            3 => 270.0,
+            index => 45.0 + 90.0 * f64::from(index - 4),
+        }
+    } else {
+        f64::from(index % slots) * 360.0 / f64::from(slots)
+    }
+}
+
+/// Angle of a radial mount in degrees. Body parts expose eight mounts since 0.42; older
+/// designs simply use the first four and keep their positions.
+pub fn radial_angle(spec: &PartSpec, index: u8) -> f64 {
+    radial_slot_angle(radial_slots(spec), index)
+}
+
+/// Nearest free slot to an exact target angle, so symmetry can space copies evenly even though
+/// the mount angles themselves are not in angular order.
+fn nearest_free_slot(slots: u8, target: f64, used: &[bool]) -> Option<u8> {
+    (0..slots).filter(|slot| !used[usize::from(*slot)]).min_by(|a, b| {
+        let distance = |slot: u8| {
+            let delta = (radial_slot_angle(slots, slot) - target).abs();
+            delta.min(360.0 - delta)
+        };
+        distance(*a).total_cmp(&distance(*b))
+    })
+}
+
+/// A symmetry copy placement: the mount, the extra rotation on that mount and the copy index.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SymmetryPlacement {
+    pub node: NodeId,
+    pub angle_deg: f64,
+    pub index: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -70,6 +199,10 @@ pub struct Attach {
     pub rotation_z_deg: f64,
 }
 
+fn default_size_scale() -> f64 {
+    1.0
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlacedPart {
     pub id: String,
@@ -80,6 +213,11 @@ pub struct PlacedPart {
     /// Symmetry group shared by copies placed together (2/3/4 radial mounts).
     #[serde(default)]
     pub symmetry: Option<String>,
+    /// Mounting-size multiplier for parts whose cross-section is not editable in their own spec
+    /// (sensors, computers, decouplers, payloads and avionics). One means the stock size; existing
+    /// saves default to it.
+    #[serde(default = "default_size_scale")]
+    pub size_scale: f64,
 }
 
 impl PlacedPart {
@@ -89,6 +227,42 @@ impl PlacedPart {
             spec: self.spec,
         }
     }
+
+    /// Height and radius after the mounting-size factor. Only the cross-section follows the
+    /// mounting size: the length stays the part's own figure, so fitting an avionics disc to a
+    /// wider body cannot turn it into a long cylinder. Parts with their own length/diameter
+    /// controls keep their exact figures, so the scale never compounds with a spec edit.
+    pub fn dimensions(&self) -> (f64, f64) {
+        let (height, radius) = dimensions(&self.spec);
+        if supports_size_scale(&self.spec) {
+            let scale = self.size_scale.clamp(MIN_SIZE_SCALE, MAX_SIZE_SCALE);
+            (height, radius * scale)
+        } else {
+            (height, radius)
+        }
+    }
+
+    /// Outer diameter used by the inspector and the diameter-step warning.
+    pub fn diameter_m(&self) -> f64 {
+        (self.dimensions().1 * 2.0).max(0.05)
+    }
+}
+
+/// Fixed-cross-section parts can be fitted to the body instead of forcing an adapter. The range
+/// is wide enough for the 0.4–1.2 m airframes used by the workshop.
+pub const MIN_SIZE_SCALE: f64 = 0.1;
+pub const MAX_SIZE_SCALE: f64 = 20.0;
+
+pub fn supports_size_scale(spec: &PartSpec) -> bool {
+    matches!(
+        spec,
+        PartSpec::Sensor { .. }
+            | PartSpec::Computer { .. }
+            | PartSpec::Decoupler
+            | PartSpec::MissionModule { .. }
+            | PartSpec::Explosive { .. }
+            | PartSpec::Avionics { .. }
+    )
 }
 
 /// A design warning, with the part it concerns when selecting that part helps.
@@ -186,6 +360,12 @@ impl<'de> Deserialize<'de> for Vehicle {
                     part.spec
                         .validate()
                         .map_err(|e| D::Error::custom(format!("{}: {e}", part.id)))?;
+                    if !(MIN_SIZE_SCALE..=MAX_SIZE_SCALE).contains(&part.size_scale) {
+                        return Err(D::Error::custom(format!(
+                            "{}: mounting size must be between {MIN_SIZE_SCALE} and {MAX_SIZE_SCALE}",
+                            part.id
+                        )));
+                    }
                 }
                 Ok(Self { name, parts })
             }
@@ -219,6 +399,16 @@ pub fn dimensions(spec: &PartSpec) -> (f64, f64) {
         PartSpec::Computer { .. } => (0.15, 0.15),
         PartSpec::Decoupler => (0.06, 0.20),
         PartSpec::MissionModule { mass_kg } => ((0.2 + mass_kg / 150.0).min(2.2), 0.20),
+        PartSpec::Explosive { mass_kg, .. } => ((0.3 + mass_kg / 180.0).min(2.2), 0.20),
+        PartSpec::Adapter {
+            length_m,
+            diameter_m,
+            exit_diameter_m,
+            ..
+        } => (length_m, diameter_m.max(exit_diameter_m) / 2.0),
+        PartSpec::NoseCone {
+            length_m, diameter_m, ..
+        } => (length_m, diameter_m / 2.0),
         // A surface is a thin plate: its chord runs along the body, its span outward from the
         // mount, so the radial offset places the root exactly on the parent's surface.
         PartSpec::Wing { span_m, chord_m, .. }
@@ -228,10 +418,21 @@ pub fn dimensions(spec: &PartSpec) -> (f64, f64) {
     }
 }
 
-/// Part diameter used to compare a child with the node it attaches to. Mismatches are a warning,
-/// never a refusal: the prompt keeps drag out of this lot.
-fn node_diameter(spec: &PartSpec) -> f64 {
-    (dimensions(spec).1 * 2.0).max(0.05)
+/// Diameters of the two axial faces, bottom then top, after the part's mounting size. Every body
+/// returns the same figure twice; an adapter returns its inlet and outlet so a warning compares
+/// the faces that actually meet.
+fn node_diameters(part: &PlacedPart) -> (f64, f64) {
+    match part.spec {
+        PartSpec::Adapter {
+            diameter_m,
+            exit_diameter_m,
+            ..
+        } => (diameter_m, exit_diameter_m),
+        _ => {
+            let diameter = part.diameter_m();
+            (diameter, diameter)
+        }
+    }
 }
 
 fn stack_order(spec: &PartSpec) -> u8 {
@@ -239,13 +440,16 @@ fn stack_order(spec: &PartSpec) -> u8 {
         PartSpec::LiquidEngine { .. } | PartSpec::AirBreathing { .. } => 0,
         PartSpec::SolidMotor { .. } | PartSpec::FuelTank { .. } => 1,
         PartSpec::Decoupler => 3,
+        PartSpec::NoseCone { .. } => 4,
         _ => 2,
     }
 }
 
 pub fn radial_slots(spec: &PartSpec) -> u8 {
     match spec {
-        PartSpec::SolidMotor { .. } | PartSpec::FuelTank { .. } | PartSpec::MissionModule { .. } => 4,
+        // Eight mounts let radial symmetry offer 2 to 8 copies; the first four keep their old
+        // positions, so existing four-way sets do not move.
+        PartSpec::SolidMotor { .. } | PartSpec::FuelTank { .. } | PartSpec::MissionModule { .. } => 8,
         _ => 0,
     }
 }
@@ -349,6 +553,7 @@ impl Vehicle {
                     spec: part.spec,
                     attach,
                     symmetry: None,
+                    size_scale: 1.0,
                 });
             }
         }
@@ -549,6 +754,9 @@ impl Vehicle {
         if parent_part.spec.is_aero() {
             return Err(format!("{parent} is a surface and cannot carry parts"));
         }
+        if parent_part.spec.is_nose() {
+            return Err(format!("{parent} is the nose cone and closes the stack"));
+        }
         if spec.is_aero() && !node.is_radial() {
             return Err(format!("{} mounts on a radial node only", spec.short_label()));
         }
@@ -626,15 +834,116 @@ impl Vehicle {
 
     /// Radial slots for a symmetry count, starting at `first` and evenly spaced. The count comes
     /// from the parent body, not from the part being placed: surfaces have no mounts of their own
-    /// but still form four-way sets around a body.
+    /// but still form sets around a body.
     pub fn symmetry_slots(&self, parent: &str, _spec: &PartSpec, first: u8, count: u8) -> Vec<(NodeId, f64)> {
-        let slots = self.part(parent).map_or(0, |part| radial_slots(&part.spec)).clamp(1, 4);
-        (0..count.min(slots))
-            .map(|step| {
-                let index = (first + step) % slots.max(1);
-                (NodeId::Radial(index), f64::from(index) * 90.0)
-            })
+        self.symmetry_placements(parent, SymmetryKind::Radial, first, count)
+            .into_iter()
+            .map(|placement| (placement.node, placement.angle_deg))
             .collect()
+    }
+
+    /// Placements for the active symmetry mode. Radial sets spread evenly around the body;
+    /// bilateral mirrors left/right around the lateral axis and axial mirrors fore/aft around the
+    /// longitudinal axis. A two-copy mirror falls back to the opposite mount when its mathematical
+    /// mirror would land on the source itself.
+    pub fn symmetry_placements(
+        &self,
+        parent: &str,
+        kind: SymmetryKind,
+        first: u8,
+        count: u8,
+    ) -> Vec<SymmetryPlacement> {
+        let slots = self.part(parent).map_or(0, |part| radial_slots(&part.spec));
+        if slots == 0 {
+            return Vec::new();
+        }
+        let first = first % slots;
+        let mut placements = vec![SymmetryPlacement {
+            node: NodeId::Radial(first),
+            angle_deg: 0.0,
+            index: 0,
+        }];
+        match kind {
+            SymmetryKind::Radial => {
+                // Evenly spaced copies around the body, not consecutive slots. The closest free slot
+                // carries the copy and the fractional part of the exact angle is stored in
+                // `angle_deg`, so two copies sit opposite each other and three sit 120° apart.
+                let count = count.min(slots);
+                let start = radial_slot_angle(slots, first);
+                let mut used = vec![false; usize::from(slots)];
+                used[usize::from(first)] = true;
+                for index in 1..count {
+                    let target = (start + f64::from(index) * 360.0 / f64::from(count)).rem_euclid(360.0);
+                    let Some(slot) = nearest_free_slot(slots, target, &used) else {
+                        break;
+                    };
+                    used[usize::from(slot)] = true;
+                    placements.push(SymmetryPlacement {
+                        node: NodeId::Radial(slot),
+                        angle_deg: (target - radial_slot_angle(slots, slot)).rem_euclid(360.0),
+                        index,
+                    });
+                }
+            }
+            SymmetryKind::Bilateral | SymmetryKind::Axial => {
+                // Mirror the actual mount angle, not the slot number: the slots added in 0.42 sit
+                // between the historical four, so an index formula would put copies on the wrong
+                // side. Bilateral reflects left/right (`x = 0`), axial reflects fore/aft (`z = 0`).
+                let source = radial_slot_angle(slots, first);
+                let mut target = match kind {
+                    SymmetryKind::Bilateral => 180.0 - source,
+                    _ => -source,
+                }
+                .rem_euclid(360.0);
+                let delta = (target - source).abs();
+                if delta.min(360.0 - delta) < 1e-6 {
+                    // A centre-line part mirrors onto itself; place the pair on the opposite mount
+                    // instead of stacking two parts on one point.
+                    target = (source + 180.0).rem_euclid(360.0);
+                }
+                let mut used = vec![false; usize::from(slots)];
+                used[usize::from(first)] = true;
+                let mirrored = nearest_free_slot(slots, target, &used).unwrap_or(first);
+                placements.push(SymmetryPlacement {
+                    node: NodeId::Radial(mirrored),
+                    angle_deg: (target - radial_slot_angle(slots, mirrored)).rem_euclid(360.0),
+                    index: 1,
+                });
+            }
+        }
+        placements
+    }
+
+    /// Every part of the same symmetry set as `id`, ordered by copy index. The id itself is
+    /// included when it belongs to a set.
+    pub fn symmetry_members(&self, id: &str) -> Vec<String> {
+        let Some(group) = self.part(id).and_then(|part| part.symmetry.clone()) else {
+            return vec![id.to_string()];
+        };
+        let (key, kind, _) = decode_symmetry(&group);
+        let mut members: Vec<(u8, String)> = self
+            .parts
+            .iter()
+            .filter_map(|part| {
+                let group = part.symmetry.as_deref()?;
+                let (other_key, other_kind, index) = decode_symmetry(group);
+                (other_key == key && other_kind == kind).then_some((index, part.id.clone()))
+            })
+            .collect();
+        members.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        members.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// Kind of the symmetry set a part belongs to, if any.
+    pub fn symmetry_kind_of(&self, id: &str) -> Option<SymmetryKind> {
+        let group = self.part(id)?.symmetry.as_deref()?;
+        Some(decode_symmetry(group).1)
+    }
+
+    /// A named subassembly is a subtree with a player-visible name. `false` when the part is the
+    /// root of the vehicle rather than the root of a named group.
+    pub fn named_group_root(&self, id: &str) -> bool {
+        self.part(id).is_some_and(|part| part.attach.is_some())
     }
 
     /// Errors and warnings in one list, each naming the part to select to fix it. This is the only
@@ -663,10 +972,20 @@ impl Vehicle {
                 None,
             )),
             1 => {}
-            count => issues.push(VehicleIssue::error(
-                format!("the vehicle has {count} root parts; exactly one is allowed"),
-                None,
-            )),
+            count => {
+                issues.push(VehicleIssue::error(
+                    format!("the vehicle has {count} root parts; exactly one is allowed"),
+                    None,
+                ));
+                // Name each loose root so the assembly control panel can select it directly
+                // instead of only reporting a count.
+                for part in roots.iter().skip(1) {
+                    issues.push(VehicleIssue::error(
+                        format!("{} is not connected to the rest of the vehicle", part.id),
+                        Some(part.id.clone()),
+                    ));
+                }
+            }
         }
         let mut ids = BTreeSet::new();
         for part in &self.parts {
@@ -844,7 +1163,14 @@ impl Vehicle {
             if parent.spec.is_aero() || part.spec.is_aero() {
                 continue;
             }
-            let (parent_d, child_d) = (node_diameter(&parent.spec), node_diameter(&part.spec));
+            let (parent_bottom, parent_top) = node_diameters(parent);
+            let (child_bottom, child_top) = node_diameters(part);
+            let (parent_d, child_d) = match attach.node {
+                NodeId::Top => (parent_top, child_bottom),
+                NodeId::Bottom => (parent_bottom, child_top),
+                // A radial part sits beside the body, not on an axial face.
+                NodeId::Radial(_) => (parent_bottom.max(parent_top), child_bottom.max(child_top)),
+            };
             if (parent_d - child_d).abs() > 0.051 {
                 warnings.push(VehicleIssue::warning(
                     format!(
@@ -921,6 +1247,12 @@ impl Vehicle {
             "set_mode",
             "wait_mode",
             "mark",
+            "if",
+            "wait_until",
+            "repeat",
+            "repeat_while",
+            "break",
+            "call",
         ]
         .into_iter()
         .collect();
@@ -966,7 +1298,7 @@ impl Vehicle {
         self.parts
             .iter()
             .filter(|part| !part.spec.is_aero())
-            .map(|part| dimensions(&part.spec).1 * 2.0)
+            .map(PlacedPart::diameter_m)
             .fold(0.0, f64::max)
             .max(0.1)
     }
@@ -984,6 +1316,14 @@ impl Vehicle {
 
     pub fn total_wet_mass_kg(&self) -> f64 {
         self.stage_views().iter().map(Self::stage_wet_mass).sum()
+    }
+
+    /// Total explosive charge mass and its abstract game yield across the design.
+    pub fn payload_summary(&self) -> (f64, f64) {
+        self.parts.iter().fold((0.0, 0.0), |(mass, yield_kg), part| {
+            let stats = part.spec.stats();
+            (mass + stats.payload_kg, yield_kg + stats.payload_yield_kg)
+        })
     }
 
     /// Same formulas and constants as the flat model: a stage's ignition mass includes every stage
@@ -1042,7 +1382,7 @@ impl Vehicle {
         let Some(root) = self.root() else {
             return poses;
         };
-        let (height, radius) = dimensions(&root.spec);
+        let (height, radius) = root.dimensions();
         let identity = [1.0, 0.0, 0.0, 0.0];
         let mut stack = vec![(root.id.clone(), [0.0, height / 2.0, 0.0], identity, height, radius)];
         let mut seen = BTreeSet::new();
@@ -1053,7 +1393,7 @@ impl Vehicle {
             let Some(part) = self.part(&id) else {
                 continue;
             };
-            let (height, radius) = dimensions(&part.spec);
+            let (height, radius) = part.dimensions();
             let (rx, ry, rz) = quaternion_to_euler_xyz(orientation);
             poses.push(PartPose {
                 id: id.clone(),
@@ -1068,13 +1408,14 @@ impl Vehicle {
                 rotation_z_deg: rz.to_degrees(),
             });
             for child in self.children(&id) {
-                let (child_height, child_radius) = dimensions(&child.spec);
+                let (child_height, child_radius) = child.dimensions();
                 let attach = child.attach.as_ref();
                 let mut local = match attach.map(|a| a.node) {
                     Some(NodeId::Top) => [0.0, parent_height / 2.0 + child_height / 2.0, 0.0],
                     Some(NodeId::Bottom) => [0.0, -parent_height / 2.0 - child_height / 2.0, 0.0],
                     Some(NodeId::Radial(index)) => {
-                        let angle = (f64::from(index) * 90.0 + attach.map_or(0.0, |a| a.angle_deg)).to_radians();
+                        let angle =
+                            (radial_angle(&part.spec, index) + attach.map_or(0.0, |a| a.angle_deg)).to_radians();
                         let offset = parent_radius + child_radius;
                         [angle.cos() * offset, 0.0, angle.sin() * offset]
                     }
@@ -1132,6 +1473,7 @@ impl Vehicle {
             spec,
             attach: None,
             symmetry: None,
+            size_scale: 1.0,
         });
         match parent {
             Some(top) if top != id => self.attach(&id, &top, NodeId::Top, 0.0),
@@ -1153,6 +1495,7 @@ impl Vehicle {
             spec,
             attach: None,
             symmetry: None,
+            size_scale: 1.0,
         });
         if let Err(error) = self.attach(&id, parent, node, 0.0) {
             // Do not leave an orphan root behind when the mount is refused.
@@ -1306,6 +1649,7 @@ pub(crate) mod tests {
                 },
                 attach: None,
                 symmetry: Some("boosters".into()),
+                size_scale: 1.0,
             });
             vehicle.attach(&id, parent, *node, 0.0).unwrap();
         }
@@ -1362,6 +1706,7 @@ pub(crate) mod tests {
                 rotation_z_deg: 0.0,
             }),
             symmetry: None,
+            size_scale: 1.0,
         });
         let issues = vehicle.validate().unwrap_err().join(" | ");
         assert!(issues.contains("fuel tank"), "{issues}");
@@ -1402,6 +1747,7 @@ pub(crate) mod tests {
                 spec: PartSpec::Decoupler,
                 attach: None,
                 symmetry: None,
+                size_scale: 1.0,
             });
             vehicle.attach(id, "booster", NodeId::Radial(index), 0.0).unwrap();
         }
@@ -1465,7 +1811,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn three_axis_transforms_round_trip_in_schema_six() {
+    fn three_axis_transforms_round_trip_in_schema_seven() {
         let mut vehicle = sounding_rocket();
         let attach = vehicle.part_mut("pc").unwrap().attach.as_mut().unwrap();
         attach.offset_x_m = 0.35;
@@ -1475,7 +1821,7 @@ pub(crate) mod tests {
         attach.rotation_y_deg = 45.0;
         attach.rotation_z_deg = 90.0;
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":6"));
+        assert!(json.contains("\"schema_version\":7"));
         let restored: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, vehicle);
     }
@@ -1487,6 +1833,165 @@ pub(crate) mod tests {
         assert!(
             vehicle.warnings().iter().any(|w| w.contains("diameter step")),
             "{:?}",
+            vehicle.warnings()
+        );
+    }
+
+    #[test]
+    fn an_adapter_carries_a_diameter_change_without_a_step_warning() {
+        let mut vehicle = Vehicle::from_stages(
+            "Adapter stack",
+            vec![Stage {
+                parts: vec![part(
+                    "booster",
+                    PartSpec::SolidMotor {
+                        length_m: 2.0,
+                        diameter_m: 0.6,
+                        burn_time_s: 20.0,
+                    },
+                )],
+            }],
+        );
+        vehicle
+            .add_attached(
+                "adapter",
+                PartSpec::Adapter {
+                    length_m: 0.4,
+                    diameter_m: 0.6,
+                    exit_diameter_m: 0.3,
+                    shape: crate::vehicle::AdapterShape::Ogive,
+                },
+                "booster",
+                NodeId::Top,
+            )
+            .unwrap();
+        vehicle
+            .add_attached(
+                "sustainer",
+                PartSpec::SolidMotor {
+                    length_m: 1.0,
+                    diameter_m: 0.3,
+                    burn_time_s: 25.0,
+                },
+                "adapter",
+                NodeId::Top,
+            )
+            .unwrap();
+        vehicle
+            .add_attached(
+                "pc",
+                PartSpec::Computer {
+                    class: ComputerClass::Basic,
+                },
+                "sustainer",
+                NodeId::Top,
+            )
+            .unwrap();
+        assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
+        assert!(
+            !vehicle.warnings().iter().any(|w| w.contains("diameter step")),
+            "the adapter absorbs both ends: {:?}",
+            vehicle.warnings()
+        );
+        let poses = vehicle.poses();
+        let adapter = poses.iter().find(|pose| pose.id == "adapter").unwrap();
+        let sustainer = poses.iter().find(|pose| pose.id == "sustainer").unwrap();
+        assert!((sustainer.y_m - sustainer.height_m / 2.0 - (adapter.y_m + adapter.height_m / 2.0)).abs() < 1e-9);
+        assert_eq!(dimensions(&vehicle.part("adapter").unwrap().spec), (0.4, 0.3));
+    }
+
+    #[test]
+    fn mounting_size_fits_a_fixed_part_to_a_wider_body() {
+        let mut vehicle = Vehicle::from_stages(
+            "Wide stack",
+            vec![Stage {
+                parts: vec![part(
+                    "booster",
+                    PartSpec::SolidMotor {
+                        length_m: 2.0,
+                        diameter_m: 0.6,
+                        burn_time_s: 20.0,
+                    },
+                )],
+            }],
+        );
+        vehicle
+            .add_attached(
+                "computer",
+                PartSpec::Computer {
+                    class: ComputerClass::Basic,
+                },
+                "booster",
+                NodeId::Top,
+            )
+            .unwrap();
+        assert!(
+            vehicle.warnings().iter().any(|w| w.contains("diameter step")),
+            "the stock computer is narrower than the body: {:?}",
+            vehicle.warnings()
+        );
+        let computer = vehicle.part_mut("computer").unwrap();
+        assert_eq!(computer.diameter_m(), 0.3);
+        computer.size_scale = 2.0;
+        assert_eq!(computer.diameter_m(), 0.6);
+        assert!(
+            !vehicle.warnings().iter().any(|w| w.contains("diameter step")),
+            "the mounting size removes the step: {:?}",
+            vehicle.warnings()
+        );
+        let pose = vehicle.poses().into_iter().find(|pose| pose.id == "computer").unwrap();
+        assert!((pose.radius_m - 0.3).abs() < 1e-9);
+        assert!(
+            (pose.height_m - 0.15).abs() < 1e-9,
+            "the mounting size only widens the part"
+        );
+    }
+
+    #[test]
+    fn a_legacy_save_defaults_the_mounting_size_to_one() {
+        let old = r#"{"schema_version": 7, "name": "Old", "parts": [
+            {"id": "computer", "spec": {"part": "computer", "class": "basic"}, "attach": null}
+        ]}"#;
+        let vehicle: Vehicle = serde_json::from_str(old).unwrap();
+        assert_eq!(vehicle.part("computer").unwrap().size_scale, 1.0);
+    }
+
+    #[test]
+    fn a_nose_cone_is_a_placed_part_with_its_own_dimensions() {
+        let mut vehicle = Vehicle::from_stages(
+            "Nose stack",
+            vec![Stage {
+                parts: vec![part(
+                    "booster",
+                    PartSpec::SolidMotor {
+                        length_m: 2.0,
+                        diameter_m: 0.6,
+                        burn_time_s: 20.0,
+                    },
+                )],
+            }],
+        );
+        vehicle
+            .add_attached(
+                "nose",
+                PartSpec::NoseCone {
+                    length_m: 0.7,
+                    diameter_m: 0.6,
+                    shape: crate::vehicle::NoseShape::Ogive,
+                },
+                "booster",
+                NodeId::Top,
+            )
+            .unwrap();
+        assert_eq!(vehicle.topmost_id().as_deref(), Some("nose"));
+        assert_eq!(dimensions(&vehicle.part("nose").unwrap().spec), (0.7, 0.3));
+        assert!(
+            vehicle.node_status("nose", NodeId::Top, &PartSpec::Decoupler).is_err(),
+            "the nose cone closes the stack"
+        );
+        assert!(
+            !vehicle.warnings().iter().any(|w| w.contains("diameter step")),
+            "a matching nose leaves no step: {:?}",
             vehicle.warnings()
         );
     }
@@ -1504,7 +2009,7 @@ pub(crate) mod tests {
     fn saved_designs_round_trip_and_legacy_files_migrate() {
         let vehicle = sounding_rocket();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":6"), "{json}");
+        assert!(json.contains("\"schema_version\":7"), "{json}");
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
 
@@ -1558,16 +2063,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn radial_symmetry_spaces_copies_evenly() {
+        let vehicle = sounding_rocket();
+        let pair = vehicle.symmetry_placements("booster", SymmetryKind::Radial, 0, 2);
+        assert_eq!(pair.len(), 2, "the pair includes its source");
+        assert_eq!(pair[1].node, NodeId::Radial(2));
+        assert!((pair[1].angle_deg - 0.0).abs() < 1e-6);
+        let trio = vehicle.symmetry_placements("booster", SymmetryKind::Radial, 0, 3);
+        assert_eq!(trio[1].node, NodeId::Radial(5));
+        assert!((trio[1].angle_deg - 345.0).abs() < 1e-6, "{trio:?}");
+        assert_eq!(trio[2].node, NodeId::Radial(6));
+        assert!((trio[2].angle_deg - 15.0).abs() < 1e-6, "{trio:?}");
+        let bilateral = vehicle.symmetry_placements("booster", SymmetryKind::Bilateral, 4, 2);
+        assert_eq!(bilateral[1].node, NodeId::Radial(5));
+        assert!((bilateral[1].angle_deg - 0.0).abs() < 1e-6, "{bilateral:?}");
+        let axial = vehicle.symmetry_placements("booster", SymmetryKind::Axial, 4, 2);
+        assert_eq!(axial[1].node, NodeId::Radial(7));
+        assert!((axial[1].angle_deg - 0.0).abs() < 1e-6, "{axial:?}");
+        let wrapped = vehicle.symmetry_placements("booster", SymmetryKind::Radial, 7, 4);
+        let wrapped_nodes: BTreeSet<NodeId> = wrapped.iter().map(|placement| placement.node).collect();
+        assert_eq!(wrapped.len(), 4);
+        assert_eq!(wrapped_nodes.len(), 4, "targets past 360° wrap around");
+    }
+
+    #[test]
     fn a_surface_set_uses_the_parent_body_slots() {
         let vehicle = sounding_rocket();
         let slots = vehicle.symmetry_slots("booster", &wing(), 0, 4);
         assert_eq!(slots.len(), 4, "a body offers four slots to a wing");
         let decoupler = vehicle.symmetry_slots("dec1", &wing(), 0, 4);
-        assert_eq!(decoupler.len(), 1, "a decoupler has no radial mount");
+        assert_eq!(decoupler.len(), 0, "a decoupler has no radial mount");
     }
 
     #[test]
-    fn schema_three_still_loads_and_is_rewritten_as_five() {
+    fn schema_three_still_loads_and_is_rewritten_as_seven() {
         let old = r#"{
             "schema_version": 3,
             "name": "Schema three",
@@ -1581,15 +2110,15 @@ pub(crate) mod tests {
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
         assert_eq!(vehicle.aero().surface_count, 0);
         let written = serde_json::to_string(&vehicle).unwrap();
-        assert!(written.contains("\"schema_version\":6"), "{written}");
+        assert!(written.contains("\"schema_version\":7"), "{written}");
 
-        let future = r#"{"schema_version": 7, "name": "Future", "parts": []}"#;
+        let future = r#"{"schema_version": 8, "name": "Future", "parts": []}"#;
         let refused = serde_json::from_str::<Vehicle>(future).unwrap_err();
         assert!(refused.to_string().contains("newer"), "{refused}");
     }
 
     #[test]
-    fn schema_four_designs_still_load_and_are_rewritten_as_five() {
+    fn schema_four_designs_still_load_and_are_rewritten_as_seven() {
         let old = r#"{
             "schema_version": 4,
             "name": "Schema four",
@@ -1602,7 +2131,7 @@ pub(crate) mod tests {
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
         assert_eq!(vehicle.avionics().mission_modules, 0);
         let written = serde_json::to_string(&vehicle).unwrap();
-        assert!(written.contains("\"schema_version\":6"), "{written}");
+        assert!(written.contains("\"schema_version\":7"), "{written}");
     }
 
     #[test]
@@ -1654,7 +2183,7 @@ pub(crate) mod tests {
             )
             .unwrap();
         let json = serde_json::to_string(&vehicle).unwrap();
-        assert!(json.contains("\"schema_version\":6"), "{json}");
+        assert!(json.contains("\"schema_version\":7"), "{json}");
         assert!(!json.contains("variable_geometry"));
         let read: Vehicle = serde_json::from_str(&json).unwrap();
         assert_eq!(read, vehicle);
@@ -1687,5 +2216,67 @@ pub(crate) mod tests {
             },
         );
         assert!(vehicle.validate().is_ok(), "{:?}", vehicle.validate());
+    }
+
+    #[test]
+    fn symmetry_group_ids_decode_old_and_new_sets() {
+        let (key, kind, index) = decode_symmetry("sym-4");
+        assert_eq!((key.as_str(), kind, index), ("sym-4", SymmetryKind::Radial, 0));
+        let group = encode_symmetry("sym-9", SymmetryKind::Bilateral, 3);
+        assert_eq!(group, "sym-9-b3");
+        let (key, kind, index) = decode_symmetry(&group);
+        assert_eq!((key.as_str(), kind, index), ("sym-9", SymmetryKind::Bilateral, 3));
+    }
+
+    #[test]
+    fn eight_radial_mounts_and_two_copy_mirrors_are_available() {
+        let vehicle = sounding_rocket();
+        let motor = PartSpec::SolidMotor {
+            length_m: 1.0,
+            diameter_m: 0.2,
+            burn_time_s: 10.0,
+        };
+        assert_eq!(radial_slots(&motor), 8);
+        let radial = vehicle.symmetry_placements("booster", SymmetryKind::Radial, 0, 8);
+        assert_eq!(radial.len(), 8);
+        let nodes: BTreeSet<NodeId> = radial.iter().map(|placement| placement.node).collect();
+        assert_eq!(nodes.len(), 8);
+        assert!((radial_angle(&motor, 1) - 90.0).abs() < 1e-9, "legacy slot");
+        assert!((radial_angle(&motor, 4) - 45.0).abs() < 1e-9, "new slot");
+        for kind in [SymmetryKind::Bilateral, SymmetryKind::Axial] {
+            let mirror = vehicle.symmetry_placements("booster", kind, 0, 2);
+            assert_eq!(mirror.len(), 2);
+            assert_ne!(mirror[0].node, mirror[1].node, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn symmetry_members_are_ordered_by_copy_index() {
+        let mut vehicle = sounding_rocket();
+        let spec = PartSpec::SolidMotor {
+            length_m: 1.0,
+            diameter_m: 0.2,
+            burn_time_s: 10.0,
+        };
+        for (index, node) in [(1u8, NodeId::Radial(2)), (0, NodeId::Radial(0))] {
+            vehicle.parts.push(PlacedPart {
+                id: format!("wing-{index}"),
+                spec,
+                attach: None,
+                symmetry: Some(encode_symmetry("sym-2", SymmetryKind::Axial, index)),
+                size_scale: 1.0,
+            });
+            vehicle.attach(&format!("wing-{index}"), "booster", node, 0.0).unwrap();
+        }
+        assert_eq!(vehicle.symmetry_members("wing-0"), vec!["wing-0", "wing-1"]);
+        assert_eq!(vehicle.symmetry_kind_of("wing-1"), Some(SymmetryKind::Axial));
+    }
+
+    #[test]
+    fn a_second_root_is_reported_by_name() {
+        let mut vehicle = sounding_rocket();
+        vehicle.detach("sustainer").unwrap();
+        let issues = vehicle.validate().unwrap_err().join(" | ");
+        assert!(issues.contains("sustainer is not connected"), "{issues}");
     }
 }

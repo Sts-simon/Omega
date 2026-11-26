@@ -243,6 +243,45 @@ impl SaveSlot {
         Ok(bytes)
     }
 
+    /// Restore the previous generation of one file from its `.bak` sidecar. The manifest is
+    /// updated in the same operation so the recovered bytes are verified normally afterwards.
+    /// This is deliberately explicit: ordinary reads never silently replace a file.
+    pub fn recover_backup(&self, rel: &str) -> Result<Vec<u8>, SlotError> {
+        check_relative(rel)?;
+        let manifest = self
+            .read_manifest()?
+            .ok_or_else(|| SlotError::MissingFile(MANIFEST_FILE.to_string()))?;
+        let backup = self.root.join(format!("{rel}.bak"));
+        let bytes = fs::read(&backup).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                SlotError::MissingFile(format!("{rel}.bak"))
+            } else {
+                SlotError::Io(format!("cannot read {}: {error}", backup.display()))
+            }
+        })?;
+        if bytes.is_empty() {
+            return Err(SlotError::InvalidManifest(format!("empty backup for {rel}")));
+        }
+        let hash = ContentHash::of_bytes(&bytes);
+        write_atomic(&self.root.join(rel), &bytes).map_err(SlotError::Io)?;
+        let mut manifest = manifest;
+        if let Some(entry) = manifest.files.iter_mut().find(|entry| entry.path == rel) {
+            entry.hash = hash;
+            entry.bytes = bytes.len() as u64;
+        } else {
+            manifest.files.push(ManifestEntry {
+                path: rel.to_string(),
+                hash,
+                bytes: bytes.len() as u64,
+            });
+            manifest.files.sort_by(|a, b| a.path.cmp(&b.path));
+        }
+        let manifest_bytes =
+            serde_json::to_vec_pretty(&manifest).map_err(|error| SlotError::Parse(error.to_string()))?;
+        write_atomic(&self.root.join(MANIFEST_FILE), &manifest_bytes).map_err(SlotError::Io)?;
+        Ok(bytes)
+    }
+
     pub fn verify_all(&self) -> Result<Vec<SlotError>, SlotError> {
         let Some(manifest) = self.read_manifest()? else {
             return Ok(Vec::new());
@@ -346,6 +385,27 @@ mod tests {
         assert!(matches!(result, Err(SlotError::Corrupt { .. })));
         assert_eq!(fs::read(slot.root().join("campaign.json")).unwrap(), b"zz");
         assert_eq!(fs::read(slot.root().join("campaign.json.bak")).unwrap(), b"v1");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_explicit_recovery_restores_the_previous_generation_and_keeps_the_manifest_valid() {
+        let dir = temp_dir("recover");
+        let slot = SaveSlot::new(dir.join("s"));
+        slot.commit("0.30.1", &[("campaign.json", b"v1".to_vec())]).unwrap();
+        slot.commit("0.30.1", &[("campaign.json", b"v2".to_vec())]).unwrap();
+        assert_eq!(fs::read(slot.root().join("campaign.json.bak")).unwrap(), b"v1");
+        fs::write(slot.root().join("campaign.json"), b"truncated").unwrap();
+        assert!(matches!(
+            slot.read_verified("campaign.json"),
+            Err(SlotError::Corrupt { .. })
+        ));
+        assert_eq!(slot.recover_backup("campaign.json").unwrap(), b"v1");
+        assert_eq!(slot.read_verified("campaign.json").unwrap(), b"v1");
+        assert!(slot.verify_all().unwrap().is_empty());
+        // The recovered slot is writable again, which is what an interrupted commit needs.
+        slot.commit("0.30.1", &[("campaign.json", b"v3".to_vec())]).unwrap();
+        assert_eq!(slot.read_verified("campaign.json").unwrap(), b"v3");
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -3,13 +3,20 @@
 //! Boards are rebuilt only when what they show changes.
 
 use super::*;
+use crate::inspector::{self, InspectorState};
 use crate::interface::{UiAction, UiActionButton};
+use crate::lab::TrialContext;
+use crate::lab::{DesignMetrics, GoalStatus, budget_ok, goal_statuses};
 use crate::missile::{self, MissileAction, MissileSession, PartTemplate};
 use crate::procurement::{self, EvidenceStatus, Procurement};
-use crate::program_editor::{self, BlockKind, MissileProgramSession, ProgramAction, adjustable, issue_counts};
+use crate::program_editor::{self, BlockKind, Branch, MissileProgramSession, PathStep, ProgramAction, issue_counts};
 use crate::revisions::RevisionLog;
+use crate::scene::{CameraAction, CameraView};
+use crate::subassembly::SubassemblyKind;
+use crate::trial_export;
 use crate::trials::{self, TrialAction, TrialSession};
 use crate::ui_kit::{self, ButtonTone, NavStatus};
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::ui::ScrollPosition;
 use std::collections::HashMap;
@@ -35,6 +42,15 @@ pub(crate) struct ProgramListScroll;
 #[derive(Component)]
 pub(crate) struct ResearchGrid;
 
+/// Marks the scrolling offer list. The dossier stays in its own column, so scrolling the eight
+/// offers never hides the contract being worked on.
+#[derive(Component)]
+pub(crate) struct ContractOfferScroll;
+
+/// Scroll offset of the offer list, kept across board rebuilds.
+#[derive(Resource, Default)]
+pub(crate) struct ContractScroll(pub(crate) f32);
+
 /// Scroll offset of the research grid, kept across board rebuilds.
 #[derive(Resource, Default)]
 pub(crate) struct ResearchScroll(pub(crate) f32);
@@ -42,6 +58,40 @@ pub(crate) struct ResearchScroll(pub(crate) f32);
 /// Marks the scrolling container that holds the workshop stage list.
 #[derive(Component)]
 pub(crate) struct PartListScroll;
+
+/// Marks the scrolling selected-part inspector.
+#[derive(Component)]
+pub(crate) struct InspectorScrollPanel;
+
+/// Scroll offset of the selected-part inspector, kept across board rebuilds.
+#[derive(Resource, Default)]
+pub(crate) struct InspectorScrollOffset(pub(crate) f32);
+
+/// Marks the scrolling assembly-control panel.
+#[derive(Component)]
+pub(crate) struct AssemblyControlPanel;
+
+/// Scroll offset of the assembly-control panel, kept across board rebuilds.
+#[derive(Resource, Default)]
+pub(crate) struct AssemblyControlScroll(pub(crate) f32);
+
+/// Bundles the two inspector resources so `sync_boards` stays below Bevy's system-parameter limit.
+#[derive(SystemParam)]
+pub(crate) struct InspectorPanel<'w> {
+    pub(crate) state: Res<'w, InspectorState>,
+    pub(crate) scroll: Res<'w, InspectorScrollOffset>,
+}
+
+/// The board scroll offsets, grouped for the same reason.
+#[derive(SystemParam)]
+pub(crate) struct BoardScrolls<'w> {
+    contract: Res<'w, ContractScroll>,
+    research: Res<'w, ResearchScroll>,
+    workshop: Res<'w, WorkshopScroll>,
+    workshop_palette: Res<'w, WorkshopPaletteScroll>,
+    program_palette: Res<'w, ProgramPaletteScroll>,
+    assembly: Res<'w, AssemblyControlScroll>,
+}
 
 /// Scroll offset of the workshop stage list, kept across board rebuilds.
 #[derive(Resource, Default)]
@@ -109,7 +159,7 @@ pub(crate) fn setup_boards(mut commands: Commands) {
     }
 }
 
-fn heading(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>) {
+pub(crate) fn heading(parent: &mut ChildSpawnerCommands<'_>, text: impl Into<String>) {
     parent
         .spawn(Node {
             margin: UiRect {
@@ -292,6 +342,10 @@ fn requirement_text(requirement: &omega_rules::Requirement) -> String {
         "path_length_m" => format!("{label} ≥ {:.0} km", requirement.limit / 1_000.0),
         "max_speed_ms" => format!("{label} ≥ {:.0} m/s", requirement.limit),
         "launch_mass_kg" => format!("{label} ≤ {:.0} kg", requirement.limit),
+        "payload_kg" => format!("{label} ≥ {:.0} kg", requirement.limit),
+        "payload_yield_kg" => format!("{label} ≥ {:.0} kg", requirement.limit),
+        "discretion" => format!("{label} ≥ {:.0}/100", requirement.limit),
+        "max_altitude_m" => format!("{label} ≥ {:.1} km", requirement.limit / 1_000.0),
         _ => format!("{label} requis"),
     }
 }
@@ -351,8 +405,15 @@ fn missile_offer_card(
             })
             .with_children(|top| {
                 ui_kit::chip(top, offer.mission_family.label(), color);
-                ui_kit::chip(top, offer.vehicle_family.label(), ui_kit::NEUTRAL);
                 difficulty_bar(top, offer.difficulty);
+            });
+            card.spawn(Node {
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|meta| {
+                ui_kit::chip(meta, offer.profile_label(), color);
+                ui_kit::chip(meta, offer.vehicle_family.label(), ui_kit::NEUTRAL);
             });
             card.spawn(Node {
                 min_height: Val::Px(34.0),
@@ -360,7 +421,48 @@ fn missile_offer_card(
             })
             .with_children(|t| ui_kit::label(t, offer.title.clone(), 14.0, ui_kit::TEXT));
             ui_kit::label(card, offer.client.clone(), 10.0, ui_kit::TEXT_DIM);
-            for requirement in offer.missile_requirements().iter().take(4) {
+            ui_kit::label(card, offer.brief.clone(), 9.5, ui_kit::TEXT_DIM);
+            ui_kit::label(card, offer.context.clone(), 8.5, ui_kit::TEXT_DIM);
+            ui_kit::label(
+                card,
+                format!(
+                    "Budget {} cr | dossier : {} sections",
+                    ui_kit::thousands(offer.design_budget_cr),
+                    offer.requested_dossier.len()
+                ),
+                9.0,
+                ui_kit::ACCENT,
+            );
+            for goal in &offer.primary_goals {
+                ui_kit::label(card, format!("PRIMAIRE  {}", goal.text()), 9.0, ui_kit::TEXT);
+            }
+            if !offer.secondary_goals.is_empty() {
+                for goal in &offer.secondary_goals {
+                    ui_kit::label(card, format!("SECONDAIRE  {}", goal.text()), 8.5, ui_kit::TEXT_DIM);
+                }
+                ui_kit::label(
+                    card,
+                    format!("Bonus secondaire +{} cr", ui_kit::thousands(offer.secondary_bonus_cr)),
+                    9.0,
+                    ui_kit::GOOD,
+                );
+            }
+            let requirements = offer.missile_requirements();
+            let mut shown: Vec<&omega_rules::Requirement> = Vec::new();
+            for id in ["PAYLOAD", "YIELD", "DISCRETION", "CEILING", "RANGE", "SPEED"] {
+                if let Some(requirement) = requirements.iter().find(|requirement| requirement.id == id) {
+                    shown.push(requirement);
+                }
+            }
+            for requirement in &requirements {
+                if shown.len() >= 4 {
+                    break;
+                }
+                if !shown.iter().any(|known| known.id == requirement.id) {
+                    shown.push(requirement);
+                }
+            }
+            for requirement in shown.into_iter().take(4) {
                 ui_kit::label(card, requirement_text(requirement), 10.0, ui_kit::TEXT);
             }
             card.spawn(Node {
@@ -411,6 +513,9 @@ fn missile_active_card(
     deadline_passed: bool,
     score: Option<f64>,
     ready: bool,
+    metrics: DesignMetrics,
+    primary: &[GoalStatus],
+    secondary: &[GoalStatus],
 ) {
     let color = contract_color(active.offer.mission_family);
     let (mut node, mut bg, border) = ui_kit::card_node(Val::Px(560.0), color);
@@ -436,6 +541,7 @@ fn missile_active_card(
                 ui_kit::chip(top, label, tone);
                 ui_kit::chip(top, format!("#{:04}", active.offer.id), ui_kit::NEUTRAL);
                 ui_kit::chip(top, active.offer.mission_family.label(), color);
+                ui_kit::chip(top, active.offer.profile_label(), ui_kit::ACCENT);
                 if selected {
                     ui_kit::chip(top, "SELECTED", ui_kit::ACCENT);
                 }
@@ -476,6 +582,44 @@ fn missile_active_card(
                     "No trial yet. Fly the vehicle and program in TRIALS to record evidence.",
                     10.0,
                     ui_kit::TEXT_DIM,
+                );
+            }
+            ui_kit::label(
+                card,
+                format!(
+                    "Budget {} / {} cr | masse {:.0} kg | fiabilité {:.0}/100 | complexité {:.0}/100",
+                    metrics.cost_cr.round(),
+                    active.offer.design_budget_cr,
+                    metrics.mass_kg,
+                    metrics.reliability,
+                    metrics.complexity
+                ),
+                9.5,
+                if budget_ok(&active.offer, &metrics) {
+                    ui_kit::TEXT_DIM
+                } else {
+                    ui_kit::BAD
+                },
+            );
+            for goal in primary {
+                ui_kit::label(
+                    card,
+                    format!("{}  {}", if goal.met { "OK" } else { "KO" }, goal.text()),
+                    9.5,
+                    if goal.met { ui_kit::GOOD } else { ui_kit::BAD },
+                );
+            }
+            if !secondary.is_empty() {
+                let bonus_ready = secondary.iter().all(|goal| goal.met);
+                ui_kit::label(
+                    card,
+                    format!(
+                        "Bonus secondaire {} | +{} cr",
+                        if bonus_ready { "acquis" } else { "non acquis" },
+                        ui_kit::thousands(active.offer.secondary_bonus_cr)
+                    ),
+                    9.0,
+                    if bonus_ready { ui_kit::GOOD } else { ui_kit::TEXT_DIM },
                 );
             }
             card.spawn(Node {
@@ -526,15 +670,80 @@ fn missile_dossier_panel(
     active: &procurement::ActiveContract,
     vehicle: &omega_rules::Vehicle,
     program: &omega_rules::Program,
+    log: &RevisionLog,
 ) {
     ui_kit::label(panel, active.offer.title.clone(), 11.5, ui_kit::TEXT);
+    ui_kit::label(panel, active.offer.profile_label(), 9.5, ui_kit::ACCENT);
     ui_kit::label(
         panel,
         format!("Accepted day {} | due day {}", active.accepted_day, active.due_day()),
         9.5,
         ui_kit::TEXT_DIM,
     );
+    ui_kit::label(panel, active.offer.brief.clone(), 9.0, ui_kit::TEXT_DIM);
+    ui_kit::label(panel, active.offer.context.clone(), 8.5, ui_kit::TEXT_DIM);
+    let flying = omega_rules::VehicleFamily::of_vehicle(vehicle);
+    if active.offer.profile.is_some() && flying != active.offer.vehicle_family {
+        ui_kit::label(
+            panel,
+            format!(
+                "PROFIL INCOMPATIBLE : cet appareil vole en {} ; le contrat demande {}.",
+                flying.label(),
+                active.offer.vehicle_family.label()
+            ),
+            9.0,
+            ui_kit::BAD,
+        );
+    }
     let dossier = procurement.dossier_for(active, vehicle, program);
+    let metrics = DesignMetrics::of(vehicle);
+    let primary = goal_statuses(&active.offer.primary_goals, &metrics);
+    let secondary = goal_statuses(&active.offer.secondary_goals, &metrics);
+    ui_kit::label(
+        panel,
+        format!(
+            "Budget {} cr | coût {:.0} cr | masse {:.0} kg",
+            ui_kit::thousands(active.offer.design_budget_cr),
+            metrics.cost_cr,
+            metrics.mass_kg
+        ),
+        9.0,
+        if budget_ok(&active.offer, &metrics) {
+            ui_kit::GOOD
+        } else {
+            ui_kit::BAD
+        },
+    );
+    for goal in &primary {
+        ui_kit::label(
+            panel,
+            format!("Principal : {}", goal.text()),
+            9.0,
+            if goal.met { ui_kit::GOOD } else { ui_kit::BAD },
+        );
+    }
+    for goal in &secondary {
+        ui_kit::label(
+            panel,
+            format!("Secondaire : {}", goal.text()),
+            8.5,
+            if goal.met { ui_kit::GOOD } else { ui_kit::TEXT_DIM },
+        );
+    }
+    ui_kit::label(
+        panel,
+        if log.head().is_some() {
+            format!(
+                "Version à soumettre : revision {} ({})",
+                log.head().map_or(0, |revision| revision.id),
+                log.head().map_or("", |revision| revision.label.as_str())
+            )
+        } else {
+            "Aucune version enregistrée : la livraison utilisera l'état courant.".to_string()
+        },
+        8.5,
+        ui_kit::ACCENT,
+    );
     let requirements = active.offer.missile_requirements();
     for (requirement, row) in requirements.iter().zip(&dossier.matrix) {
         let (badge, color) = requirement_badge(&row.status);
@@ -605,6 +814,12 @@ fn missile_dossier_panel(
             ui_kit::TEXT_DIM,
         );
     }
+    ui_kit::label(
+        panel,
+        format!("Dossier demandé : {}", active.offer.requested_dossier.join(" · ")),
+        8.0,
+        ui_kit::TEXT_DIM,
+    );
 }
 
 fn build_missile_contracts(
@@ -613,6 +828,8 @@ fn build_missile_contracts(
     procurement: &Procurement,
     vehicle: &omega_rules::Vehicle,
     program: &omega_rules::Program,
+    log: &RevisionLog,
+    scroll: f32,
 ) {
     let max_active = campus.max_active_projects();
     let can_accept = procurement.active().len() < max_active;
@@ -620,6 +837,8 @@ fn build_missile_contracts(
         flex_direction: FlexDirection::Column,
         flex_grow: 2.0,
         flex_basis: Val::Px(0.0),
+        height: Val::Percent(100.0),
+        min_height: Val::Px(0.0),
         row_gap: Val::Px(10.0),
         ..default()
     })
@@ -660,61 +879,95 @@ fn build_missile_contracts(
                 ui_kit::NEUTRAL,
             );
         });
-        heading(left, "OFFERS");
         left.spawn(Node {
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(10.0),
-            row_gap: Val::Px(10.0),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
+            margin: UiRect {
+                top: Val::Px(4.0),
+                ..default()
+            },
             ..default()
         })
-        .with_children(|offers| {
-            if procurement.offers().is_empty() {
-                ui_kit::label(
-                    offers,
-                    "No offers from the researched families. Deliver a contract, or research a new family:",
-                    11.0,
-                    ui_kit::TEXT_DIM,
-                );
-            }
-            for hint in locked_family_hints(campus) {
-                ui_kit::label(offers, format!("- {hint}"), 10.0, ui_kit::TEXT_DIM);
-            }
-            for (index, offer) in procurement.offers().iter().enumerate() {
-                missile_offer_card(offers, index, offer, can_accept);
-            }
+        .with_children(|head| {
+            ui_kit::label(head, "OFFERS", 11.0, ui_kit::TEXT_DIM);
+            ui_kit::label(head, "MOLETTE : PARCOURIR", 9.0, ui_kit::TEXT_DIM);
         });
-        heading(
-            left,
-            format!("ACTIVE CONTRACTS  {}/{}", procurement.active().len(), max_active),
-        );
-        left.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            ..default()
-        })
-        .with_children(|actives| {
-            if procurement.active().is_empty() {
-                ui_kit::label(
-                    actives,
-                    "None. Accept an offer above; the trials you fly afterwards become its evidence.",
-                    11.0,
-                    ui_kit::TEXT_DIM,
-                );
-            }
-            for active in procurement.active() {
-                let status = procurement.status_for(active, vehicle, program);
-                let dossier = procurement.dossier_for(active, vehicle, program);
-                let ready = active.offer.accepts_dossier(&dossier);
-                missile_active_card(
-                    actives,
-                    active,
-                    status,
-                    procurement.selected_id() == Some(active.offer.id),
-                    campus.day > active.due_day(),
-                    Some(dossier.score),
-                    ready,
-                );
-            }
+        left.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                row_gap: Val::Px(10.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            ScrollPosition(Vec2::new(0.0, scroll)),
+            ContractOfferScroll,
+        ))
+        .with_children(|scroll| {
+            scroll
+                .spawn(Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(10.0),
+                    row_gap: Val::Px(10.0),
+                    ..default()
+                })
+                .with_children(|offers| {
+                    if procurement.offers().is_empty() {
+                        ui_kit::label(
+                            offers,
+                            "No offers from the researched families. Deliver a contract, or research a new family:",
+                            11.0,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
+                    for hint in locked_family_hints(campus) {
+                        ui_kit::label(offers, format!("- {hint}"), 10.0, ui_kit::TEXT_DIM);
+                    }
+                    for (index, offer) in procurement.offers().iter().enumerate() {
+                        missile_offer_card(offers, index, offer, can_accept);
+                    }
+                });
+            heading(
+                scroll,
+                format!("ACTIVE CONTRACTS  {}/{}", procurement.active().len(), max_active),
+            );
+            scroll
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(10.0),
+                    ..default()
+                })
+                .with_children(|actives| {
+                    if procurement.active().is_empty() {
+                        ui_kit::label(
+                            actives,
+                            "None. Accept an offer above; the trials you fly afterwards become its evidence.",
+                            11.0,
+                            ui_kit::TEXT_DIM,
+                        );
+                    }
+                    for active in procurement.active() {
+                        let status = procurement.status_for(active, vehicle, program);
+                        let dossier = procurement.dossier_for(active, vehicle, program);
+                        let ready = active.offer.accepts_dossier(&dossier);
+                        let metrics = DesignMetrics::of(vehicle);
+                        let primary = goal_statuses(&active.offer.primary_goals, &metrics);
+                        let secondary = goal_statuses(&active.offer.secondary_goals, &metrics);
+                        missile_active_card(
+                            actives,
+                            active,
+                            status,
+                            procurement.selected_id() == Some(active.offer.id),
+                            campus.day > active.due_day(),
+                            Some(dossier.score),
+                            ready,
+                            metrics,
+                            &primary,
+                            &secondary,
+                        );
+                    }
+                });
         });
     });
     root.spawn((
@@ -722,6 +975,8 @@ fn build_missile_contracts(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
             flex_basis: Val::Px(0.0),
+            align_self: AlignSelf::Stretch,
+            min_height: Val::Px(0.0),
             row_gap: Val::Px(7.0),
             padding: UiRect::all(Val::Px(14.0)),
             border_radius: BorderRadius::all(Val::Px(7.0)),
@@ -739,7 +994,7 @@ fn build_missile_contracts(
                 10.0,
                 ui_kit::TEXT_DIM,
             ),
-            Some(active) => missile_dossier_panel(panel, procurement, active, vehicle, program),
+            Some(active) => missile_dossier_panel(panel, procurement, active, vehicle, program, log),
         }
         heading(panel, "DELIVERED");
         if procurement.completed().is_empty() {
@@ -749,11 +1004,15 @@ fn build_missile_contracts(
                 ui_kit::label(
                     panel,
                     format!(
-                        "#{} {} | +{} cr | {}%",
+                        "#{} {} | +{} cr | {}% | rev {} | bonus {}",
                         contract.id,
                         contract.title,
                         ui_kit::thousands(contract.reward),
-                        contract.score_percent
+                        contract.score_percent,
+                        contract
+                            .revision_id
+                            .map_or_else(|| "-".to_string(), |id| id.to_string()),
+                        ui_kit::thousands(contract.secondary_bonus)
                     ),
                     9.0,
                     ui_kit::TEXT_DIM,
@@ -775,13 +1034,78 @@ fn department_color(dept: omega_rules::Department) -> Color {
     }
 }
 
+fn research_tier(tree: &[omega_rules::TechNode], id: &str, memo: &mut HashMap<String, usize>) -> usize {
+    if let Some(tier) = memo.get(id) {
+        return *tier;
+    }
+    let Some(node) = tree.iter().find(|node| node.id == id) else {
+        return 0;
+    };
+    let tier = node
+        .prereqs
+        .iter()
+        .map(|prereq| research_tier(tree, prereq, memo) + 1)
+        .max()
+        .unwrap_or(0);
+    memo.insert(id.to_string(), tier);
+    tier
+}
+
+/// Parts and possibilities a technology actually unlocks. Empty entries are filtered so the tree
+/// never claims a technology is useful when it grants no part or campaign slot.
+fn research_unlocks(tech: &omega_rules::TechNode) -> String {
+    use omega_rules::{Grant, capability_label};
+    let mut names = Vec::new();
+    for grant in &tech.grants {
+        match grant {
+            Grant::Capability(capability) => {
+                let parts: Vec<&str> = PartTemplate::ALL
+                    .iter()
+                    .filter(|template| template.spec().required_capability() == capability)
+                    .map(|template| template.label())
+                    .collect();
+                if parts.is_empty() {
+                    names.push(format!("capacité {}", capability_label(capability)));
+                } else {
+                    names.extend(parts.into_iter().map(str::to_string));
+                }
+            }
+            Grant::ExtraActiveProjects(slots) => {
+                names.push(format!("+{slots} projet(s) de contrat actif(s)"));
+            }
+        }
+    }
+    if names.is_empty() {
+        "aucun déblocage direct".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
 fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, scroll: f32) {
     use omega_rules::{Department, ResearchError, default_tree};
     let tree = default_tree();
+    let mut tiers = HashMap::new();
+    let completed = campus.research.completed.len();
+    let owned = campus.research.owned_capabilities(&tree).len();
+    let available: Vec<(usize, &omega_rules::TechNode)> = tree
+        .iter()
+        .enumerate()
+        .filter(|(_, tech)| {
+            !campus.research.is_completed(&tech.id)
+                && campus
+                    .research
+                    .active
+                    .as_ref()
+                    .is_none_or(|active| active.id != tech.id)
+                && tech.prereqs.iter().all(|prereq| campus.research.is_completed(prereq))
+        })
+        .collect();
+    let total_cost: u64 = tree.iter().map(|tech| tech.cost_cr).sum();
     root.spawn(Node {
         flex_direction: FlexDirection::Column,
         flex_grow: 1.0,
-        row_gap: Val::Px(12.0),
+        row_gap: Val::Px(10.0),
         ..default()
     })
     .with_children(|col| {
@@ -802,8 +1126,8 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, scr
                     Some(active) => {
                         let label = tree
                             .iter()
-                            .find(|t| t.id == active.id)
-                            .map_or(active.id.as_str(), |t| t.label.as_str());
+                            .find(|tech| tech.id == active.id)
+                            .map_or(active.id.as_str(), |tech| tech.label.as_str());
                         format!(
                             "Researching: {label} - {} day(s) left. One project at a time; press NEXT DAY to advance.",
                             active.days_left
@@ -813,10 +1137,56 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, scr
                 };
                 ui_kit::label(title, status, 10.5, ui_kit::TEXT_DIM);
             });
+            ui_kit::chip(head, format!("{completed}/{} RESEARCHED", tree.len()), ui_kit::GOOD);
+            ui_kit::chip(head, format!("{} CAPABILITIES", owned), ui_kit::PURPLE);
+            ui_kit::chip(head, format!("{} AVAILABLE", available.len()), ui_kit::ACCENT);
             ui_kit::chip(head, format!("DAY {}", campus.day), ui_kit::NEUTRAL);
             ui_kit::chip(head, format!("{} cr", ui_kit::thousands(campus.credits)), ui_kit::GOOD);
             ui_kit::button(head, "NEXT DAY", UiAction::NextDay, ButtonTone::Primary, Val::Px(130.0));
         });
+
+        // The comparison strip is deliberately compact: it answers "what can I start now, and what
+        // does each choice unlock?" before the player scrolls through six department columns.
+        if !available.is_empty() {
+            let mut comparable = available.clone();
+            comparable.sort_by_key(|(_, tech)| (tech.cost_cr, tech.duration_days));
+            col.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                ..default()
+            })
+            .insert(BackgroundColor(ui_kit::PANEL))
+            .with_children(|panel| {
+                ui_kit::label(panel, "COMPARER LES TECHNOLOGIES DISPONIBLES", 10.0, ui_kit::ACCENT);
+                for (_, tech) in comparable.iter().take(6) {
+                    ui_kit::label(
+                        panel,
+                        format!(
+                            "{} — {} cr / {} j — débloque : {}",
+                            tech.label,
+                            ui_kit::thousands(tech.cost_cr),
+                            tech.duration_days,
+                            research_unlocks(tech)
+                        ),
+                        8.8,
+                        ui_kit::TEXT_DIM,
+                    );
+                }
+                ui_kit::label(
+                    panel,
+                    format!(
+                        "{} cr pour terminer l'arbre · {} technologie(s) au total · une seule recherche à la fois",
+                        ui_kit::thousands(total_cost),
+                        tree.len()
+                    ),
+                    8.2,
+                    ui_kit::TEXT_DIM,
+                );
+            });
+        }
+
         // A department can hold more cards than fit under the window, so the grid scrolls
         // instead of drawing cards nobody can reach at the bottom of the screen.
         col.spawn((
@@ -834,6 +1204,15 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, scr
         .with_children(|grid| {
             for dept in Department::ALL {
                 let color = department_color(dept);
+                let dept_techs: Vec<(usize, &omega_rules::TechNode)> = tree
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tech)| tech.department == dept)
+                    .collect();
+                let done = dept_techs
+                    .iter()
+                    .filter(|(_, tech)| campus.research.is_completed(&tech.id))
+                    .count();
                 grid.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
@@ -844,54 +1223,110 @@ fn build_research(root: &mut ChildSpawnerCommands<'_>, campus: &CampusState, scr
                 .with_children(|column| {
                     column
                         .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(2.0),
                             padding: UiRect::bottom(Val::Px(2.0)),
                             ..default()
                         })
-                        .with_children(|h| ui_kit::label(h, dept.label(), 11.0, color));
-                    for (index, tech) in tree.iter().enumerate().filter(|(_, t)| t.department == dept) {
+                        .with_children(|h| {
+                            ui_kit::label(h, format!("{}  {done}/{}", dept.label(), dept_techs.len()), 11.0, color);
+                            let mut lane: Vec<&omega_rules::TechNode> =
+                                dept_techs.iter().map(|(_, tech)| *tech).collect();
+                            lane.sort_by_key(|tech| (research_tier(&tree, &tech.id, &mut tiers), &tech.label));
+                            let path: Vec<String> = lane
+                                .iter()
+                                .map(|tech| {
+                                    format!("T{} {}", research_tier(&tree, &tech.id, &mut tiers) + 1, tech.label)
+                                })
+                                .collect();
+                            ui_kit::label(h, format!("PARCOURS : {}", path.join("  →  ")), 8.0, ui_kit::TEXT_DIM);
+                        });
+                    for (index, tech) in dept_techs {
+                        let tier = research_tier(&tree, &tech.id, &mut tiers);
                         let (mut node, bg, border) = ui_kit::card_node(Val::Percent(100.0), color);
-                        node.row_gap = Val::Px(5.0);
+                        node.row_gap = Val::Px(4.0);
                         column
                             .spawn((node, bg, border, UiInteraction::None))
                             .with_children(|card| {
+                                card.spawn(Node {
+                                    align_items: AlignItems::Center,
+                                    column_gap: Val::Px(4.0),
+                                    ..default()
+                                })
+                                .with_children(|top| {
+                                    ui_kit::chip(top, format!("PALIER {}", tier + 1), color);
+                                    if let Some(prereq) = tech.prereqs.first() {
+                                        let name = tree
+                                            .iter()
+                                            .find(|candidate| &candidate.id == prereq)
+                                            .map_or(prereq.as_str(), |candidate| candidate.label.as_str());
+                                        ui_kit::chip(top, format!("APRÈS {name}"), ui_kit::NEUTRAL);
+                                    }
+                                });
                                 ui_kit::label(card, tech.label.clone(), 13.0, ui_kit::TEXT);
-                                ui_kit::label(card, tech.description.clone(), 10.0, ui_kit::TEXT_DIM);
+                                ui_kit::label(card, tech.description.clone(), 9.5, ui_kit::TEXT_DIM);
                                 ui_kit::label(
                                     card,
-                                    format!("{} cr | {} days", ui_kit::thousands(tech.cost_cr), tech.duration_days),
-                                    10.5,
+                                    format!("DÉBLOQUE : {}", research_unlocks(tech)),
+                                    9.0,
+                                    ui_kit::ACCENT,
+                                );
+                                ui_kit::label(
+                                    card,
+                                    format!("{} cr | {} jours", ui_kit::thousands(tech.cost_cr), tech.duration_days),
+                                    10.0,
                                     Color::srgb(0.78, 0.84, 0.88),
                                 );
                                 if !tech.prereqs.is_empty() {
-                                    let names: Vec<&str> = tech
+                                    let names: Vec<String> = tech
                                         .prereqs
                                         .iter()
-                                        .filter_map(|p| tree.iter().find(|t| &t.id == p).map(|t| t.label.as_str()))
+                                        .map(|prereq| {
+                                            let label = tree
+                                                .iter()
+                                                .find(|candidate| &candidate.id == prereq)
+                                                .map_or(prereq.as_str(), |candidate| candidate.label.as_str());
+                                            if campus.research.is_completed(prereq) {
+                                                format!("{label} OK")
+                                            } else {
+                                                format!("{label} requis")
+                                            }
+                                        })
                                         .collect();
                                     ui_kit::label(
                                         card,
-                                        format!("Requires: {}", names.join(", ")),
-                                        9.5,
+                                        format!("Dépendances : {}", names.join(", ")),
+                                        8.5,
                                         ui_kit::TEXT_DIM,
                                     );
                                 }
                                 if campus.research.is_completed(&tech.id) {
                                     card.spawn(Node::default())
                                         .with_children(|c| ui_kit::chip(c, "RESEARCHED", ui_kit::GOOD));
-                                } else if campus.research.active.as_ref().is_some_and(|a| a.id == tech.id) {
-                                    let left = campus.research.active.as_ref().map_or(0, |a| a.days_left);
+                                } else if campus
+                                    .research
+                                    .active
+                                    .as_ref()
+                                    .is_some_and(|active| active.id == tech.id)
+                                {
+                                    let left = campus.research.active.as_ref().map_or(0, |active| active.days_left);
                                     card.spawn(Node::default()).with_children(|c| {
                                         ui_kit::chip(c, format!("{left} DAY(S) LEFT"), ui_kit::PURPLE)
                                     });
                                 } else {
                                     match campus.research.can_start(&tree, &tech.id, campus.credits) {
-                                        Ok(()) => ui_kit::button(
-                                            card,
-                                            "START RESEARCH",
-                                            UiAction::StartResearch(index),
-                                            ButtonTone::Primary,
-                                            Val::Percent(100.0),
-                                        ),
+                                        Ok(()) => {
+                                            if tech.prereqs.is_empty() {
+                                                ui_kit::chip(card, "NOUVELLE POSSIBILITÉ", ui_kit::GOOD);
+                                            }
+                                            ui_kit::button(
+                                                card,
+                                                "START RESEARCH",
+                                                UiAction::StartResearch(index),
+                                                ButtonTone::Primary,
+                                                Val::Percent(100.0),
+                                            );
+                                        }
                                         Err(ResearchError::MissingPrerequisite(_)) => {
                                             card.spawn(Node::default())
                                                 .with_children(|c| ui_kit::chip(c, "LOCKED", ui_kit::NEUTRAL));
@@ -953,6 +1388,13 @@ fn part_title(spec: &omega_rules::PartSpec) -> &'static str {
         } => "Ordinateur de bord avancé",
         PartSpec::Decoupler => "Séparateur",
         PartSpec::MissionModule { .. } => "Module de mission",
+        PartSpec::Explosive { grade, .. } => match grade {
+            omega_rules::ExplosiveGrade::Standard => "Charge explosive",
+            omega_rules::ExplosiveGrade::Improved => "Charge explosive améliorée",
+            omega_rules::ExplosiveGrade::Advanced => "Charge explosive avancée",
+        },
+        PartSpec::Adapter { .. } => "Adaptateur",
+        PartSpec::NoseCone { .. } => "Coiffe",
         PartSpec::Wing { .. } => "Aile",
         PartSpec::FinSet { .. } => "Jeu d'ailettes",
         PartSpec::ControlSurface { .. } => "Surface de commande",
@@ -997,7 +1439,7 @@ fn block_name_fr(kind: &str) -> &'static str {
     }
 }
 
-fn spec_summary(spec: &omega_rules::PartSpec) -> String {
+pub(crate) fn spec_summary(spec: &omega_rules::PartSpec) -> String {
     use omega_rules::PartSpec::*;
     match *spec {
         SolidMotor {
@@ -1012,6 +1454,35 @@ fn spec_summary(spec: &omega_rules::PartSpec) -> String {
         LiquidEngine { scale } => format!("Moteur liquide · ×{scale:.1}"),
         AirBreathing { scale } => format!("Propulseur à air · ×{scale:.1}"),
         MissionModule { mass_kg } => format!("Module de mission · {mass_kg:.0} kg"),
+        Explosive { mass_kg, grade } => {
+            let stats = spec.stats();
+            let grade = match grade {
+                omega_rules::ExplosiveGrade::Standard => "standard",
+                omega_rules::ExplosiveGrade::Improved => "améliorée",
+                omega_rules::ExplosiveGrade::Advanced => "avancée",
+            };
+            format!(
+                "Charge {grade} · {mass_kg:.0} kg · rendement {:.0} kg",
+                stats.payload_yield_kg
+            )
+        }
+        Adapter {
+            length_m,
+            diameter_m,
+            exit_diameter_m,
+            shape,
+        } => format!(
+            "Adaptateur {} · {length_m:.2} m · Ø {diameter_m:.2} → {exit_diameter_m:.2} m",
+            ui_kit::fr(shape.label())
+        ),
+        NoseCone {
+            length_m,
+            diameter_m,
+            shape,
+        } => format!(
+            "Coiffe {} · {length_m:.2} m · Ø {diameter_m:.2} m",
+            ui_kit::fr(shape.label())
+        ),
         Wing {
             span_m,
             chord_m,
@@ -1148,7 +1619,7 @@ fn param_row(parent: &mut ChildSpawnerCommands<'_>, param: missile::Param, value
         });
 }
 
-fn score_color(value: f64) -> Color {
+pub(crate) fn score_color(value: f64) -> Color {
     if value < 30.0 {
         ui_kit::BAD
     } else if value < 55.0 {
@@ -1158,7 +1629,7 @@ fn score_color(value: f64) -> Color {
     }
 }
 
-fn panel_node(width: Val) -> (Node, BackgroundColor, UiInteraction) {
+pub(crate) fn panel_node(width: Val) -> (Node, BackgroundColor, UiInteraction) {
     (
         Node {
             width,
@@ -1173,14 +1644,108 @@ fn panel_node(width: Val) -> (Node, BackgroundColor, UiInteraction) {
     )
 }
 
+/// Small fixed-width star beside a palette entry; a full button's padding would clip it in the
+/// 252 px column.
+fn palette_favorite(cell: &mut ChildSpawnerCommands<'_>, template: PartTemplate, favorite: bool) {
+    let tone = if favorite {
+        ButtonTone::Primary
+    } else {
+        ButtonTone::Ghost
+    };
+    cell.spawn((
+        UiInteraction::default(),
+        bevy::ui::FocusPolicy::Block,
+        Node {
+            width: Val::Px(22.0),
+            min_height: Val::Px(28.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(3.0)),
+            ..default()
+        },
+        BackgroundColor(tone.background(UiInteraction::None)),
+        tone,
+        UiActionButton(UiAction::Missile(MissileAction::ToggleFavorite(template))),
+    ))
+    .with_children(|b| {
+        ui_kit::label(b, if favorite { "*" } else { "+" }, 12.0, ui_kit::TEXT);
+    });
+}
+
+/// Compact square control used by the assembly tree rows (collapse, group, rename, lock, hide).
+fn tree_control(row: &mut ChildSpawnerCommands<'_>, text: &str, action: UiAction, on: bool) {
+    let tone = if on { ButtonTone::Secondary } else { ButtonTone::Ghost };
+    row.spawn((
+        UiInteraction::default(),
+        bevy::ui::FocusPolicy::Block,
+        Node {
+            width: Val::Px(22.0),
+            min_height: Val::Px(28.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(3.0)),
+            ..default()
+        },
+        BackgroundColor(tone.background(UiInteraction::None)),
+        tone,
+        UiActionButton(action),
+    ))
+    .with_children(|b| {
+        ui_kit::label(b, text, 9.0, if on { ui_kit::TEXT } else { ui_kit::TEXT_DIM });
+    });
+}
+
+/// Two palette entries per row, each with its favourite toggle. The entries keep their drag data
+/// through `spawn_palette_button`; the star is a plain action button beside them.
+fn palette_grid(
+    panel: &mut ChildSpawnerCommands<'_>,
+    templates: &[PartTemplate],
+    session: &MissileSession,
+    owned: &std::collections::BTreeSet<String>,
+) {
+    for entries in templates.chunks(2) {
+        panel
+            .spawn(Node {
+                width: Val::Percent(100.0),
+                column_gap: Val::Px(3.0),
+                ..default()
+            })
+            .with_children(|row| {
+                for template in entries {
+                    row.spawn(Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        column_gap: Val::Px(2.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|cell| {
+                        crate::workshop::spawn_palette_button(
+                            cell,
+                            *template,
+                            owned.contains(template.spec().required_capability()),
+                        );
+                        let favorite = session.favorites.contains(template);
+                        palette_favorite(cell, *template, favorite);
+                    });
+                }
+            });
+    }
+}
+
 fn build_missile(
     root: &mut ChildSpawnerCommands<'_>,
     campus: &CampusState,
     session: &MissileSession,
     log: &RevisionLog,
+    trials: &TrialSession,
     procurement: &Procurement,
+    inspector: &InspectorState,
+    preview_image: &Handle<Image>,
     scroll: f32,
     palette_scroll: f32,
+    inspector_scroll: f32,
+    assembly_scroll: f32,
 ) {
     let owned = campus.owned_capabilities();
     let vehicle = &session.vehicle;
@@ -1217,6 +1782,95 @@ fn build_missile(
                     WorkshopPaletteList,
                 ))
                 .with_children(|panel| {
+            heading(panel, "RECHERCHE");
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|row| {
+                    let query = if session.palette_search.is_empty() {
+                        "/ : rechercher une piece...".to_string()
+                    } else {
+                        format!("\"{}\"", session.palette_search)
+                    };
+                    ui_kit::label(row, query, 9.5, ui_kit::TEXT);
+                    if !session.palette_search.is_empty() {
+                        ui_kit::button(
+                            row,
+                            "EFFACER",
+                            UiAction::Missile(MissileAction::ClearPaletteSearch),
+                            ButtonTone::Ghost,
+                            Val::Px(58.0),
+                        );
+                    }
+                });
+            // A render-to-texture camera shows the hovered part in the palette itself.
+            let mut preview = ImageNode::new(preview_image.clone());
+            preview.image_mode = bevy::ui::widget::NodeImageMode::Stretch;
+            panel.spawn((
+                preview,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(104.0),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(ui_kit::CARD),
+            ));
+            panel.spawn((
+                Text::new("Survolez une piece"),
+                TextFont {
+                    font_size: FontSize::Px(9.0),
+                    ..default()
+                },
+                TextColor(ui_kit::TEXT_DIM),
+                crate::workshop::PaletteHintText,
+            ));
+            heading(panel, "CAMERA");
+            for row_items in [
+                [
+                    ("FACE", CameraAction::View(CameraView::Front)),
+                    ("COTE", CameraAction::View(CameraView::Side)),
+                    ("DESSUS", CameraAction::View(CameraView::Top)),
+                ],
+                [
+                    ("ARRIERE", CameraAction::View(CameraView::Rear)),
+                    ("ISO", CameraAction::View(CameraView::Iso)),
+                    ("CADRER", CameraAction::FrameVehicle),
+                ],
+                [
+                    ("CENTRER", CameraAction::CenterSelection),
+                    ("LIBRE/ORBITE", CameraAction::ToggleMode),
+                    ("VITESSE -", CameraAction::Slower),
+                ],
+            ] {
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (label, action) in row_items {
+                            ui_kit::button_row_item(
+                                row,
+                                label,
+                                UiAction::Camera(action),
+                                ButtonTone::Ghost,
+                            );
+                        }
+                    });
+            }
+            ui_kit::button(
+                panel,
+                "VITESSE +",
+                UiAction::Camera(CameraAction::Faster),
+                ButtonTone::Ghost,
+                Val::Percent(100.0),
+            );
             heading(panel, "START FROM");
             panel
                 .spawn(Node {
@@ -1251,6 +1905,27 @@ fn build_missile(
                     );
                     ui_kit::button_row_item(row, "EMPTY", UiAction::Missile(MissileAction::Clear), ButtonTone::Ghost);
                 });
+            let favorites: Vec<PartTemplate> = PartTemplate::ALL
+                .iter()
+                .copied()
+                .filter(|template| session.favorites.contains(template))
+                .filter(|template| session.palette_matches(*template))
+                .collect();
+            if !favorites.is_empty() {
+                heading(panel, "FAVORIS");
+                palette_grid(panel, &favorites, session, &owned);
+            }
+            let recents: Vec<PartTemplate> = session
+                .recent
+                .iter()
+                .copied()
+                .filter(|template| session.palette_matches(*template))
+                .take(6)
+                .collect();
+            if !recents.is_empty() {
+                heading(panel, "RÉCENTS");
+                palette_grid(panel, &recents, session, &owned);
+            }
             heading(panel, "CATÉGORIES DE PIÈCES");
             let category_buttons = [
                 (None, "TOUT"),
@@ -1282,30 +1957,63 @@ fn build_missile(
                     .copied()
                     .filter(|template| template.spec().category() == category)
                     .filter(|_| session.palette_category.is_none_or(|selected| selected == category))
+                    .filter(|template| session.palette_matches(*template))
                     .collect();
                 if templates.is_empty() {
                     continue;
                 }
                 if session.palette_category.is_none() { heading(panel, category.label()); }
-                for row in templates.chunks(3) {
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        })
-                        .with_children(|r| {
-                            for template in row {
-                                let unlocked = owned.contains(template.spec().required_capability());
-                                crate::workshop::spawn_palette_button(r, *template, unlocked);
-                            }
-                        });
-                }
+                palette_grid(panel, &templates, session, &owned);
             }
+            heading(panel, "COMMANDES");
             ui_kit::label(
                 panel,
-                "Glissez une pièce vers un point d'attache. W/R : déplacer ou pivoter ; F : centrer ; Début : cadrer ; X : symétrie ; Suppr : supprimer ; Ctrl+Z / Ctrl+Y : annuler / rétablir.",
-                9.5,
+                "Clic : sélectionner | Ctrl+clic : ajouter/retirer | Échap : désélectionner.\nGlisser une pièce vers un point vert : monter. Glisser une flèche : déplacer le groupe.",
+                9.0,
+                ui_kit::TEXT_DIM,
+            );
+            ui_kit::label(
+                panel,
+                "W/R : déplacer/pivoter | Suppr : retirer | Ctrl+Z/Y : annuler/rétablir | X : symétrie.\nF : centrer | Début : cadrer | 1-5 : vues | V : libre/orbite | [ ] : vitesse.",
+                9.0,
+                ui_kit::TEXT_DIM,
+            );
+            heading(panel, "SYMÉTRIE");
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    let count = if session.symmetry_kind == omega_rules::assembly::SymmetryKind::Radial {
+                        session.symmetry
+                    } else {
+                        2
+                    };
+                    ui_kit::button_row_item(
+                        row,
+                        format!("{} x{count}", session.symmetry_kind.short_label()),
+                        UiAction::Missile(MissileAction::CycleSymmetry),
+                        ButtonTone::Secondary,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "MODE",
+                        UiAction::Missile(MissileAction::CycleSymmetryKind),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "ROMPRE",
+                        UiAction::Missile(MissileAction::BreakSymmetry),
+                        ButtonTone::Ghost,
+                    );
+                });
+            ui_kit::label(
+                panel,
+                "X : nombre de copies radiales (2-8) | Maj+X : mode radial/bilatéral/axial.\nCtrl+clic sur deux pièces puis LIER pour les réunir en symétrie ; ROMPRE détache la sélection.",
+                9.0,
                 ui_kit::TEXT_DIM,
             );
             panel
@@ -1317,8 +2025,14 @@ fn build_missile(
                 .with_children(|row| {
                     ui_kit::button_row_item(
                         row,
-                        format!("SYMMETRY x{}", session.symmetry),
-                        UiAction::Missile(MissileAction::CycleSymmetry),
+                        "LIER LA SÉLECTION",
+                        UiAction::Missile(MissileAction::LinkSymmetry),
+                        ButtonTone::Ghost,
+                    );
+                    ui_kit::button_row_item(
+                        row,
+                        "DUPLIQUER",
+                        UiAction::Missile(MissileAction::DuplicateSelection),
                         ButtonTone::Secondary,
                     );
                     ui_kit::button_row_item(
@@ -1334,6 +2048,95 @@ fn build_missile(
                         ButtonTone::Ghost,
                     );
                 });
+            heading(panel, "BIBLIOTHÈQUE DE SOUS-ENSEMBLES");
+            ui_kit::label(
+                panel,
+                "Sélectionnez un groupe puis enregistrez-le par catégorie. Les fichiers exportés sont relisibles dans une autre conception.",
+                9.0,
+                ui_kit::TEXT_DIM,
+            );
+            for kinds in [
+                vec![
+                    SubassemblyKind::Surfaces,
+                    SubassemblyKind::Electronics,
+                    SubassemblyKind::Structure,
+                ],
+                vec![SubassemblyKind::Stage, SubassemblyKind::Configuration],
+            ] {
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for kind in kinds {
+                            ui_kit::button_row_item(
+                                row,
+                                format!("ENREG. {}", kind.short_label()),
+                                UiAction::Missile(MissileAction::SaveSubassembly(kind)),
+                                ButtonTone::Ghost,
+                            );
+                        }
+                    });
+            }
+            ui_kit::button(
+                panel,
+                "IMPORTER LES EXPORTS",
+                UiAction::Missile(MissileAction::ImportSubassemblies),
+                ButtonTone::Ghost,
+                Val::Percent(100.0),
+            );
+            if session.library.is_empty() {
+                ui_kit::label(panel, "Bibliothèque vide.", 9.5, ui_kit::TEXT_DIM);
+            }
+            for (index, entry) in session.library.iter().enumerate().take(4) {
+                ui_kit::label(
+                    panel,
+                    format!(
+                        "{} · {} · {} pièce(s)",
+                        entry.name,
+                        entry.kind.short_label(),
+                        entry.parts.len()
+                    ),
+                    9.5,
+                    ui_kit::TEXT,
+                );
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        ui_kit::button_row_item(
+                            row,
+                            "INSÉRER",
+                            UiAction::Missile(MissileAction::ApplySubassembly(index)),
+                            ButtonTone::Secondary,
+                        );
+                        ui_kit::button_row_item(
+                            row,
+                            "EXPORTER",
+                            UiAction::Missile(MissileAction::ExportSubassembly(index)),
+                            ButtonTone::Ghost,
+                        );
+                        ui_kit::button_row_item(
+                            row,
+                            "RETIRER",
+                            UiAction::Missile(MissileAction::DeleteSubassembly(index)),
+                            ButtonTone::Danger,
+                        );
+                    });
+            }
+            if session.library.len() > 4 {
+                ui_kit::label(
+                    panel,
+                    format!("+{} autre(s) dans la bibliothèque", session.library.len() - 4),
+                    9.0,
+                    ui_kit::TEXT_DIM,
+                );
+            }
                 });
             panel
                 .spawn(Node {
@@ -1345,7 +2148,51 @@ fn build_missile(
                 })
                 .with_children(|footer| {
                     heading(footer, "VERSIONS");
-                    ui_kit::label(footer, log.missile_hud_text(vehicle), 9.0, ui_kit::TEXT_DIM);
+                    if let Some(head) = log.head() {
+                        ui_kit::label(
+                            footer,
+                            format!("HEAD rev {} | {} | {}", head.id, head.label, head.hash),
+                            8.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                    } else {
+                        ui_kit::label(footer, "Aucune version enregistrée.", 9.0, ui_kit::TEXT_DIM);
+                    }
+                    if let Some(submitted) = log.submitted() {
+                        ui_kit::label(
+                            footer,
+                            format!("SOUMISE : rev {} ({})", submitted.id, submitted.label),
+                            8.5,
+                            ui_kit::GOOD,
+                        );
+                    }
+                    if log.naming_target.is_some() {
+                        ui_kit::label(
+                            footer,
+                            format!("Nom : {}_  (ENTRÉE pour valider)", log.naming_draft),
+                            9.0,
+                            ui_kit::ACCENT,
+                        );
+                        footer
+                            .spawn(Node {
+                                column_gap: Val::Px(3.0),
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                ui_kit::button_row_item(
+                                    row,
+                                    "VALIDER",
+                                    UiAction::CommitRevisionName,
+                                    ButtonTone::Primary,
+                                );
+                                ui_kit::button_row_item(
+                                    row,
+                                    "ANNULER",
+                                    UiAction::CancelRevisionName,
+                                    ButtonTone::Ghost,
+                                );
+                            });
+                    }
                     ui_kit::button(
                         footer,
                         "RECORD REVISION",
@@ -1353,6 +2200,78 @@ fn build_missile(
                         ButtonTone::Secondary,
                         Val::Percent(100.0),
                     );
+                    for revision in log.vehicle_revisions().take(2) {
+                        let trial_count = trials
+                            .history
+                            .entries()
+                            .iter()
+                            .filter(|entry| entry.revision_id == Some(revision.id))
+                            .count();
+                        ui_kit::label(
+                            footer,
+                            format!(
+                                "rev {} | {} | {} essai(s) | {}",
+                                revision.id,
+                                revision.label,
+                                trial_count,
+                                if log.submitted().is_some_and(|submitted| submitted.id == revision.id) {
+                                    "SOUMISE"
+                                } else {
+                                    "locale"
+                                }
+                            ),
+                            8.0,
+                            ui_kit::TEXT_DIM,
+                        );
+                        footer
+                            .spawn(Node {
+                                column_gap: Val::Px(3.0),
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                ui_kit::button_row_item(
+                                    row,
+                                    "NOMMER",
+                                    UiAction::BeginRevisionName(revision.id),
+                                    ButtonTone::Ghost,
+                                );
+                                if log.head().is_some_and(|head| head.id != revision.id) {
+                                    ui_kit::button_row_item(
+                                        row,
+                                        "COMPARER",
+                                        UiAction::CompareRevision(revision.id),
+                                        ButtonTone::Ghost,
+                                    );
+                                }
+                                ui_kit::button_row_item(
+                                    row,
+                                    "RESTAURER",
+                                    UiAction::RestoreRevision(revision.id),
+                                    ButtonTone::Secondary,
+                                );
+                            });
+                    }
+                    if let Some((from, to)) = log.compare {
+                        let diff = log
+                            .revision(from)
+                            .zip(log.revision(to))
+                            .map_or_else(|| "comparaison indisponible".to_string(), |(a, b)| {
+                                crate::missile::vehicle_diff(&a.vehicle, &b.vehicle)
+                            });
+                        ui_kit::label(
+                            footer,
+                            format!("DIFF rev {from} → rev {to} : {diff}"),
+                            8.0,
+                            ui_kit::ACCENT,
+                        );
+                        ui_kit::button(
+                            footer,
+                            "FERMER LA COMPARAISON",
+                            UiAction::ClearRevisionComparison,
+                            ButtonTone::Ghost,
+                            Val::Percent(100.0),
+                        );
+                    }
                 });
         });
     });
@@ -1721,8 +2640,8 @@ fn build_missile(
             ui_kit::label(panel, "ASSEMBLY TREE", 12.0, ui_kit::ACCENT);
             ui_kit::label(
                 panel,
-                "Depth-first from the root. A decoupler starts a new stage.",
-                9.5,
+                "-/+ plier · G groupe · L verrou · H masque · N nommer. Un découpleur ouvre un étage.",
+                9.0,
                 ui_kit::TEXT_DIM,
             );
             if vehicle.parts.is_empty() {
@@ -1743,65 +2662,121 @@ fn build_missile(
                     PartListScroll,
                 ))
                 .with_children(|panel| {
-                    for entry in vehicle.tree_entries() {
-                        let indent = "   ".repeat(entry.depth);
-                        let node = entry.node.map_or("racine".to_string(), |node| ui_kit::fr(node.label()));
-                        let tone = if session.selected.as_deref() == Some(entry.id.as_str()) {
+                    for entry in session.tree_rows() {
+                        let children = vehicle.children(&entry.id).len();
+                        let count = vehicle.subtree_ids(&entry.id).len();
+                        let collapsed = session.collapsed.contains(&entry.id);
+                        let locked = session.locked.contains(&entry.id);
+                        let hidden = session.hidden.contains(&entry.id);
+                        let primary = session.selected.as_deref() == Some(entry.id.as_str());
+                        let selected = session.is_selected(&entry.id);
+                        let name = session.group_name(&entry.id).map_or_else(
+                            || session.vehicle
+                                .part(&entry.id)
+                                .map(|part| part_title(&part.spec).to_string())
+                                .unwrap_or_else(|| entry.id.clone()),
+                            str::to_string,
+                        );
+                        let indent = if entry.depth == 0 {
+                            String::new()
+                        } else {
+                            format!("{}└ ", "  ".repeat(entry.depth))
+                        };
+                        let state = match (locked, hidden) {
+                            (true, true) => " · verrouillé, masqué",
+                            (true, false) => " · verrouillé",
+                            (false, true) => " · masqué",
+                            (false, false) => "",
+                        };
+                        let symmetry = vehicle
+                            .symmetry_kind_of(&entry.id)
+                            .map(|kind| format!(" · sym {}", kind.label()))
+                            .unwrap_or_default();
+                        let tone = if primary {
                             ButtonTone::Primary
+                        } else if selected {
+                            ButtonTone::Secondary
                         } else {
                             ButtonTone::Ghost
                         };
-                        ui_kit::button(
-                            panel,
-                            format!(
-                                "{indent}{}  [{node}]  Étage {}",
-                                vehicle
-                                    .part(&entry.id)
-                                    .map(|part| part_title(&part.spec).to_string())
-                                    .unwrap_or_else(|| entry.id.clone()),
-                                entry.stage + 1
-                            ),
-                            UiAction::Missile(MissileAction::Select { id: entry.id.clone() }),
-                            tone,
-                            Val::Percent(100.0),
-                        );
+                        panel
+                            .spawn(Node {
+                                width: Val::Percent(100.0),
+                                column_gap: Val::Px(2.0),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                if children > 0 {
+                                    tree_control(
+                                        row,
+                                        if collapsed { "+" } else { "-" },
+                                        UiAction::Missile(MissileAction::ToggleCollapsed { id: entry.id.clone() }),
+                                        false,
+                                    );
+                                } else {
+                                    row.spawn(Node { width: Val::Px(22.0), ..default() });
+                                }
+                                ui_kit::button_row_item(
+                                    row,
+                                    format!("{indent}{name} [{count}] · E{}{state}{symmetry}", entry.stage + 1),
+                                    UiAction::Missile(MissileAction::Select { id: entry.id.clone() }),
+                                    tone,
+                                );
+                                if children > 0 {
+                                    tree_control(
+                                        row,
+                                        "G",
+                                        UiAction::Missile(MissileAction::SelectGroup { id: entry.id.clone() }),
+                                        false,
+                                    );
+                                    tree_control(
+                                        row,
+                                        "N",
+                                        UiAction::Missile(MissileAction::BeginRename { id: entry.id.clone() }),
+                                        false,
+                                    );
+                                }
+                                tree_control(
+                                    row,
+                                    if locked { "L" } else { "l" },
+                                    UiAction::Missile(MissileAction::ToggleLock { id: entry.id.clone() }),
+                                    locked,
+                                );
+                                tree_control(
+                                    row,
+                                    if hidden { "H" } else { "h" },
+                                    UiAction::Missile(MissileAction::ToggleHidden { id: entry.id.clone() }),
+                                    hidden,
+                                );
+                            });
                     }
                 });
         });
         let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
-        node.max_height = Val::Percent(38.0);
-        node.overflow = Overflow::clip_y();
-        right.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "SELECTED PART", 12.0, ui_kit::ACCENT);
-            match session.selected_part() {
-                Some(part) => {
-                    ui_kit::label(panel, spec_summary(&part.spec), 11.0, ui_kit::TEXT);
-                    let (height, radius) = omega_rules::assembly::dimensions(&part.spec);
-                    let place = part.attach.as_ref().map_or("pièce racine".to_string(), |attach| {
-                        if part.spec.is_aero() {
-                            format!(
-                                "sur {} via {} | {:.0}°",
-                                attach.parent,
-                                ui_kit::fr(attach.node.label()),
-                                attach.angle_deg
-                            )
-                        } else {
-                            format!("sur {} via {}", attach.parent, ui_kit::fr(attach.node.label()))
-                        }
-                    });
+        node.max_height = Val::Percent(52.0);
+        node.overflow = Overflow::scroll_y();
+        right
+            .spawn((
+                node,
+                bg,
+                interaction,
+                ScrollPosition(Vec2::new(0.0, inspector_scroll)),
+                InspectorScrollPanel,
+            ))
+            .with_children(|panel| {
+                ui_kit::label(panel, "SELECTED PART · MOLETTE : DÉFILER", 12.0, ui_kit::ACCENT);
+                if session.selection.len() > 1 {
                     ui_kit::label(
                         panel,
                         format!(
-                            "{} | étage {} | {:.2} m × {:.2} m | {}",
-                            place,
-                            vehicle.stage_of(&part.id).unwrap_or(0) + 1,
-                            height,
-                            radius * 2.0,
-                            ui_kit::fr(part.spec.category().label())
+                            "{} pièces sélectionnées : le gizmo déplace le groupe sans changer la hiérarchie. Ctrl+clic pour ajuster, Échap pour tout désélectionner.",
+                            session.selection.len()
                         ),
                         9.5,
-                        ui_kit::TEXT_DIM,
+                        ui_kit::WARN,
                     );
+<<<<<<< Updated upstream
                     if let Some(attach) = part.attach.as_ref() {
                         ui_kit::label(panel, "TRANSFORMATIONS LOCALES · pas 0,05 m / 5°", 9.5, ui_kit::ACCENT);
                         transform_axis_row(panel, "X", 0, attach.offset_x_m, attach.rotation_x_deg);
@@ -1900,33 +2875,310 @@ fn build_missile(
                         line.push_str(&format!(" | poussée {:.1} kN", stats.thrust_n / 1000.0));
                     }
                     ui_kit::label(panel, line, 10.0, ui_kit::TEXT_DIM);
+=======
+>>>>>>> Stashed changes
                     ui_kit::button(
                         panel,
-                        "SUPPRIMER LA PIÈCE",
-                        UiAction::Missile(MissileAction::RemovePart),
-                        ButtonTone::Danger,
+                        "DÉSELECTIONNER TOUT",
+                        UiAction::Missile(MissileAction::ClearSelection),
+                        ButtonTone::Ghost,
                         Val::Percent(100.0),
                     );
                 }
-                None => ui_kit::label(
-                    panel,
-                    "Click a part in the tree above to inspect, resize or remove it.",
-                    10.5,
-                    ui_kit::TEXT_DIM,
-                ),
-            }
-        });
+                match session.selected_part() {
+                    Some(part) => {
+                        ui_kit::label(panel, spec_summary(&part.spec), 11.0, ui_kit::TEXT);
+                        let help = missile::part_help(&part.spec);
+                        for (title, line) in [("RÔLE", 0), ("CONSÉQUENCES", 1), ("À SAVOIR", 2)] {
+                            if let Some(line) = help.get(line) {
+                                ui_kit::label(panel, title, 9.0, ui_kit::ACCENT);
+                                ui_kit::label(panel, line, 9.5, ui_kit::TEXT_DIM);
+                            }
+                        }
+                        let balance = omega_rules::balance::part_balance(&part.spec);
+                        let (advantage, limitation) = omega_rules::balance::tradeoff(&part.spec);
+                        ui_kit::label(panel, "BILAN DE LA PIÈCE", 9.0, ui_kit::ACCENT);
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "Masse {:.1} kg · carburant {:.1} kg · coût ~{:.0} cr",
+                                balance.dry_mass_kg, balance.propellant_kg, balance.cost_cr
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "Puissance {:+.0} W · complexité {:.2} · fiabilité {:+.2}",
+                                balance.power_w, balance.complexity, balance.reliability
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                        ui_kit::label(panel, format!("Avantage : {advantage}"), 9.0, ui_kit::GOOD);
+                        ui_kit::label(panel, format!("Limite : {limitation}"), 9.0, ui_kit::WARN);
+                        let has_children = !vehicle.children(&part.id).is_empty();
+                        let locked = session.locked.contains(&part.id);
+                        let hidden = session.hidden.contains(&part.id);
+                        panel
+                            .spawn(Node {
+                                width: Val::Percent(100.0),
+                                column_gap: Val::Px(4.0),
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                ui_kit::button_row_item(
+                                    row,
+                                    if locked { "DÉVERROUILLER" } else { "VERROUILLER" },
+                                    UiAction::Missile(MissileAction::ToggleLock { id: part.id.clone() }),
+                                    if locked { ButtonTone::Secondary } else { ButtonTone::Ghost },
+                                );
+                                ui_kit::button_row_item(
+                                    row,
+                                    if hidden { "AFFICHER" } else { "MASQUER" },
+                                    UiAction::Missile(MissileAction::ToggleHidden { id: part.id.clone() }),
+                                    if hidden { ButtonTone::Secondary } else { ButtonTone::Ghost },
+                                );
+                            });
+                        if has_children {
+                            panel
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    column_gap: Val::Px(4.0),
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    ui_kit::button_row_item(
+                                        row,
+                                        "TOUT LE GROUPE",
+                                        UiAction::Missile(MissileAction::SelectGroup { id: part.id.clone() }),
+                                        ButtonTone::Ghost,
+                                    );
+                                    ui_kit::button_row_item(
+                                        row,
+                                        "NOMMER LE GROUPE",
+                                        UiAction::Missile(MissileAction::BeginRename { id: part.id.clone() }),
+                                        ButtonTone::Ghost,
+                                    );
+                                });
+                        }
+                        if session.rename_target.as_deref() == Some(part.id.as_str()) {
+                            ui_kit::label(
+                                panel,
+                                format!("Nom : {}", session.rename_draft),
+                                10.0,
+                                ui_kit::TEXT,
+                            );
+                            panel
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    column_gap: Val::Px(4.0),
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    ui_kit::button_row_item(
+                                        row,
+                                        "OK",
+                                        UiAction::Missile(MissileAction::CommitRename),
+                                        ButtonTone::Primary,
+                                    );
+                                    ui_kit::button_row_item(
+                                        row,
+                                        "ANNULER",
+                                        UiAction::Missile(MissileAction::CancelRename),
+                                        ButtonTone::Ghost,
+                                    );
+                                });
+                        }
+                        ui_kit::label(panel, "PARAMÈTRES", 9.0, ui_kit::ACCENT);
+                        let (height, radius) = part.dimensions();
+                        let place = part.attach.as_ref().map_or("pièce racine".to_string(), |attach| {
+                            if part.spec.is_aero() {
+                                format!(
+                                    "sur {} via {} | {:.0}°",
+                                    attach.parent,
+                                    ui_kit::fr(attach.node.label()),
+                                    attach.angle_deg
+                                )
+                            } else {
+                                format!("sur {} via {}", attach.parent, ui_kit::fr(attach.node.label()))
+                            }
+                        });
+                        ui_kit::label(
+                            panel,
+                            format!(
+                                "{} | étage {} | {:.2} m × {:.2} m | {}",
+                                place,
+                                vehicle.stage_of(&part.id).unwrap_or(0) + 1,
+                                height,
+                                radius * 2.0,
+                                ui_kit::fr(part.spec.category().label())
+                            ),
+                            9.5,
+                            ui_kit::TEXT_DIM,
+                        );
+                        inspector::spawn_editor(panel, part, inspector.precision);
+                        let needed: Vec<&str> = std::iter::once(part.spec.required_capability())
+                            .chain(part.spec.extra_capabilities())
+                            .collect();
+                        let missing: Vec<String> = needed
+                            .iter()
+                            .filter(|capability| !owned.contains(**capability))
+                            .map(|capability| omega_rules::research::capability_label(capability))
+                            .collect();
+                        if !missing.is_empty() {
+                            ui_kit::label(
+                                panel,
+                                format!("Needs research: {}", missing.join(", ")),
+                                9.5,
+                                ui_kit::WARN,
+                            );
+                        }
+                        if let Some(kind) = vehicle.symmetry_kind_of(&part.id) {
+                            let members = vehicle.symmetry_members(&part.id);
+                            ui_kit::label(
+                                panel,
+                                format!(
+                                    "Symétrie {} · {} copie(s) liée(s) : les réglages et transformations se propagent.",
+                                    kind.label(),
+                                    members.len()
+                                ),
+                                9.5,
+                                ui_kit::ACCENT,
+                            );
+                            panel
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    column_gap: Val::Px(4.0),
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    ui_kit::button_row_item(
+                                        row,
+                                        "ROMPRE LE LIEN",
+                                        UiAction::Missile(MissileAction::BreakSymmetry),
+                                        ButtonTone::Ghost,
+                                    );
+                                    ui_kit::button_row_item(
+                                        row,
+                                        "LIER LA SÉLECTION",
+                                        UiAction::Missile(MissileAction::LinkSymmetry),
+                                        ButtonTone::Ghost,
+                                    );
+                                });
+                        }
+                        if let Some(category) = omega_rules::avionics::category_of(&part.spec) {
+                            ui_kit::label(
+                                panel,
+                                format!("Électronique : {}", ui_kit::fr(category.label())),
+                                9.5,
+                                ui_kit::TEXT_DIM,
+                            );
+                        }
+                        if let omega_rules::PartSpec::Avionics { module } = part.spec {
+                            let spec = module.spec();
+                            let power = if spec.power_w < 0.0 {
+                                format!("alimente {:.0} W", -spec.power_w)
+                            } else {
+                                format!("demande {:.0} W", spec.power_w)
+                            };
+                            ui_kit::label(
+                                panel,
+                                format!(
+                                    "{} crédits | {} | complexité {:.0} %",
+                                    spec.cost_cr,
+                                    power,
+                                    spec.complexity * 100.0
+                                ),
+                                9.5,
+                                ui_kit::TEXT_DIM,
+                            );
+                            let mut effect = Vec::new();
+                            if spec.authority_bonus > 0.0 {
+                                effect.push(format!("autorité +{:.0}%", spec.authority_bonus * 100.0));
+                            }
+                            if spec.lock_bonus > 0.0 {
+                                effect.push(format!("verrouillage +{:.0} pts", spec.lock_bonus * 100.0));
+                            }
+                            if spec.fault_reduction > 0.0 {
+                                effect.push(format!("pannes -{:.0}%", spec.fault_reduction * 100.0));
+                            }
+                            if effect.is_empty() {
+                                effect.push(format!("aucun effet en vol, fiabilité {:+.2}", spec.reliability));
+                            }
+                            ui_kit::label(panel, effect.join(" | "), 9.5, ui_kit::TEXT_DIM);
+                            let mut needs = Vec::new();
+                            if module.needs_standard_computer() {
+                                needs.push("un ordinateur standard");
+                            }
+                            if module.needs_navigation() {
+                                needs.push("un module de navigation");
+                            }
+                            if !needs.is_empty() {
+                                ui_kit::label(panel, format!("Nécessite {}", needs.join(" et ")), 9.5, ui_kit::WARN);
+                            }
+                        }
+                        let params = missile::params_of(part);
+                        if params.is_empty() {
+                            ui_kit::label(panel, "This part has no adjustable setting.", 10.0, ui_kit::TEXT_DIM);
+                        }
+                        for (param, value) in params {
+                            param_row(panel, param, value);
+                        }
+                        for choice in missile::choices_of(&part.spec) {
+                            ui_kit::button(
+                                panel,
+                                format!("{}: {}", choice.label(), missile::choice_value_for_part(part, choice)),
+                                UiAction::Missile(MissileAction::CycleAero(choice)),
+                                ButtonTone::Ghost,
+                                Val::Percent(100.0),
+                            );
+                        }
+                        let stats = part.spec.stats();
+                        let mut line = format!("Masse sèche {:.1} kg", stats.dry_mass_kg);
+                        if stats.propellant_kg > 0.0 {
+                            line.push_str(&format!(" | propergol {:.1} kg", stats.propellant_kg));
+                        }
+                        if stats.thrust_n > 0.0 {
+                            line.push_str(&format!(" | poussée {:.1} kN", stats.thrust_n / 1000.0));
+                        }
+                        ui_kit::label(panel, line, 10.0, ui_kit::TEXT_DIM);
+                        ui_kit::button(
+                            panel,
+                            "SUPPRIMER LA PIÈCE",
+                            UiAction::Missile(MissileAction::RemovePart),
+                            ButtonTone::Danger,
+                            Val::Percent(100.0),
+                        );
+                    }
+                    None => ui_kit::label(
+                        panel,
+                        "Click a part in the tree above to inspect, resize or remove it.",
+                        10.5,
+                        ui_kit::TEXT_DIM,
+                    ),
+                }
+            });
         let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
         node.flex_grow = 1.0;
         node.min_height = Val::Px(0.0);
-        node.overflow = Overflow::clip_y();
-        right.spawn((node, bg, interaction)).with_children(|panel| {
-            let issues = vehicle.issues();
-            let errors = issues
+        node.overflow = Overflow::scroll_y();
+        right
+            .spawn((
+                node,
+                bg,
+                interaction,
+                ScrollPosition(Vec2::new(0.0, assembly_scroll)),
+                AssemblyControlPanel,
+            ))
+            .with_children(|panel| {
+            let report = session.assembly_report();
+            let errors = report
                 .iter()
                 .filter(|issue| issue.severity == omega_rules::IssueSeverity::Error)
                 .count();
-            let warnings = issues.len() - errors;
+            let warnings = report.len() - errors;
             panel
                 .spawn(Node {
                     width: Val::Percent(100.0),
@@ -1936,13 +3188,13 @@ fn build_missile(
                     ..default()
                 })
                 .with_children(|row| {
-                    ui_kit::label(row, "VALIDATION", 12.0, ui_kit::ACCENT);
+                    ui_kit::label(row, "CONTRÔLE DE L'ASSEMBLAGE", 12.0, ui_kit::ACCENT);
                     let (text, color) = if errors == 0 {
-                        ("DESIGN VALID".to_string(), ui_kit::GOOD)
+                        ("ASSEMBLAGE COHÉRENT".to_string(), ui_kit::GOOD)
                     } else if errors == 1 {
-                        ("1 ERROR".to_string(), ui_kit::BAD)
+                        ("1 ERREUR".to_string(), ui_kit::BAD)
                     } else {
-                        (format!("{errors} ERRORS"), ui_kit::BAD)
+                        (format!("{errors} ERREURS"), ui_kit::BAD)
                     };
                     ui_kit::chip(row, text, color);
                     if warnings > 0 {
@@ -1957,43 +3209,62 @@ fn build_missile(
                         );
                     }
                 });
-            if issues.is_empty() {
-                ui_kit::label(panel, "No errors and no warnings.", 9.5, ui_kit::TEXT_DIM);
-            }
-            // A row that names a part is a shortcut: pressing it selects that part so the player
-            // can fix it instead of hunting the tree.
-            for issue in issues.iter().take(6) {
-                let prefix = match issue.severity {
-                    omega_rules::IssueSeverity::Error => "ERROR",
-                    omega_rules::IssueSeverity::Warning => "WARN",
-                };
-                match &issue.part {
-                    Some(id) => ui_kit::button(
-                        panel,
-                        format!("{prefix}  {}  [{id}]", issue.message),
-                        UiAction::Missile(MissileAction::Select { id: id.clone() }),
-                        ButtonTone::Ghost,
-                        Val::Percent(100.0),
-                    ),
-                    None => ui_kit::label(
-                        panel,
-                        format!("{prefix}  {}", issue.message),
-                        9.5,
-                        if issue.severity == omega_rules::IssueSeverity::Error {
-                            ui_kit::BAD
-                        } else {
-                            ui_kit::WARN
-                        },
-                    ),
-                };
-            }
-            if issues.len() > 6 {
+            if report.is_empty() {
                 ui_kit::label(
                     panel,
-                    format!("+{} more issue(s); fix these first", issues.len() - 6),
+                    "Aucun problème : connexions, points d'attache, catégories, verrous et sous-ensembles sont cohérents.",
                     9.5,
                     ui_kit::TEXT_DIM,
                 );
+            }
+            // A dedicated panel groups construction problems by cause. Every row that names a
+            // part is a shortcut: pressing it selects the part in the tree and in 3D.
+            for kind in [
+                missile::AssemblyIssueKind::Unconnected,
+                missile::AssemblyIssueKind::Occupied,
+                missile::AssemblyIssueKind::Incompatible,
+                missile::AssemblyIssueKind::Locked,
+                missile::AssemblyIssueKind::Subassembly,
+            ] {
+                let rows: Vec<&missile::AssemblyIssue> =
+                    report.iter().filter(|issue| issue.kind == kind).collect();
+                if rows.is_empty() {
+                    continue;
+                }
+                let issues_are_errors = rows
+                    .iter()
+                    .any(|issue| issue.severity == omega_rules::IssueSeverity::Error);
+                ui_kit::label(
+                    panel,
+                    format!("{} ({})", kind.label(), rows.len()),
+                    9.0,
+                    if issues_are_errors { ui_kit::BAD } else { ui_kit::WARN },
+                );
+                for issue in &rows {
+                    let prefix = match issue.severity {
+                        omega_rules::IssueSeverity::Error => "ERREUR",
+                        omega_rules::IssueSeverity::Warning => "AVERT.",
+                    };
+                    match &issue.part {
+                        Some(id) => ui_kit::button(
+                            panel,
+                            format!("{prefix}  {}  [{id}]", issue.message),
+                            UiAction::Missile(MissileAction::Select { id: id.clone() }),
+                            ButtonTone::Ghost,
+                            Val::Percent(100.0),
+                        ),
+                        None => ui_kit::label(
+                            panel,
+                            format!("{prefix}  {}", issue.message),
+                            9.5,
+                            if issue.severity == omega_rules::IssueSeverity::Error {
+                                ui_kit::BAD
+                            } else {
+                                ui_kit::WARN
+                            },
+                        ),
+                    };
+                }
             }
         });
     });
@@ -2110,218 +3381,18 @@ fn build_program(
         });
     });
 
-    // Middle: threads and the selected block.
+    // Middle: the visual canvas and its compact inspector.
     root.spawn(Node {
         flex_direction: FlexDirection::Column,
         flex_grow: 1.0,
         flex_basis: Val::Px(0.0),
+        min_width: Val::Px(0.0),
+        min_height: Val::Px(0.0),
         row_gap: Val::Px(10.0),
         ..default()
     })
     .with_children(|middle| {
-        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
-        // Cap the list panel so the selected-block controls stay on screen even with a 32-block
-        // program; the list scrolls instead of pushing them below the window.
-        node.max_height = Val::Percent(70.0);
-        node.overflow = Overflow::clip();
-        middle.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "THREADS", 12.0, ui_kit::ACCENT);
-            panel
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (index, blocks) in session.program.threads.iter().enumerate() {
-                        let tone = if index == session.thread {
-                            ButtonTone::Primary
-                        } else {
-                            ButtonTone::Secondary
-                        };
-                        ui_kit::button_row_item(
-                            row,
-                            format!("T{} ({})", index + 1, blocks.len()),
-                            UiAction::Program(ProgramAction::SelectThread(index)),
-                            tone,
-                        );
-                    }
-                    ui_kit::button_row_item(
-                        row,
-                        "+ THREAD",
-                        UiAction::Program(ProgramAction::AddThread),
-                        ButtonTone::Ghost,
-                    );
-                    ui_kit::button_row_item(
-                        row,
-                        "- THREAD",
-                        UiAction::Program(ProgramAction::RemoveThread),
-                        ButtonTone::Danger,
-                    );
-                });
-            heading(panel, format!("TÂCHE {} — BLOCS", session.thread + 1));
-            let blocks = session
-                .program
-                .threads
-                .get(session.thread)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            panel
-                .spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        flex_grow: 1.0,
-                        min_height: Val::Px(0.0),
-                        row_gap: Val::Px(4.0),
-                        overflow: Overflow::scroll_y(),
-                        ..default()
-                    },
-                    ScrollPosition(Vec2::new(0.0, session.scroll)),
-                    ProgramListScroll,
-                ))
-                .with_children(|list| {
-                    if blocks.is_empty() {
-                        ui_kit::label(
-                            list,
-                            "Empty thread. Add a block from the library.",
-                            10.5,
-                            ui_kit::TEXT_DIM,
-                        );
-                    } else {
-                        ui_kit::label(list, "thread start", 9.0, ui_kit::TEXT_DIM);
-                    }
-                    for (index, block) in blocks.iter().enumerate() {
-                        if index > 0 {
-                            // The connection between the previous block and this one. Editing the
-                            // chain (move, insert, duplicate) is the only way to change it, and the
-                            // rules reject a link that cannot follow its predecessor.
-                            list.spawn((
-                                Node {
-                                    width: Val::Px(2.0),
-                                    height: Val::Px(7.0),
-                                    margin: UiRect::left(Val::Px(14.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(ui_kit::TEXT_DIM),
-                            ));
-                        }
-                        let tone = if session.block == Some(index) {
-                            ButtonTone::Primary
-                        } else {
-                            ButtonTone::Ghost
-                        };
-                        // Auto width plus the column's stretch keeps a block inside the
-                        // scrolling thread list; a percentage would resolve against the
-                        // scroll container's unconstrained content width and overflow it.
-                        ui_kit::button(
-                            list,
-                            format!("{}. {}", index + 1, block.label()),
-                            UiAction::Program(ProgramAction::SelectBlock(index)),
-                            tone,
-                            Val::Auto,
-                        );
-                    }
-                });
-        });
-        let (mut node, bg, interaction) = panel_node(Val::Percent(100.0));
-        node.flex_shrink = 0.0;
-        middle.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "SELECTED BLOCK", 12.0, ui_kit::ACCENT);
-            match session.selected_block() {
-                None => ui_kit::label(
-                    panel,
-                    "Select a block to tune, reorder or remove it.",
-                    10.5,
-                    ui_kit::TEXT_DIM,
-                ),
-                Some(block) => {
-                    ui_kit::label(panel, block.label(), 13.0, ui_kit::TEXT);
-                    ui_kit::label(
-                        panel,
-                        format!("{} | {}", block.category().label(), block.description()),
-                        9.5,
-                        ui_kit::TEXT_DIM,
-                    );
-                    if adjustable(block) {
-                        panel
-                            .spawn(Node {
-                                width: Val::Percent(100.0),
-                                column_gap: Val::Px(4.0),
-                                align_items: AlignItems::Center,
-                                ..default()
-                            })
-                            .with_children(|row| {
-                                ui_kit::button_row_item(
-                                    row,
-                                    "-",
-                                    UiAction::Program(ProgramAction::Adjust(-1)),
-                                    ButtonTone::Secondary,
-                                );
-                                ui_kit::button_row_item(
-                                    row,
-                                    "+",
-                                    UiAction::Program(ProgramAction::Adjust(1)),
-                                    ButtonTone::Secondary,
-                                );
-                            });
-                    } else {
-                        ui_kit::label(
-                            panel,
-                            "This block closes the thread and has no value to tune.",
-                            10.0,
-                            ui_kit::TEXT_DIM,
-                        );
-                    }
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            ui_kit::button_row_item(
-                                row,
-                                "MOVE UP",
-                                UiAction::Program(ProgramAction::MoveUp),
-                                ButtonTone::Secondary,
-                            );
-                            ui_kit::button_row_item(
-                                row,
-                                "MOVE DOWN",
-                                UiAction::Program(ProgramAction::MoveDown),
-                                ButtonTone::Secondary,
-                            );
-                            ui_kit::button_row_item(
-                                row,
-                                "REMOVE",
-                                UiAction::Program(ProgramAction::RemoveSelected),
-                                ButtonTone::Danger,
-                            );
-                        });
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            ui_kit::button_row_item(
-                                row,
-                                "FLIP VALUE",
-                                UiAction::Program(ProgramAction::Flip),
-                                ButtonTone::Ghost,
-                            );
-                            ui_kit::button_row_item(
-                                row,
-                                "DUPLICATE",
-                                UiAction::Program(ProgramAction::Duplicate),
-                                ButtonTone::Secondary,
-                            );
-                        });
-                }
-            }
-        });
+        crate::campus::program_canvas::build_program_canvas_column(middle, vehicle, session);
     });
 
     // Right: computer limits and validation.
@@ -2522,22 +3593,27 @@ fn build_program(
                         9.5,
                         ui_kit::TEXT_DIM,
                     );
-                    for entry in report.trace.iter().take(6) {
+                    for (index, entry) in report.trace.iter().enumerate().take(6) {
+                        let (marker, color) = if index == session.debug_cursor {
+                            (">", ui_kit::ACCENT)
+                        } else if entry.anomaly {
+                            ("!", ui_kit::BAD)
+                        } else if index < session.debug_cursor {
+                            ("+", ui_kit::GOOD)
+                        } else {
+                            ("·", ui_kit::WARN)
+                        };
                         ui_kit::label(
                             panel,
                             format!(
-                                "{:.1}s T{} #{} {}",
+                                "{marker} {:.1}s T{} #{} {}",
                                 entry.t_s,
                                 entry.thread + 1,
                                 entry.block + 1,
                                 entry.label
                             ),
                             9.0,
-                            if entry.timed_out {
-                                ui_kit::WARN
-                            } else {
-                                ui_kit::TEXT_DIM
-                            },
+                            color,
                         );
                     }
                     for anomaly in report.anomalies.iter().take(2) {
@@ -2555,14 +3631,14 @@ fn build_program(
     });
 }
 
-fn rate(value: Option<f64>) -> String {
+pub(crate) fn rate(value: Option<f64>) -> String {
     value
         .map(|rate| format!("{:.0}%", rate * 100.0))
         .unwrap_or_else(|| "-".to_string())
 }
 
 /// One bar chart: samples collapsed to at most 96 bars, scaled to the series maximum.
-fn plot(
+pub(crate) fn plot(
     parent: &mut ChildSpawnerCommands<'_>,
     title: &str,
     unit: &str,
@@ -2617,496 +3693,9 @@ fn build_trials(
     program: &omega_rules::Program,
     session: &TrialSession,
     procurement: &Procurement,
+    log: &RevisionLog,
 ) {
-    let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
-    let busy = session.batch_job.is_some();
-    let current_hash = trials::input_hash(vehicle, program, &trials::config(session));
-    let batch_stale = session.batch_stale(vehicle, program);
-
-    // Left: seed, run, batch and comparison controls.
-    root.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        width: Val::Px(252.0),
-        row_gap: Val::Px(10.0),
-        ..default()
-    })
-    .with_children(|left| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
-        left.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "TRIAL SETUP", 15.0, ui_kit::ACCENT);
-            ui_kit::label(panel, vehicle.name.clone(), 10.5, ui_kit::TEXT_DIM);
-            heading(panel, "MISSION PROFILE");
-            ui_kit::button(
-                panel,
-                if session.air_launch {
-                    "AIR LAUNCH 200 m/s"
-                } else {
-                    "VERTICAL LAUNCH"
-                },
-                UiAction::Trial(TrialAction::ToggleLaunch),
-                ButtonTone::Secondary,
-                Val::Percent(100.0),
-            );
-            heading(panel, "SEED");
-            ui_kit::label(panel, format!("Seed {}", session.seed), 13.0, ui_kit::TEXT);
-            panel
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (text, step) in [("-10", -10i64), ("-1", -1), ("+1", 1), ("+10", 10)] {
-                        ui_kit::button_row_item(
-                            row,
-                            text,
-                            UiAction::Trial(TrialAction::SeedStep(step)),
-                            ButtonTone::Ghost,
-                        );
-                    }
-                });
-            match trials::lock_probe(vehicle, program, session.seed) {
-                Some(probe) => {
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            ui_kit::chip(row, format!("TIRAGE {:.2}", probe.roll), ui_kit::NEUTRAL);
-                            ui_kit::chip(
-                                row,
-                                if probe.success { "LOCK" } else { "NO LOCK" },
-                                if probe.success { ui_kit::GOOD } else { ui_kit::BAD },
-                            );
-                        });
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "Tirage de verrouillage pour cette graine, sous {:.0} m/s ({:.0} %).",
-                            probe.max_speed_ms,
-                            probe.probability * 100.0
-                        ),
-                        9.5,
-                        ui_kit::TEXT_DIM,
-                    );
-                }
-                None => ui_kit::label(
-                    panel,
-                    "The seed rolls the target lock; fit a radar and a LOCK TARGET block.",
-                    9.5,
-                    ui_kit::WARN,
-                ),
-            }
-            let spread = omega_rules::flight::dispersion(session.seed);
-            ui_kit::label(
-                panel,
-                format!(
-                    "Dispersion de la graine  poussée {:+.1} %  combustion {:+.1} %  traînée {:+.1} %",
-                    (spread.thrust - 1.0) * 100.0,
-                    (spread.burn - 1.0) * 100.0,
-                    (spread.drag - 1.0) * 100.0
-                ),
-                9.5,
-                ui_kit::TEXT_DIM,
-            );
-            heading(panel, "CONTRACTS");
-            if procurement.active().is_empty() {
-                ui_kit::label(
-                    panel,
-                    "Accept a contract to bind trials as evidence.",
-                    9.5,
-                    ui_kit::TEXT_DIM,
-                );
-            }
-            for active in procurement.active() {
-                let status = procurement.status_for(active, vehicle, program);
-                panel
-                    .spawn(Node {
-                        width: Val::Percent(100.0),
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        ui_kit::chip(row, format!("#{:04}", active.offer.id), ui_kit::NEUTRAL);
-                        let tone = match status {
-                            EvidenceStatus::Current => ui_kit::GOOD,
-                            EvidenceStatus::Stale => ui_kit::BAD,
-                            _ => ui_kit::WARN,
-                        };
-                        ui_kit::chip(row, status.label(), tone);
-                    });
-                ui_kit::label(panel, active.offer.title.clone(), 9.0, ui_kit::TEXT_DIM);
-            }
-            ui_kit::button(
-                panel,
-                "RUN TRIAL",
-                UiAction::Trial(TrialAction::Run),
-                ButtonTone::Primary,
-                Val::Percent(100.0),
-            );
-            heading(panel, "MONTE CARLO BATCH");
-            panel
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for runs in trials::BATCH_SIZES {
-                        let tone = if monte_carlo && !busy {
-                            ButtonTone::Secondary
-                        } else {
-                            ButtonTone::Disabled
-                        };
-                        ui_kit::button_row_item(
-                            row,
-                            ui_kit::thousands(runs as u64),
-                            UiAction::Trial(TrialAction::Batch(runs)),
-                            tone,
-                        );
-                    }
-                });
-            if let Some((done, total)) = session.batch_progress() {
-                panel.spawn((
-                    Text::new(format!("Série en cours : {done} / {total} graines...")),
-                    TextFont {
-                        font: ui_kit::ui_font(),
-                        font_size: FontSize::Px(10.0),
-                        ..default()
-                    },
-                    TextColor(ui_kit::ACCENT),
-                    BatchProgressText,
-                ));
-            } else if !monte_carlo {
-                ui_kit::label(panel, "Locked: Monte Carlo research needed.", 9.5, ui_kit::WARN);
-            }
-            if batch_stale && !busy {
-                ui_kit::label(panel, "Batch stale: inputs changed.", 9.5, ui_kit::WARN);
-            }
-            heading(panel, "A / B");
-            panel
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    ui_kit::button_row_item(
-                        row,
-                        "SNAPSHOT A",
-                        UiAction::Trial(TrialAction::Snapshot),
-                        ButtonTone::Secondary,
-                    );
-                    ui_kit::button_row_item(
-                        row,
-                        "COMPARE",
-                        UiAction::Trial(TrialAction::Compare),
-                        ButtonTone::Secondary,
-                    );
-                });
-            match &session.baseline {
-                Some(baseline) => ui_kit::label(
-                    panel,
-                    format!("A: {} ({})", baseline.hash, baseline.vehicle.name),
-                    9.5,
-                    ui_kit::TEXT_DIM,
-                ),
-                None => ui_kit::label(panel, "A: empty. Snapshot before editing.", 9.5, ui_kit::TEXT_DIM),
-            }
-            heading(panel, "INPUT HASH");
-            ui_kit::label(
-                panel,
-                current_hash.chars().take(16).collect::<String>(),
-                11.0,
-                ui_kit::TEXT,
-            );
-            if session
-                .report
-                .as_ref()
-                .is_some_and(|run| run.input_hash != current_hash)
-            {
-                ui_kit::label(panel, "Changed since the last run.", 9.5, ui_kit::WARN);
-            }
-            ui_kit::label(
-                panel,
-                "Same vehicle, program and seed give the same report.",
-                9.5,
-                ui_kit::TEXT_DIM,
-            );
-        });
-    });
-
-    // Middle: the four plots and the headline figures.
-    root.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        flex_grow: 1.0,
-        flex_basis: Val::Px(0.0),
-        row_gap: Val::Px(10.0),
-        ..default()
-    })
-    .with_children(|middle| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
-        middle.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "TRAJECTORY", 12.0, ui_kit::ACCENT);
-            match &session.report {
-                None => ui_kit::label(
-                    panel,
-                    "No trial yet. Press RUN TRIAL to fly the current vehicle and program.",
-                    10.5,
-                    ui_kit::TEXT_DIM,
-                ),
-                Some(run) => {
-                    let samples = &run.report.samples;
-                    plot(panel, "SPEED", "m/s", ui_kit::ACCENT, samples, |s| s.speed_ms);
-                    plot(panel, "ALTITUDE", "m", ui_kit::PURPLE, samples, |s| s.altitude_m);
-                    plot(panel, "MASS", "kg", ui_kit::WARN, samples, |s| s.mass_kg);
-                    plot(panel, "THRUST", "kN", Color::srgb(0.36, 0.62, 0.95), samples, |s| {
-                        s.thrust_n / 1_000.0
-                    });
-                }
-            }
-        });
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
-        middle.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "METRICS", 12.0, ui_kit::ACCENT);
-            match &session.report {
-                None => ui_kit::label(panel, "Run a trial to see figures.", 10.5, ui_kit::TEXT_DIM),
-                Some(run) => {
-                    let report = &run.report;
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(6.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            ui_kit::chip(row, format!("{:.0} m/s max", report.max_speed_ms), ui_kit::GOOD);
-                            ui_kit::chip(
-                                row,
-                                format!("{:.1} km", report.path_length_m / 1_000.0),
-                                ui_kit::NEUTRAL,
-                            );
-                            ui_kit::chip(row, format!("{:.1} s", report.flight_time_s), ui_kit::NEUTRAL);
-                        });
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(6.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            let twr = report.first_ignition_twr;
-                            ui_kit::chip(
-                                row,
-                                format!("TWR {:.2}", twr.unwrap_or(0.0)),
-                                if twr.is_some_and(|value| value >= 1.0) {
-                                    ui_kit::GOOD
-                                } else {
-                                    ui_kit::BAD
-                                },
-                            );
-                            match report.lock {
-                                Some(lock) => ui_kit::chip(
-                                    row,
-                                    format!(
-                                        "lock {:.0}% {}",
-                                        lock.probability * 100.0,
-                                        if lock.success { "acquired" } else { "failed" }
-                                    ),
-                                    if lock.success { ui_kit::GOOD } else { ui_kit::BAD },
-                                ),
-                                None => ui_kit::chip(row, "no lock attempted", ui_kit::NEUTRAL),
-                            }
-                            ui_kit::chip(
-                                row,
-                                if report.lifted_off { "lifted off" } else { "no lift-off" },
-                                if report.lifted_off { ui_kit::GOOD } else { ui_kit::BAD },
-                            );
-                        });
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "Run seed {} ({}) | final {:.0} m/s | {} samples",
-                            run.seed,
-                            if run.air_launch { "air launch" } else { "vertical" },
-                            report.final_speed_ms,
-                            report.samples.len()
-                        ),
-                        9.5,
-                        ui_kit::TEXT_DIM,
-                    );
-                }
-            }
-        });
-    });
-
-    // Right: timeline, anomalies and the batch/comparison results.
-    root.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        width: Val::Px(330.0),
-        row_gap: Val::Px(10.0),
-        ..default()
-    })
-    .with_children(|right| {
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
-        right.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "EVENTS", 12.0, ui_kit::ACCENT);
-            match &session.report {
-                None => ui_kit::label(panel, "Nothing flown yet.", 10.0, ui_kit::TEXT_DIM),
-                Some(run) if run.report.events.is_empty() => {
-                    ui_kit::label(panel, "No event was reported.", 10.0, ui_kit::TEXT_DIM)
-                }
-                Some(run) => {
-                    for (t, label) in run.report.events.iter().take(9) {
-                        ui_kit::label(panel, format!("{t:6.1}s  {label}"), 10.0, ui_kit::TEXT);
-                    }
-                    if run.report.events.len() > 9 {
-                        ui_kit::label(
-                            panel,
-                            format!("+{} more events", run.report.events.len() - 9),
-                            9.5,
-                            ui_kit::TEXT_DIM,
-                        );
-                    }
-                }
-            }
-            heading(panel, "ANOMALIES");
-            match &session.report {
-                None => ui_kit::label(panel, "-", 10.0, ui_kit::TEXT_DIM),
-                Some(run) if run.report.anomalies.is_empty() => {
-                    panel
-                        .spawn(Node::default())
-                        .with_children(|row| ui_kit::chip(row, "NO ANOMALY", ui_kit::GOOD));
-                }
-                Some(run) => {
-                    for anomaly in run.report.anomalies.iter().take(5) {
-                        ui_kit::label(panel, format!("- {anomaly}"), 9.5, ui_kit::BAD);
-                    }
-                    if run.report.anomalies.len() > 5 {
-                        ui_kit::label(
-                            panel,
-                            format!("+{} more", run.report.anomalies.len() - 5),
-                            9.5,
-                            ui_kit::BAD,
-                        );
-                    }
-                }
-            }
-        });
-        let (node, bg, interaction) = panel_node(Val::Percent(100.0));
-        right.spawn((node, bg, interaction)).with_children(|panel| {
-            ui_kit::label(panel, "BATCH", 12.0, ui_kit::ACCENT);
-            match &session.batch {
-                None => ui_kit::label(
-                    panel,
-                    "Run a seeded batch to see the distribution.",
-                    10.0,
-                    ui_kit::TEXT_DIM,
-                ),
-                Some(batch) => {
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            column_gap: Val::Px(6.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            ui_kit::chip(row, format!("{} runs", batch.runs), ui_kit::NEUTRAL);
-                            ui_kit::chip(row, format!("{} no lift-off", batch.no_liftoff), ui_kit::BAD);
-                            ui_kit::chip(row, format!("{} no separation", batch.no_separation), ui_kit::WARN);
-                            if batch_stale {
-                                ui_kit::chip(row, "STALE", ui_kit::BAD);
-                            }
-                        });
-                    if batch_stale {
-                        ui_kit::label(
-                            panel,
-                            "Vehicle, program, profile or seed changed since this batch.",
-                            9.5,
-                            ui_kit::BAD,
-                        );
-                    }
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "lock acquired {}/{} ({}) | {} runs with anomalies",
-                            batch.lock_success,
-                            batch.lock_attempts,
-                            rate(batch.lock_rate()),
-                            batch.anomalies
-                        ),
-                        9.5,
-                        ui_kit::TEXT_DIM,
-                    );
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "mean {:.0} m/s | {:.1} km | {:.1} s",
-                            batch.mean_max_speed_ms,
-                            batch.mean_path_m / 1_000.0,
-                            batch.mean_flight_time_s
-                        ),
-                        9.5,
-                        ui_kit::TEXT_DIM,
-                    );
-                }
-            }
-            heading(panel, "A VS B");
-            match &session.comparison {
-                None => ui_kit::label(panel, "Snapshot A, edit, then COMPARE.", 10.0, ui_kit::TEXT_DIM),
-                Some(comparison) => {
-                    let a = &comparison.baseline;
-                    let b = &comparison.current;
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "A {}  vs  B {}",
-                            comparison.baseline_hash,
-                            comparison.current_hash.chars().take(8).collect::<String>()
-                        ),
-                        9.5,
-                        ui_kit::TEXT_DIM,
-                    );
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "path   {:.1} -> {:.1} km  ({:+.1})",
-                            a.mean_path_m / 1_000.0,
-                            b.mean_path_m / 1_000.0,
-                            (b.mean_path_m - a.mean_path_m) / 1_000.0
-                        ),
-                        10.0,
-                        ui_kit::TEXT,
-                    );
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "speed  {:.0} -> {:.0} m/s  ({:+.0})",
-                            a.mean_max_speed_ms,
-                            b.mean_max_speed_ms,
-                            b.mean_max_speed_ms - a.mean_max_speed_ms
-                        ),
-                        10.0,
-                        ui_kit::TEXT,
-                    );
-                    ui_kit::label(
-                        panel,
-                        format!(
-                            "lock   {} -> {}  ({} vs {})",
-                            rate(a.lock_rate()),
-                            rate(b.lock_rate()),
-                            a.lock_success,
-                            b.lock_success
-                        ),
-                        10.0,
-                        ui_kit::TEXT,
-                    );
-                }
-            }
-        });
-    });
+    super::trial_lab::build(root, campus, vehicle, program, session, procurement, log);
 }
 
 /// Mouse-wheel scrolling for the workshop stage list, mirroring [`scroll_program_list`].
@@ -3122,7 +3711,63 @@ pub(crate) fn scroll_part_list(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    if cursor.x < window.width() - 380.0 {
+    if cursor.x < window.width() - 380.0 || cursor.y > window.height() * 0.30 {
+        return;
+    }
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    if scroll.0 != position.y {
+        scroll.0 = position.y;
+    }
+}
+
+/// Mouse-wheel scrolling for the selected-part inspector, the lower half of the right column.
+pub(crate) fn scroll_inspector(
+    window: Single<&Window>,
+    wheel: Res<AccumulatedMouseScroll>,
+    mut scroll: ResMut<InspectorScrollOffset>,
+    mut panels: Query<&mut ScrollPosition, With<InspectorScrollPanel>>,
+) {
+    let Ok(mut position) = panels.single_mut() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    if cursor.x < window.width() - 380.0 || cursor.y < window.height() * 0.30 || cursor.y > window.height() * 0.84 {
+        return;
+    }
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    if scroll.0 != position.y {
+        scroll.0 = position.y;
+    }
+}
+
+/// Mouse-wheel scrolling for the assembly-control panel at the bottom of the right column.
+pub(crate) fn scroll_assembly_control(
+    window: Single<&Window>,
+    wheel: Res<AccumulatedMouseScroll>,
+    mut scroll: ResMut<AssemblyControlScroll>,
+    mut panels: Query<&mut ScrollPosition, With<AssemblyControlPanel>>,
+) {
+    let Ok(mut position) = panels.single_mut() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    if cursor.x < window.width() - 380.0 || cursor.y < window.height() * 0.84 {
         return;
     }
     if wheel.delta.y != 0.0 {
@@ -3184,6 +3829,40 @@ pub(crate) fn scroll_program_palette(
     if wheel.delta.y != 0.0 {
         let step = match wheel.unit {
             MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        } * wheel.delta.y;
+        position.y = (position.y - step).max(0.0);
+    }
+    if scroll.0 != position.y {
+        scroll.0 = position.y;
+    }
+}
+
+/// Mouse-wheel scrolling for the offer list. The dossier stays in its own column, so scrolling the
+/// eight offer cards never hides the contract being worked on.
+pub(crate) fn scroll_contracts_board(
+    campus: Res<CampusState>,
+    window: Single<&Window>,
+    wheel: Res<AccumulatedMouseScroll>,
+    mut scroll: ResMut<ContractScroll>,
+    mut lists: Query<&mut ScrollPosition, With<ContractOfferScroll>>,
+) {
+    if campus.view != CampusView::Contracts {
+        return;
+    }
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    // Only the left column scrolls; the dossier column keeps its own content in place.
+    if cursor.x > window.width() * 0.68 {
+        return;
+    }
+    let Ok(mut position) = lists.single_mut() else {
+        return;
+    };
+    if wheel.delta.y != 0.0 {
+        let step = match wheel.unit {
+            MouseScrollUnit::Line => 40.0,
             MouseScrollUnit::Pixel => 1.0,
         } * wheel.delta.y;
         position.y = (position.y - step).max(0.0);
@@ -3268,6 +3947,7 @@ fn signature(
     trials: &TrialSession,
     procurement: &Procurement,
     log: &RevisionLog,
+    inspector: &InspectorState,
 ) -> String {
     match kind {
         BoardKind::Island => format!(
@@ -3278,17 +3958,18 @@ fn signature(
             procurement.completed().len()
         ),
         BoardKind::Contracts => format!(
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{:?}",
             campus.credits,
             campus.day,
             campus.max_active_projects(),
-            procurement.signature(&missile.vehicle, &program.program)
+            procurement.signature(&missile.vehicle, &program.program),
+            log.head().map(|revision| (revision.id, revision.label.clone()))
         ),
         BoardKind::Research => format!("{:?}|{}|{}", campus.research, campus.credits, campus.day),
         BoardKind::Missile => format!(
-            "{:?}|{:?}|{}|{}|{:?}|{:?}|{:?}|{}|{}|{}",
+            "{:?}|{}|{}|{}|{:?}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}",
             missile.vehicle,
-            missile.selected,
+            missile.ui_signature(),
             missile.symmetry,
             campus.credits,
             campus.research,
@@ -3299,21 +3980,54 @@ fn signature(
             campus.day,
             procurement.active().len(),
             // The contract check follows the selected active contract.
-            procurement.selected_id().unwrap_or(0)
+            procurement.selected_id().unwrap_or(0),
+            // Precision changes the visible step caption and selected button.
+            inspector.signature(),
+            log.submitted().map(|revision| revision.id),
+            log.naming_target,
+            log.naming_draft,
+            log.compare,
+            trials.history.entries().len()
         ),
         BoardKind::Program => format!(
-            "{:?}|{:?}|{}|{:?}",
-            missile.vehicle, program.program, program.thread, program.block
+            "{:?}|{:?}|{}|{:?}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{:?}|{:?}",
+            missile.vehicle,
+            program.program,
+            program.thread,
+            program.block,
+            program.path,
+            program.selection,
+            program.debug_cursor,
+            program.debug_playing,
+            program.debug_speed,
+            program.multi_select,
+            program.branch_focus,
+            program.debug.as_ref().map(|report| (
+                report.trace.len(),
+                report.anomalies.len(),
+                report.flight_time_s.to_bits()
+            )),
+            program
+                .library
+                .programs
+                .iter()
+                .map(|saved| &saved.name)
+                .collect::<Vec<_>>()
         ),
         BoardKind::Trials => format!(
-            "{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{}|{:?}|{:?}",
             trials.revision,
             trials.seed,
             trials.air_launch,
             trials.report.is_some(),
             trials.batch.is_some(),
             trials.comparison.is_some(),
-            procurement.signature(&missile.vehicle, &program.program)
+            procurement.signature(&missile.vehicle, &program.program),
+            trials.tab,
+            trials.selected_history,
+            trials.history.entries().len(),
+            trials.failure,
+            trials.context.revision_id
         ),
     }
 }
@@ -3321,21 +4035,21 @@ fn signature(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_boards(
     mut commands: Commands,
+    frontend: Res<crate::main_menu::Frontend>,
     campus: Res<CampusState>,
     missile: Res<MissileSession>,
     program: Res<MissileProgramSession>,
     trials: Res<TrialSession>,
     procurement: Res<Procurement>,
     log: Res<RevisionLog>,
-    research_scroll: Res<ResearchScroll>,
-    workshop_scroll: Res<WorkshopScroll>,
-    workshop_palette_scroll: Res<WorkshopPaletteScroll>,
-    program_palette_scroll: Res<ProgramPaletteScroll>,
+    inspector: InspectorPanel,
+    palette_preview: Res<crate::workshop::PalettePreview>,
+    scrolls: BoardScrolls,
     mut boards: Query<(Entity, &mut Node, &BoardKind)>,
     mut seen: Local<HashMap<BoardKind, String>>,
 ) {
     for (entity, mut node, kind) in &mut boards {
-        let show = visible(*kind, &campus);
+        let show = *frontend == crate::main_menu::Frontend::Game && visible(*kind, &campus);
         let wanted = if show { Display::Flex } else { Display::None };
         if node.display != wanted {
             node.display = wanted;
@@ -3344,7 +4058,16 @@ pub(crate) fn sync_boards(
             seen.remove(kind);
             continue;
         }
-        let sig = signature(*kind, &campus, &missile, &program, &trials, &procurement, &log);
+        let sig = signature(
+            *kind,
+            &campus,
+            &missile,
+            &program,
+            &trials,
+            &procurement,
+            &log,
+            &inspector.state,
+        );
         if seen.get(kind) == Some(&sig) {
             continue;
         }
@@ -3364,18 +4087,25 @@ pub(crate) fn sync_boards(
                 procurement_ref,
                 &missile_ref.vehicle,
                 &program_ref.program,
+                &log,
+                scrolls.contract.0,
             ),
-            BoardKind::Research => build_research(root, campus_ref, research_scroll.0),
+            BoardKind::Research => build_research(root, campus_ref, scrolls.research.0),
             BoardKind::Missile => build_missile(
                 root,
                 campus_ref,
                 missile_ref,
                 &log,
+                &trials,
                 procurement_ref,
-                workshop_scroll.0,
-                workshop_palette_scroll.0,
+                &inspector.state,
+                &palette_preview.image,
+                scrolls.workshop.0,
+                scrolls.workshop_palette.0,
+                inspector.scroll.0,
+                scrolls.assembly.0,
             ),
-            BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref, program_palette_scroll.0),
+            BoardKind::Program => build_program(root, &missile_ref.vehicle, program_ref, scrolls.program_palette.0),
             BoardKind::Trials => build_trials(
                 root,
                 campus_ref,
@@ -3383,6 +4113,7 @@ pub(crate) fn sync_boards(
                 &program_ref.program,
                 trials_ref,
                 procurement_ref,
+                &log,
             ),
         });
     }
@@ -3404,6 +4135,18 @@ pub(crate) fn poll_trial_batch(mut trials: ResMut<TrialSession>, mut campus: Res
             }
             Err(message) => campus.message = friendly_capabilities(&message),
         }
+        if let Err(error) = trials.persist_history() {
+            warn!("Could not save the trial history: {error}");
+            campus.message = format!("Historique non sauvegardé : {error}");
+        }
+    }
+}
+
+/// Flush the campaign history once the board has handled input, so exports and navigation do not
+/// depend on the next click to persist a finished campaign.
+pub(crate) fn persist_trial_history(mut trials: ResMut<TrialSession>) {
+    if let Err(error) = trials.persist_history() {
+        warn!("Could not save the trial history: {error}");
     }
 }
 
@@ -3477,6 +4220,29 @@ pub(crate) fn update_nav_status(
     }
 }
 
+/// Snapshot of the design context attached to every new campaign.
+fn trial_context(campus: &CampusState, log: &RevisionLog, vehicle: &omega_rules::Vehicle) -> TrialContext {
+    let head = log.head();
+    let change_summary = head.map_or_else(
+        || "aucune révision de conception enregistrée".to_string(),
+        |revision| {
+            let diff = missile::vehicle_diff(&revision.vehicle, vehicle);
+            if diff == "no changes" {
+                "aucun écart avec la révision".to_string()
+            } else {
+                diff
+            }
+        },
+    );
+    TrialContext {
+        day: campus.day,
+        revision_id: head.map(|revision| revision.id),
+        revision_hash: head.map(|revision| revision.hash.clone()).unwrap_or_default(),
+        revision_label: head.map_or_else(|| "non révisée".to_string(), |revision| revision.label.clone()),
+        change_summary,
+    }
+}
+
 /// Replace internal capability ids in a message with the name of the technology that grants them.
 pub(crate) fn friendly_capabilities(message: &str) -> String {
     let mut text = message.to_string();
@@ -3501,6 +4267,7 @@ pub(crate) fn handle_extra_actions(
     mut program: ResMut<MissileProgramSession>,
     mut trials: ResMut<TrialSession>,
     mut procurement: ResMut<Procurement>,
+    mut workshop_input: ResMut<crate::workshop::WorkshopInput>,
 ) {
     for (interaction, button) in &buttons {
         if *interaction != UiInteraction::Pressed {
@@ -3517,6 +4284,69 @@ pub(crate) fn handle_extra_actions(
                         Err(error) => format!("Revision {id} recorded but not saved: {error}"),
                     },
                     Err(error) => format!("Revision not recorded: {error}"),
+                };
+            }
+            UiAction::BeginRevisionName(id) => {
+                log.begin_naming(id);
+                campus.message = "Type a revision name, then press Enter.".to_string();
+            }
+            UiAction::CommitRevisionName => {
+                if let Some(id) = log.naming_target {
+                    let draft = log.naming_draft.clone();
+                    campus.message = match log.rename(id, &draft) {
+                        Ok(()) => match log
+                            .to_bytes()
+                            .and_then(|bytes| crate::save::write(crate::save::SaveFile::Revisions, &bytes))
+                        {
+                            Ok(()) => format!("Renamed revision {id}"),
+                            Err(error) => format!("Revision renamed but not saved: {error}"),
+                        },
+                        Err(error) => format!("Revision not renamed: {error}"),
+                    };
+                }
+                log.cancel_naming();
+            }
+            UiAction::CancelRevisionName => {
+                log.cancel_naming();
+                campus.message = "Revision rename cancelled.".to_string();
+            }
+            UiAction::CompareRevision(id) => {
+                let from = log.head().map(|head| head.id);
+                campus.message = match from.map(|from| log.compare_revisions(from, id)) {
+                    Some(Ok(diff)) => format!("Compared rev {from:?} to rev {id}: {diff}"),
+                    Some(Err(error)) => error,
+                    None => "No head revision to compare against.".to_string(),
+                };
+            }
+            UiAction::ClearRevisionComparison => {
+                log.clear_comparison();
+                campus.message = "Revision comparison closed.".to_string();
+            }
+            UiAction::RestoreRevision(id) => {
+                campus.message = match log.restore_target(id) {
+                    Ok(revision) => {
+                        missile.vehicle = revision.vehicle;
+                        missile.selected = None;
+                        missile.selection.clear();
+                        missile.collapsed.clear();
+                        let new_id = log.commit_vehicle(&missile.vehicle).ok();
+                        if let Some(new_id) = new_id {
+                            let _ = log.rename(new_id, &format!("Restored from {}", revision.label));
+                        }
+                        let log_saved = log
+                            .to_bytes()
+                            .and_then(|bytes| crate::save::write(crate::save::SaveFile::Revisions, &bytes));
+                        let vehicle_saved = missile::persist_missile(&missile);
+                        match (log_saved, vehicle_saved) {
+                            (Ok(()), Ok(())) => format!(
+                                "Restored revision {id} as revision {}.",
+                                new_id.map_or_else(|| "-".to_string(), |id| id.to_string())
+                            ),
+                            (Err(error), _) => format!("Restored locally, revision log not saved: {error}"),
+                            (_, Err(error)) => format!("Restored locally, vehicle not saved: {error}"),
+                        }
+                    }
+                    Err(error) => error,
                 };
             }
             UiAction::SelectMissileContract(id) => {
@@ -3554,30 +4384,145 @@ pub(crate) fn handle_extra_actions(
                 }
                 Err(message) => campus.message = message,
             },
-            UiAction::Trial(action) => {
-                let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
-                let outcome =
-                    trials::apply_action(&mut trials, action, &missile.vehicle, &program.program, monte_carlo);
-                match outcome {
-                    Ok(message) => {
-                        if !message.is_empty() {
-                            campus.message = message;
+            UiAction::Trial(action) => match action {
+                TrialAction::ExportHtml => {
+                    campus.message = match trial_export::export_html(
+                        &trials,
+                        &missile.vehicle,
+                        &program.program,
+                        &procurement,
+                        &log,
+                    ) {
+                        Ok(path) => trial_export::export_message(&path),
+                        Err(error) => error,
+                    };
+                }
+                TrialAction::ExportCsv => {
+                    campus.message = match trial_export::export_csv(&trials, &missile.vehicle, &program.program) {
+                        Ok(path) => trial_export::export_message(&path),
+                        Err(error) => error,
+                    };
+                }
+                TrialAction::ExportPdf => {
+                    campus.message =
+                        match trial_export::export_pdf(&trials, &missile.vehicle, &program.program, &procurement, &log)
+                        {
+                            Ok(path) => trial_export::export_message(&path),
+                            Err(error) => error,
+                        };
+                }
+                TrialAction::InspectPart(id) => {
+                    let owned = campus.owned_capabilities();
+                    campus.message = friendly_capabilities(&missile.apply(MissileAction::Select { id }, &owned));
+                    campus.view = CampusView::Missile;
+                }
+                TrialAction::InspectBlock { thread, block } => {
+                    let path = vec![PathStep {
+                        index: block,
+                        branch: Branch::Body,
+                    }];
+                    match program.apply(ProgramAction::SelectPath { thread, path }, &missile.vehicle) {
+                        Ok(_) => {
+                            campus.message = "Bloc concerné sélectionné dans le programme".to_string();
+                            campus.view = CampusView::Program;
+                        }
+                        Err(error) => campus.message = error,
+                    }
+                }
+                action => {
+                    let context = trial_context(&campus, &log, &missile.vehicle);
+                    trials.set_context(context);
+                    let monte_carlo = campus.owned_capabilities().contains(trials::MONTE_CARLO);
+                    let annotate_compliance = matches!(&action, TrialAction::Run | TrialAction::Relaunch(_));
+                    let outcome =
+                        trials::apply_action(&mut trials, action, &missile.vehicle, &program.program, monte_carlo);
+                    match outcome {
+                        Ok(message) => {
+                            if !message.is_empty() {
+                                campus.message = message;
+                            }
+                        }
+                        Err(message) => campus.message = friendly_capabilities(&message),
+                    }
+                    if let Err(error) = trials.persist_history() {
+                        warn!("Could not save the trial history: {error}");
+                        campus.message = format!("Historique non sauvegardé : {error}");
+                    }
+                    if annotate_compliance
+                        && let Some(active) = procurement.selected()
+                        && let Some(run) = &trials.report
+                        && let Some(entry) = trials.history.entries().last()
+                        && entry.input_hash == run.input_hash
+                        && let Some(snapshot) = crate::lab::compliance_for_report(
+                            Some(&active.offer),
+                            &entry.vehicle,
+                            &entry.program,
+                            entry.seed,
+                            &run.report,
+                        )
+                    {
+                        trials.history.annotate_latest_compliance(snapshot);
+                        trials.history_dirty = true;
+                        if let Err(error) = trials.persist_history() {
+                            warn!("Could not save the trial compliance: {error}");
                         }
                     }
-                    Err(message) => campus.message = friendly_capabilities(&message),
                 }
-            }
+            },
             UiAction::Missile(action) => {
+                if matches!(
+                    &action,
+                    MissileAction::ClearPaletteSearch | MissileAction::BeginRename { .. }
+                ) {
+                    workshop_input.search_active = false;
+                }
                 let owned = campus.owned_capabilities();
+                let before = missile.vehicle.clone();
                 let message = friendly_capabilities(&missile.apply(action, &owned));
                 if !message.is_empty() {
                     campus.message = message;
                 }
-                if let Err(error) = missile::persist_missile(&missile) {
+                if before != missile.vehicle
+                    && let Err(error) = missile::persist_missile(&missile)
+                {
                     warn!("Could not save the vehicle: {error}");
+                }
+                if missile.library_dirty {
+                    match missile::persist_library(&missile) {
+                        Ok(()) => missile.library_dirty = false,
+                        Err(error) => warn!("Could not save the subassembly library: {error}"),
+                    }
                 }
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod research_presentation_tests {
+    use super::*;
+
+    #[test]
+    fn tiers_follow_prerequisites_and_previews_name_real_parts() {
+        let tree = omega_rules::default_tree();
+        let mut memo = HashMap::new();
+        for tech in &tree {
+            let tier = research_tier(&tree, &tech.id, &mut memo);
+            for prereq in &tech.prereqs {
+                assert!(
+                    research_tier(&tree, prereq, &mut memo) < tier,
+                    "{} must sit above {prereq}",
+                    tech.id
+                );
+            }
+            assert!(
+                !research_unlocks(tech).is_empty(),
+                "{} must advertise a real possibility",
+                tech.id
+            );
+        }
+        let wing = tree.iter().find(|tech| tech.id == "aerodynamics").unwrap();
+        assert!(research_unlocks(wing).contains("WING"), "{}", research_unlocks(wing));
     }
 }

@@ -120,11 +120,18 @@ pub fn fr(text: impl Into<String>) -> String {
         "COMPUTER 3" => "ORDINATEUR 3",
         "DECOUPLER" => "SÉPARATEUR",
         "MISSION MODULE" => "MODULE DE MISSION",
+        "EXPLOSIVE CHARGE" => "CHARGE EXPLOSIVE",
+        "IMPROVED CHARGE" => "CHARGE AMÉLIORÉE",
+        "ADVANCED CHARGE" => "CHARGE AVANCÉE",
+        "ADAPTER" => "ADAPTATEUR",
+        "NOSE CONE" => "COIFFE",
         "WING" => "AILE",
         "FIN SET" => "JEU D'AILETTES",
         "CONTROL" => "COMMANDE",
         "Length (m)" => "Longueur (m)",
         "Diameter (m)" => "Diamètre (m)",
+        "Exit diameter (m)" => "Diamètre de sortie (m)",
+        "Mount diameter (m)" => "Diamètre de montage (m)",
         "Burn time (s)" => "Durée de combustion (s)",
         "Engine scale" => "Échelle du moteur",
         "Mass (kg)" => "Masse (kg)",
@@ -133,6 +140,11 @@ pub fn fr(text: impl Into<String>) -> String {
         "Sweep (deg)" => "Flèche (°)",
         "PLANFORM" => "FORME EN PLAN",
         "PROFILE" => "PROFIL",
+        "SHAPE" => "FORME",
+        "CONICAL" => "CONIQUE",
+        "OGIVE" => "OGIVE",
+        "PARABOLIC" => "PARABOLIQUE",
+        "STEPPED" => "ÉTAGÉ",
         "STABILISER" => "RÔLE DES AILETTES",
         "LAYOUT" => "CONFIGURATION",
         "SURFACE" => "SURFACE",
@@ -149,6 +161,54 @@ pub fn fr(text: impl Into<String>) -> String {
         "SNAPSHOT A" => "ENREGISTRER A",
         "STABILITY" => "STABILITÉ",
         "LIFT" => "PORTANCE",
+        "Explosive charge" => "Charge explosive",
+        "Charge yield" => "Rendement de charge",
+        "Discretion" => "Discrétion",
+        "Apogee" => "Apogée",
+        "GENERAL" => "GÉNÉRAL",
+        "DEEP STRIKE" => "FRAPPE PROFONDE",
+        "VEIL RAID" => "RAID FURTIF",
+        "PRECISION STRIKE" => "FRAPPE DE PRÉCISION",
+        "AIR SUPERIORITY" => "SUPÉRIORITÉ AÉRIENNE",
+        "LONG-RANGE INTERCEPT" => "INTERCEPTION LONGUE PORTÉE",
+        "POINT DEFENCE" => "DÉFENSE PONCTUELLE",
+        "AREA DEFENCE" => "DÉFENSE DE ZONE",
+        "THEATRE STRIKE" => "FRAPPE DE THÉÂTRE",
+        "SEA SKIMMER" => "RASE-MOTTES NAVAL",
+        "Deep strike programme" => "Programme de frappe profonde",
+        "Low-observable raid" => "Raid à faible observabilité",
+        "Precision strike package" => "Lot de frappe de précision",
+        "Air superiority round" => "Munition de supériorité aérienne",
+        "Long-range intercept" => "Interception longue portée",
+        "Point-defence interceptor" => "Intercepteur de défense ponctuelle",
+        "Area-defence interceptor" => "Intercepteur de défense de zone",
+        "Theatre strike programme" => "Programme de frappe de théâtre",
+        "Sea-skimmer programme" => "Programme de rase-mottes naval",
+        "A high-apogee, long-range round that trades stealth for reach." => {
+            "Un missile à haute apogée et longue portée qui échange la furtivité contre l'allonge."
+        }
+        "A low-flying raid package: the trial must stay discreet." => {
+            "Un raid à basse altitude : l'essai doit rester discret."
+        }
+        "A compact short-range round with a tightly sized charge." => {
+            "Un missile courte portée compact avec une charge calibrée."
+        }
+        "A light, agile round that must acquire its target and turn hard." => {
+            "Un missile léger et agile qui doit acquérir sa cible et manœuvrer fort."
+        }
+        "A patient cruiser that loiters low before a long intercept." => {
+            "Un croiseur patient qui patrouille bas avant une longue interception."
+        }
+        "A quick-reaction round for close-in defence." => "Un missile à réaction rapide pour la défense rapprochée.",
+        "A high-altitude interceptor that watches a wide sector." => {
+            "Un intercepteur à haute altitude qui couvre un large secteur."
+        }
+        "A heavy two-stage round with a large payload and a high apogee." => {
+            "Un missile lourd à deux étages, à forte charge et haute apogée."
+        }
+        "A wave-top cruise package that must remain hard to spot." => {
+            "Un missile de croisière au ras des vagues qui doit rester difficile à repérer."
+        }
         "DRAG" => "TRAÎNÉE",
         "COMPLEXITY" => "COMPLEXITÉ",
         "RELIABILITY" => "FIABILITÉ",
@@ -173,6 +233,8 @@ pub fn fr(text: impl Into<String>) -> String {
         "ACCEPT" => "ACCEPTER",
         "NEXT DAY" => "JOUR SUIVANT",
         "START RESEARCH" => "LANCER LA RECHERCHE",
+        "Campaign loaded" => "Campagne chargée",
+        "New campaign: select a facility on the island" => "Nouvelle campagne : choisissez un bâtiment sur l'île",
         "RESEARCHED" => "DÉBLOQUÉ",
         "LOCKED" => "VERROUILLÉ",
         "LAB BUSY" => "LABORATOIRE OCCUPÉ",
@@ -180,6 +242,8 @@ pub fn fr(text: impl Into<String>) -> String {
         "TRIAL REQUIRED" => "ESSAI REQUIS",
         "EVIDENCE CURRENT" => "PREUVES À JOUR",
         "SELECTED" => "SÉLECTIONNÉ",
+        "STALE" => "OBSOLÈTE",
+        "SECONDARY" => "SECONDAIRE",
         "DEADLINE PASSED" => "ÉCHÉANCE DÉPASSÉE",
         "DOSSIER READY" => "DOSSIER PRÊT",
         "DOSSIER INCOMPLETE" => "DOSSIER INCOMPLET",
@@ -422,6 +486,27 @@ pub fn fr(text: impl Into<String>) -> String {
     let mut translated = text;
     for (from, to) in [
         ("SYMMETRY x", "SYMÉTRIE x"),
+        ("HEAD rev ", "VERSION ACTIVE rév. "),
+        ("Deadline passed on day ", "Échéance dépassée au jour "),
+        ("Design budget exceeded: ", "Budget de conception dépassé : "),
+        ("Primary design goals not met: ", "Objectifs principaux non atteints : "),
+        ("Dossier refused: ", "Dossier refusé : "),
+        ("No active contract.", "Aucun contrat actif."),
+        (
+            "This exact design was already delivered to contract #",
+            "Ce modèle exact a déjà été livré au contrat n°",
+        ),
+        ("Trial evidence saved on ", "Preuves d'essai enregistrées sur "),
+        (
+            "Could not save the missile program: ",
+            "Impossible d'enregistrer le programme : ",
+        ),
+        (
+            "Could not save the program library: ",
+            "Impossible d'enregistrer la bibliothèque : ",
+        ),
+        ("Revision not recorded: ", "Version non enregistrée : "),
+        ("Revision not renamed: ", "Version non renommée : "),
         ("SURFACE-TO-SURFACE", "SOL-SOL"),
         ("SURFACE-TO-AIR", "SOL-AIR"),
         ("AIR-TO-SURFACE", "AIR-SOL"),
@@ -654,7 +739,20 @@ mod tests {
             "AIR-AIR — programme de développement"
         );
         assert_eq!(fr("Ignite stage 2"), "Allumer l'étage 2");
+        assert_eq!(fr("DEEP STRIKE"), "FRAPPE PROFONDE");
+        assert_eq!(fr("Low-observable raid"), "Raid à faible observabilité");
+        assert_eq!(fr("Charge yield"), "Rendement de charge");
+        assert_eq!(fr("IMPROVED CHARGE"), "CHARGE AMÉLIORÉE");
         assert_eq!(fr("9 000 crédits"), "9 000 crédits");
+    }
+
+    #[test]
+    fn french_translation_covers_revision_and_evidence_states() {
+        assert_eq!(fr("STALE"), "OBSOLÈTE");
+        assert_eq!(fr("SECONDARY"), "SECONDAIRE");
+        assert_eq!(fr("HEAD rev 4 | essai | abc"), "VERSION ACTIVE rév. 4 | essai | abc");
+        assert!(fr("Dossier refused: score too low").starts_with("Dossier refusé"));
+        assert!(fr("Deadline passed on day 12.").starts_with("Échéance dépassée"));
     }
 
     #[test]

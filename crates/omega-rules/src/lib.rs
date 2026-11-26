@@ -6,6 +6,7 @@
 pub mod aero;
 pub mod assembly;
 pub mod avionics;
+pub mod balance;
 pub mod compliance;
 pub mod contracts;
 pub mod diff;
@@ -25,12 +26,12 @@ pub use assembly::{
 pub use avionics::{AvionicsCategory, AvionicsFigures, AvionicsModule, AvionicsSpec};
 pub use compliance::{CheckStatus, ContractCheck, contract_preview};
 pub use contracts::{
-    ContractEvaluation, ContractOffer, ContractPhase, ContractProgress, ContractRequirements, MissionFamily,
-    VehicleFamily, generate_contract_board,
+    ContractEvaluation, ContractOffer, ContractPhase, ContractProfile, ContractProgress, ContractRequirements,
+    MissionFamily, VehicleFamily, generate_contract_board,
 };
 pub use diff::{DesignDiff, diff_parts};
 pub use dossier::{ACCEPTANCE_THRESHOLD, Dossier, DossierDecision, MatrixRow, build_dossier};
-pub use flight::{FlightConfig, FlightReport, LaunchMode, LockResult, Sample, simulate};
+pub use flight::{FlightConfig, FlightReport, LaunchMode, LockResult, Sample, discretion_from_altitude, simulate};
 pub use metrics::{DerivedMetrics, PartGeometry, derive_metrics};
 pub use program::{
     Block, BlockCategory, BlockTrace, FLAGS, MARKS, MODES, Program, ProgramConnection, ProgramIssue, ProgramLibrary,
@@ -41,10 +42,10 @@ pub use requirement::{
     evaluate_requirement, verification_cost,
 };
 pub use research::{
-    ActiveResearch, Department, Grant, ResearchError, ResearchState, TechNode, default_tree, starting_capabilities,
-    validate_tree,
+    ActiveResearch, Department, Grant, ResearchError, ResearchState, TechNode, capability_label, default_tree,
+    starting_capabilities, validate_tree,
 };
 pub use vehicle::{
-    AirfoilProfile, ComputerClass, ControlKind, FinLayout, Part, PartCategory, PartSpec, PartStats, RadarClass,
-    SensorKind, StabilizerRole, Stage, StageReport, WingPlanform,
+    AdapterShape, AirfoilProfile, ComputerClass, ControlKind, ExplosiveGrade, FinLayout, NoseShape, Part, PartCategory,
+    PartSpec, PartStats, RadarClass, SensorKind, StabilizerRole, Stage, StageReport, WingPlanform,
 };

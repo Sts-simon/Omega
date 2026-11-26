@@ -1,6 +1,10 @@
 [package]
 name = "omega"
+<<<<<<< Updated upstream
 version = "0.39.0"
+=======
+version = "0.47.0"
+>>>>>>> Stashed changes
 edition = "2024"
 description = "Jeu fictif de conception de véhicules militaires avec Rust et Bevy"
 license = "MIT"

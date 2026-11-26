@@ -2,6 +2,7 @@
 //! only builds the top bar and routes the actions that need the campaign or the office.
 
 use crate::campus::{CampusState, CampusView};
+use crate::main_menu::MenuAction;
 use crate::ui_kit::{self, NavStatus, UiInteraction};
 use bevy::prelude::*;
 
@@ -16,13 +17,25 @@ pub(crate) enum UiAction {
     /// Fly the current design and program once, so a stale contract gets fresh evidence.
     ReflyMissileContract,
     RecordMissileRevision,
+    BeginRevisionName(u32),
+    CommitRevisionName,
+    CancelRevisionName,
+    CompareRevision(u32),
+    ClearRevisionComparison,
+    RestoreRevision(u32),
+    /// Main menu and save-slot actions, handled by `main_menu`.
+    Menu(MenuAction),
     Missile(crate::missile::MissileAction),
+    Camera(crate::scene::CameraAction),
     Program(crate::program_editor::ProgramAction),
     Trial(crate::trials::TrialAction),
 }
 
 #[derive(Component)]
 pub(crate) struct UiActionButton(pub(crate) UiAction);
+
+#[derive(Component)]
+pub(crate) struct NavRoot;
 
 pub fn setup(mut commands: Commands) {
     let nav = commands
@@ -46,6 +59,7 @@ pub fn setup(mut commands: Commands) {
             },
             UiInteraction::None,
             BackgroundColor(Color::srgba(0.012, 0.024, 0.036, 0.96)),
+            NavRoot,
         ))
         .id();
 
@@ -72,6 +86,7 @@ pub fn setup(mut commands: Commands) {
         add_nav_button(parent, "RESEARCH", CampusView::Research);
         add_nav_button(parent, "PROGRAM", CampusView::Program);
         add_nav_button(parent, "TRIALS", CampusView::Trials);
+        add_menu_button(parent);
         parent
             .spawn(Node {
                 flex_grow: 1.0,
@@ -111,6 +126,16 @@ pub fn setup(mut commands: Commands) {
     });
 }
 
+fn add_menu_button(parent: &mut ChildSpawnerCommands<'_>) {
+    ui_kit::button(
+        parent,
+        "MENU",
+        UiAction::Menu(MenuAction::Open),
+        ui_kit::ButtonTone::Ghost,
+        Val::Px(64.0),
+    );
+}
+
 fn add_nav_button(parent: &mut ChildSpawnerCommands<'_>, label: &'static str, target: CampusView) {
     let entity = parent
         .spawn((
@@ -143,7 +168,10 @@ pub fn handle_actions(
     mut campus: ResMut<CampusState>,
     missile: Res<crate::missile::MissileSession>,
     program: Res<crate::program_editor::MissileProgramSession>,
+    mut log: ResMut<crate::revisions::RevisionLog>,
+    trials: Res<crate::trials::TrialSession>,
     mut procurement: ResMut<crate::procurement::Procurement>,
+    mut camera: ResMut<crate::scene::CameraCommand>,
 ) {
     for (interaction, button) in &buttons {
         if *interaction != UiInteraction::Pressed {
@@ -162,12 +190,23 @@ pub fn handle_actions(
                 Some(id),
                 &missile.vehicle,
                 &program.program,
+                log.head().map(|revision| revision.id),
+                &trials.history,
+                &mut log,
             ),
             UiAction::SelectMissileContract(id) => campus.message = procurement.select(id),
+            UiAction::Camera(action) => camera.0 = Some(action),
             // Program, trial, workshop and revision actions need more resources than the campaign;
             // `campus::board::handle_extra_actions` runs after this system and dispatches them.
             UiAction::RecordMissileRevision
+            | UiAction::BeginRevisionName(_)
+            | UiAction::CommitRevisionName
+            | UiAction::CancelRevisionName
+            | UiAction::CompareRevision(_)
+            | UiAction::ClearRevisionComparison
+            | UiAction::RestoreRevision(_)
             | UiAction::ReflyMissileContract
+            | UiAction::Menu(_)
             | UiAction::Missile(_)
             | UiAction::Program(_)
             | UiAction::Trial(_) => {}

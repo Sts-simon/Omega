@@ -7,7 +7,8 @@
 
 use crate::aero::AeroSummary;
 use crate::assembly::Vehicle;
-use crate::program::{Block, Program, validate_program};
+use crate::contracts::VehicleFamily;
+use crate::program::{Block, Condition, MAX_CALL_DEPTH, MAX_LOOP_ITERATIONS, Program, validate_program};
 use crate::vehicle::{AIR_BREATHING_MIN_SPEED_MS, G0, PartSpec, RadarClass};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -75,6 +76,9 @@ pub struct FlightReport {
     pub surface_fault: bool,
     /// Blocks the run executed, when the configuration asked for a trace.
     pub trace: Vec<crate::program::BlockTrace>,
+    /// Flags and mode left at the end of the run, shown by the program debugger.
+    pub final_flags: [bool; crate::program::FLAGS],
+    pub final_mode: u8,
     /// Thrust-to-weight ratio when the first stage was ignited.
     pub first_ignition_twr: Option<f64>,
     pub lifted_off: bool,
@@ -83,12 +87,30 @@ pub struct FlightReport {
     pub final_speed_ms: f64,
     pub flight_time_s: f64,
     pub lock: Option<LockResult>,
+    /// Highest altitude reached during the run, in metres.
+    pub max_altitude_m: f64,
+    /// Low-observability score derived only from the altitude profile (0..100).
+    pub discretion: f64,
+    /// Design family the flight belonged to, used to match a trial to a contract profile.
+    pub vehicle_family: VehicleFamily,
+    /// Explosive charge mass carried by the design.
+    pub payload_kg: f64,
+    /// Abstract game yield of the charge, after its grade multiplier.
+    pub payload_yield_kg: f64,
 }
 
 const SEA_LEVEL_HPA: f64 = 1_013.25;
 const SCALE_HEIGHT_M: f64 = 8_000.0;
 const PITCH_OVER_SPEED_MS: f64 = 100.0;
 const ALTITUDE_RATE_MS: f64 = 60.0;
+/// Altitude at which the discretion score falls to about 37 %.
+const DISCRETION_SCALE_HEIGHT_M: f64 = 7_000.0;
+
+/// A low flight is discreet; a high apogee is easy to see. This is a gameplay curve, not a sensor
+/// or radar-cross-section model.
+pub fn discretion_from_altitude(altitude_m: f64) -> f64 {
+    (100.0 * (-altitude_m.max(0.0) / DISCRETION_SCALE_HEIGHT_M).exp()).clamp(0.0, 100.0)
+}
 const DRAG_COEFFICIENT: f64 = 0.35;
 const SAMPLE_PERIOD_S: f64 = 0.5;
 
@@ -144,11 +166,48 @@ fn air_density(altitude_m: f64) -> f64 {
     1.225 * (-altitude_m / SCALE_HEIGHT_M).exp()
 }
 
-struct ThreadState {
+struct ExecFrame {
+    blocks: Vec<Block>,
     pc: usize,
+    /// Top-level block this frame belongs to, used by the debugger highlight.
+    trace_block: usize,
+    root: bool,
+    is_routine: bool,
+    loop_remaining: Option<u32>,
+    loop_condition: Option<Condition>,
+    loop_deadline: Option<f64>,
+    loop_iterations: u32,
+}
+
+struct ThreadState {
+    frames: Vec<ExecFrame>,
     wait_until: f64,
     /// When the current condition block started waiting, so its timeout is measured from there.
     waiting_since: Option<f64>,
+}
+
+impl ThreadState {
+    fn new(blocks: Vec<Block>) -> Self {
+        Self {
+            frames: vec![ExecFrame {
+                blocks,
+                pc: 0,
+                trace_block: 0,
+                root: true,
+                is_routine: false,
+                loop_remaining: None,
+                loop_condition: None,
+                loop_deadline: None,
+                loop_iterations: 0,
+            }],
+            wait_until: 0.0,
+            waiting_since: None,
+        }
+    }
+
+    fn finished(&self) -> bool {
+        self.frames.is_empty()
+    }
 }
 
 pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> Result<FlightReport, Vec<String>> {
@@ -210,18 +269,13 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
     };
     let mut pitched_over = !vertical;
     let mut altitude_target: Option<f64> = if vertical { None } else { Some(altitude) };
+    let mut max_altitude = altitude;
+    let vehicle_family = VehicleFamily::of_vehicle(vehicle);
+    let (payload_kg, payload_yield_kg) = vehicle.payload_summary();
     let mut speed_target: Option<f64> = None;
     let mut throttle = 1.0;
     let mut throttle_integral = 0.5;
-    let mut threads: Vec<ThreadState> = program
-        .threads
-        .iter()
-        .map(|_| ThreadState {
-            pc: 0,
-            wait_until: 0.0,
-            waiting_since: None,
-        })
-        .collect();
+    let mut threads: Vec<ThreadState> = program.threads.iter().cloned().map(ThreadState::new).collect();
     // Shared program state: four flags and one mode register, exactly what the editor exposes.
     let mut flags = [false; crate::program::FLAGS];
     let mut mode: u8 = 0;
@@ -261,15 +315,58 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
 
     loop {
         // --- program ---
-        for thread_index in 0..threads.len() {
+        for (thread_index, thread_state) in threads.iter_mut().enumerate() {
             loop {
-                if t < threads[thread_index].wait_until
-                    || threads[thread_index].pc >= program.threads[thread_index].len()
-                {
+                if t < thread_state.wait_until {
                     break;
                 }
-                let pc = threads[thread_index].pc;
-                let block = program.threads[thread_index][pc];
+                if thread_state.frames.is_empty() {
+                    break;
+                }
+                // A frame that reached its end either starts its next loop pass, leaves a loop, or
+                // returns to its caller. This is where nested blocks and subroutines unwind.
+                if thread_state
+                    .frames
+                    .last()
+                    .is_some_and(|frame| frame.pc >= frame.blocks.len())
+                {
+                    let mut restart = false;
+                    if let Some(frame) = thread_state.frames.last_mut() {
+                        if let Some(remaining) = frame.loop_remaining {
+                            if remaining > 1 {
+                                frame.loop_remaining = Some(remaining - 1);
+                                frame.pc = 0;
+                                restart = true;
+                            }
+                        } else if let Some(condition) = frame.loop_condition {
+                            frame.loop_iterations += 1;
+                            let deadline = frame.loop_deadline.unwrap_or(f64::INFINITY);
+                            if condition.is_met(speed, altitude, &flags, mode) {
+                                if t < deadline && frame.loop_iterations < MAX_LOOP_ITERATIONS {
+                                    frame.pc = 0;
+                                    restart = true;
+                                } else {
+                                    anomalies.push(format!(
+                                        "t={t:.1}s: thread {}: 'repeat while' stopped after {} iteration(s)",
+                                        thread_index + 1,
+                                        frame.loop_iterations
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if restart {
+                        continue;
+                    }
+                    thread_state.frames.pop();
+                    continue;
+                }
+                let (block, trace_block) = {
+                    let frame = thread_state.frames.last().expect("frame exists");
+                    let pc = frame.pc;
+                    let trace_block = if frame.root { pc } else { frame.trace_block };
+                    (frame.blocks[pc].clone(), trace_block)
+                };
                 // Inputs and conditions are gates: they stay on the same block until met, then
                 // report their timeout and are skipped.
                 let met = match block {
@@ -277,6 +374,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                     Block::WaitPressure { hpa, .. } => altitude >= -SCALE_HEIGHT_M * (hpa / SEA_LEVEL_HPA).ln(),
                     Block::WaitFlag { flag, value, .. } => flags[usize::from(flag)] == value,
                     Block::WaitMode { mode: wanted, .. } => mode == wanted,
+                    Block::WaitUntil { condition, .. } => condition.is_met(speed, altitude, &flags, mode),
                     _ => true,
                 };
                 let mut timed_out = false;
@@ -285,10 +383,11 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                         Block::WaitSpeed { timeout_s, .. }
                         | Block::WaitPressure { timeout_s, .. }
                         | Block::WaitFlag { timeout_s, .. }
-                        | Block::WaitMode { timeout_s, .. } => timeout_s,
+                        | Block::WaitMode { timeout_s, .. }
+                        | Block::WaitUntil { timeout_s, .. } => timeout_s,
                         _ => 0.0,
                     };
-                    let since = *threads[thread_index].waiting_since.get_or_insert(t);
+                    let since = *thread_state.waiting_since.get_or_insert(t);
                     if t - since < timeout {
                         break;
                     }
@@ -299,52 +398,64 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                         block.label()
                     ));
                 }
-                threads[thread_index].pc += 1;
-                threads[thread_index].waiting_since = None;
+                if let Some(frame) = thread_state.frames.last_mut() {
+                    frame.pc += 1;
+                }
+                thread_state.waiting_since = None;
                 if config.trace && trace.len() < 4_096 {
                     trace.push(crate::program::BlockTrace {
                         t_s: t,
                         thread: thread_index,
-                        block: pc,
+                        block: trace_block,
                         label: block.label(),
                         timed_out,
+                        anomaly: timed_out,
+                        flags,
+                        mode,
                     });
                 }
+                let anomaly_before = anomalies.len();
                 match block {
                     Block::Wait { seconds } => {
-                        threads[thread_index].wait_until = t + seconds;
+                        thread_state.wait_until = t + seconds;
                         break;
                     }
                     Block::IgniteStage { stage } => {
-                        let has_engine = stages[stage].parts.iter().any(|p| {
-                            matches!(
-                                p.spec,
-                                PartSpec::SolidMotor { .. }
-                                    | PartSpec::LiquidEngine { .. }
-                                    | PartSpec::AirBreathing { .. }
-                            )
-                        });
-                        if !attached[stage] {
-                            anomalies.push(format!(
-                                "t={t:.1}s: stage {} was already dropped, ignition ignored",
-                                stage + 1
-                            ));
-                        } else if !has_engine {
-                            anomalies.push(format!("t={t:.1}s: stage {} has no engine to ignite", stage + 1));
-                        } else if !ignited[stage] {
-                            ignited[stage] = true;
-                            ever_ignited = true;
-                            events.push((t, format!("Stage {} ignited", stage + 1)));
-                            if first_ignition_twr.is_none() {
-                                let thrust: f64 =
-                                    stages[stage].parts.iter().map(|p| p.spec.stats().thrust_n).sum::<f64>()
-                                        * spread.thrust;
-                                first_ignition_twr = Some(thrust / (attached_mass(&attached, &remaining) * G0));
+                        if stage >= stage_count {
+                            anomalies.push(format!("t={t:.1}s: stage {} does not exist", stage + 1));
+                        } else {
+                            let has_engine = stages[stage].parts.iter().any(|p| {
+                                matches!(
+                                    p.spec,
+                                    PartSpec::SolidMotor { .. }
+                                        | PartSpec::LiquidEngine { .. }
+                                        | PartSpec::AirBreathing { .. }
+                                )
+                            });
+                            if !attached[stage] {
+                                anomalies.push(format!(
+                                    "t={t:.1}s: stage {} was already dropped, ignition ignored",
+                                    stage + 1
+                                ));
+                            } else if !has_engine {
+                                anomalies.push(format!("t={t:.1}s: stage {} has no engine to ignite", stage + 1));
+                            } else if !ignited[stage] {
+                                ignited[stage] = true;
+                                ever_ignited = true;
+                                events.push((t, format!("Stage {} ignited", stage + 1)));
+                                if first_ignition_twr.is_none() {
+                                    let thrust: f64 =
+                                        stages[stage].parts.iter().map(|p| p.spec.stats().thrust_n).sum::<f64>()
+                                            * spread.thrust;
+                                    first_ignition_twr = Some(thrust / (attached_mass(&attached, &remaining) * G0));
+                                }
                             }
                         }
                     }
                     Block::SeparateStage { stage } => {
-                        if !attached[stage] {
+                        if stage >= stage_count {
+                            anomalies.push(format!("t={t:.1}s: stage {} does not exist", stage + 1));
+                        } else if !attached[stage] {
                             anomalies.push(format!("t={t:.1}s: stage {} was already dropped", stage + 1));
                         } else if (0..stage).any(|lower| attached[lower]) {
                             anomalies.push(format!(
@@ -381,6 +492,98 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                     Block::SetFlag { flag, value } => flags[usize::from(flag)] = value,
                     Block::SetMode { mode: selected } => mode = selected,
                     Block::Mark { mark } => events.push((t, format!("Mark #{mark}"))),
+                    Block::If {
+                        condition,
+                        then_blocks,
+                        else_blocks,
+                    } => {
+                        let branch = if condition.is_met(speed, altitude, &flags, mode) {
+                            then_blocks
+                        } else {
+                            else_blocks
+                        };
+                        if !branch.is_empty() {
+                            thread_state.frames.push(ExecFrame {
+                                blocks: branch,
+                                pc: 0,
+                                trace_block,
+                                root: false,
+                                is_routine: false,
+                                loop_remaining: None,
+                                loop_condition: None,
+                                loop_deadline: None,
+                                loop_iterations: 0,
+                            });
+                        }
+                    }
+                    // The gate was decided above; reaching here means it was met or timed out.
+                    Block::WaitUntil { .. } => {}
+                    Block::Repeat { times, body } => {
+                        if times > 0 && !body.is_empty() {
+                            thread_state.frames.push(ExecFrame {
+                                blocks: body,
+                                pc: 0,
+                                trace_block,
+                                root: false,
+                                is_routine: false,
+                                loop_remaining: Some(u32::from(times)),
+                                loop_condition: None,
+                                loop_deadline: None,
+                                loop_iterations: 0,
+                            });
+                        }
+                    }
+                    Block::RepeatWhile {
+                        condition,
+                        timeout_s,
+                        body,
+                    } => {
+                        if condition.is_met(speed, altitude, &flags, mode) && !body.is_empty() {
+                            thread_state.frames.push(ExecFrame {
+                                blocks: body,
+                                pc: 0,
+                                trace_block,
+                                root: false,
+                                is_routine: false,
+                                loop_remaining: None,
+                                loop_condition: Some(condition),
+                                loop_deadline: Some(t + timeout_s),
+                                loop_iterations: 0,
+                            });
+                        }
+                    }
+                    Block::Break => {
+                        if let Some(loop_index) = thread_state
+                            .frames
+                            .iter()
+                            .rposition(|frame| frame.loop_remaining.is_some() || frame.loop_condition.is_some())
+                        {
+                            thread_state.frames.truncate(loop_index);
+                        }
+                    }
+                    Block::Call { routine } => {
+                        let depth = thread_state.frames.iter().filter(|frame| frame.is_routine).count();
+                        if depth >= MAX_CALL_DEPTH {
+                            anomalies.push(format!(
+                                "t={t:.1}s: thread {}: subroutine call depth exceeded for '{routine}'",
+                                thread_index + 1
+                            ));
+                        } else if let Some(called) = program.routines.iter().find(|entry| entry.name == routine)
+                            && !called.blocks.is_empty()
+                        {
+                            thread_state.frames.push(ExecFrame {
+                                blocks: called.blocks.clone(),
+                                pc: 0,
+                                trace_block,
+                                root: false,
+                                is_routine: true,
+                                loop_remaining: None,
+                                loop_condition: None,
+                                loop_deadline: None,
+                                loop_iterations: 0,
+                            });
+                        }
+                    }
                     Block::LockTarget => {
                         let lowest = attached.iter().position(|a| *a).unwrap_or(stage_count);
                         let radar = vehicle.best_radar(lowest);
@@ -414,6 +617,15 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
                             speed_ms: speed,
                         });
                     }
+                }
+                if anomalies.len() > anomaly_before
+                    && let Some(entry) = trace.last_mut()
+                {
+                    entry.anomaly = true;
+                }
+                if let Some(entry) = trace.last_mut() {
+                    entry.flags = flags;
+                    entry.mode = mode;
                 }
             }
         }
@@ -520,6 +732,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
             let step = (target - altitude).clamp(-altitude_rate * dt, altitude_rate * dt);
             altitude = (altitude + step).max(0.0);
         }
+        max_altitude = max_altitude.max(altitude);
         max_speed = max_speed.max(speed);
         t += dt;
 
@@ -536,7 +749,7 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         }
 
         // --- end conditions ---
-        let finished_programs = threads.iter().zip(&program.threads).all(|(s, p)| s.pc >= p.len());
+        let finished_programs = threads.iter().all(ThreadState::finished);
         if vertical && !lifted_off && ever_ignited && stuck_s > 2.0 {
             anomalies.push("the vehicle cannot lift off: thrust-to-weight ratio is below 1".to_string());
             break;
@@ -572,6 +785,8 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         avionics: avionics.summary(),
         surface_fault,
         trace,
+        final_flags: flags,
+        final_mode: mode,
         first_ignition_twr,
         lifted_off,
         max_speed_ms: max_speed,
@@ -579,6 +794,11 @@ pub fn simulate(vehicle: &Vehicle, program: &Program, config: FlightConfig) -> R
         final_speed_ms: speed,
         flight_time_s: t,
         lock,
+        max_altitude_m: max_altitude,
+        discretion: discretion_from_altitude(max_altitude),
+        vehicle_family,
+        payload_kg,
+        payload_yield_kg,
     })
 }
 
@@ -588,6 +808,7 @@ mod tests {
     use crate::assembly::tests::sounding_rocket;
     use crate::assembly::{NodeId, Vehicle};
     use crate::avionics::AvionicsModule;
+    use crate::program::Routine;
     use crate::vehicle::{AirfoilProfile, ComputerClass, SensorKind, WingPlanform};
 
     fn two_stage_program(separate_at: f64) -> Program {
@@ -759,6 +980,28 @@ mod tests {
         let program = Program::single(vec![Block::IgniteStage { stage: 0 }, Block::Wait { seconds: 20.0 }]);
         let slow = simulate(&cruise_vehicle(), &program, air(40.0)).unwrap();
         assert!(slow.max_speed_ms < 41.0, "{}", slow.max_speed_ms);
+    }
+
+    #[test]
+    fn the_trial_reports_the_altitude_profile_and_the_vehicle_family() {
+        let mut vehicle = cruise_vehicle();
+        vehicle
+            .add_to_top(
+                "baro",
+                PartSpec::Sensor {
+                    kind: SensorKind::Barometer,
+                },
+            )
+            .unwrap();
+        let program = Program::single(vec![
+            Block::IgniteStage { stage: 0 },
+            Block::HoldPressure { hpa: 900.0 },
+            Block::Wait { seconds: 20.0 },
+        ]);
+        let report = simulate(&vehicle, &program, air(200.0)).unwrap();
+        assert_eq!(report.vehicle_family, VehicleFamily::Cruise);
+        assert!(report.max_altitude_m > 800.0, "apogee {}", report.max_altitude_m);
+        assert!((report.discretion - discretion_from_altitude(report.max_altitude_m)).abs() < 1e-9);
     }
 
     #[test]
@@ -1376,5 +1619,116 @@ mod tests {
             fast.unwrap() < slow.unwrap(),
             "authority settles earlier: {fast:?} vs {slow:?}"
         );
+    }
+
+    fn control_vehicle() -> Vehicle {
+        let mut vehicle = cruise_vehicle();
+        vehicle.replace_part(
+            "pc",
+            PartSpec::Computer {
+                class: ComputerClass::Advanced,
+            },
+        );
+        vehicle
+    }
+
+    #[test]
+    fn branches_loops_wait_and_break_are_deterministic() {
+        let vehicle = control_vehicle();
+        let program = Program::single(vec![
+            Block::SetFlag { flag: 0, value: true },
+            Block::If {
+                condition: Condition::FlagIs { flag: 0, value: true },
+                then_blocks: vec![Block::Mark { mark: 1 }],
+                else_blocks: vec![Block::Mark { mark: 2 }],
+            },
+            Block::Repeat {
+                times: 2,
+                body: vec![Block::ToggleFlag { flag: 1 }],
+            },
+            Block::Repeat {
+                times: 3,
+                body: vec![Block::Mark { mark: 3 }, Block::Break, Block::Mark { mark: 4 }],
+            },
+            Block::WaitUntil {
+                condition: Condition::SpeedAtLeast { speed_ms: 10.0 },
+                timeout_s: 2.0,
+            },
+            Block::Mark { mark: 5 },
+        ]);
+        let a = simulate(&vehicle, &program, air(300.0)).unwrap();
+        let b = simulate(&vehicle, &program, air(300.0)).unwrap();
+        assert_eq!(a, b);
+        let marks: Vec<&str> = a
+            .events
+            .iter()
+            .map(|(_, event)| event.as_str())
+            .filter(|event| event.starts_with("Mark"))
+            .collect();
+        assert_eq!(marks, vec!["Mark #1", "Mark #3", "Mark #5"]);
+        assert!(a.trace.iter().all(|entry| !entry.anomaly), "{:?}", a.anomalies);
+    }
+
+    #[test]
+    fn routines_can_be_called_from_several_places_and_update_state() {
+        let vehicle = control_vehicle();
+        let mut program = Program::single(vec![
+            Block::Call {
+                routine: "check".to_string(),
+            },
+            Block::Call {
+                routine: "check".to_string(),
+            },
+            Block::Mark { mark: 7 },
+        ]);
+        program.routines.push(Routine {
+            name: "check".to_string(),
+            blocks: vec![Block::Mark { mark: 6 }, Block::SetMode { mode: 2 }],
+        });
+        let report = simulate(&vehicle, &program, air(300.0)).unwrap();
+        assert_eq!(report.final_mode, 2);
+        let marks: Vec<&str> = report
+            .events
+            .iter()
+            .map(|(_, event)| event.as_str())
+            .filter(|event| event.starts_with("Mark"))
+            .collect();
+        assert_eq!(marks, vec!["Mark #6", "Mark #6", "Mark #7"]);
+    }
+
+    #[test]
+    fn repeat_while_stops_when_its_condition_becomes_false() {
+        let vehicle = control_vehicle();
+        let program = Program::single(vec![
+            Block::IgniteStage { stage: 0 },
+            Block::SetFlag { flag: 2, value: true },
+            Block::RepeatWhile {
+                condition: Condition::FlagIs { flag: 2, value: true },
+                timeout_s: 5.0,
+                body: vec![Block::Mark { mark: 6 }, Block::ToggleFlag { flag: 2 }],
+            },
+            Block::Mark { mark: 7 },
+        ]);
+        let report = simulate(&vehicle, &program, air(300.0)).unwrap();
+        let marks: Vec<&str> = report
+            .events
+            .iter()
+            .map(|(_, event)| event.as_str())
+            .filter(|event| event.starts_with("Mark"))
+            .collect();
+        assert_eq!(marks, vec!["Mark #6", "Mark #7"]);
+        assert!(report.anomalies.is_empty(), "{:?}", report.anomalies);
+    }
+
+    #[test]
+    fn programs_saved_before_routines_and_layout_still_load() {
+        let program = Program::single(vec![Block::Wait { seconds: 0.1 }]);
+        let mut value = serde_json::to_value(&program).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("routines");
+        object.remove("layout");
+        let loaded: Program = serde_json::from_value(value).unwrap();
+        assert!(loaded.routines.is_empty());
+        assert!(loaded.layout.is_empty());
     }
 }

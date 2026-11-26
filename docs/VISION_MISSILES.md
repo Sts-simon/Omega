@@ -8,7 +8,7 @@ The game is about trade-offs, progression, experimentation and meeting fictional
 
 ## Gameplay systems
 
-- **Contracts:** offers are grouped by fictional mission and vehicle families. Research controls which families become available.
+- **Contracts:** offers are grouped by fictional mission and vehicle families, with mission profiles that add charge mass/yield, a low-altitude discretion score or a high-altitude apogee demand. Research controls which families become available.
 - **Research:** technologies unlock abstract vehicle parts, program options and contract families. Progress consumes game credits and advances the campaign clock.
 - **Workshop:** the player assembles a staged vehicle from a limited set of fictional components and sees derived gameplay statistics and validation feedback.
 - **Program editor:** a visual, resource-limited editor lets the player arrange a small set of abstract blocks in parallel threads.
@@ -27,7 +27,7 @@ The game is about trade-offs, progression, experimentation and meeting fictional
 
 ## Explicit safety and scope boundary
 
-Omega is a fictional game, not an engineering tool. It does not model or provide real-world guidance, navigation, tracking, targeting, seeker logic, warhead design, countermeasures or weapon performance data. Any lock or trial outcome is an abstract seeded game event. The scientific library in the workspace is independent of the game and is not a source of weapon-design validation.
+Omega is a fictional game, not an engineering tool. It does not model or provide real-world guidance, navigation, tracking, targeting, seeker logic, warhead design, countermeasures or weapon performance data. An explosive charge is represented only by a payload mass, a research grade and a game yield; there is no chemistry, blast or fragmentation model. Any lock or trial outcome is an abstract seeded game event. The scientific library in the workspace is independent of the game and is not a source of weapon-design validation.
 
 ## Current status
 

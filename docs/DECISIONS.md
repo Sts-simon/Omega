@@ -3,15 +3,168 @@
 Short records for the choices made while rebuilding the missile workshop. Each one names the
 simplest option that keeps the game playable and testable; revisit only with a measured reason.
 
-## 2026-11-24 — A program is chains plus shared state, not a node canvas
+## 2026-11-26 — Contracts use explicit integer goals; revisions stay append-only
 
-The editor keeps the thread model and draws the connections between consecutive blocks instead of
-introducing a free 2D node canvas. Conditions and modes are gates on the current block, with a
-timeout, and four flags plus one mode register are the only shared state. Why: the flight already
-executes parallel threads, the chain is what a missile program actually is, and a canvas would add
-node placement, port hit-testing and a branch/merge language without teaching a new decision. The
-connection rules stay real: a terminal block has no successor and an ignition cannot follow the
-separation of its stage.
+The 0.45 offer keeps the existing score thresholds and adds separate integer goals for mass,
+reliability and complexity. Integers avoid introducing `f64` into a type that derives `Eq` and is
+compared as a persisted board value; the application converts `DesignMetrics` to the same scale at
+display and delivery time. Budget and goals are checked before the dossier, but a refusal never
+removes the active contract. Secondary goals are all-or-nothing because a partial bonus would make
+the reward table depend on an arbitrary weighting; meeting every optional goal pays
+`secondary_bonus_cr` once.
+
+Revision restore copies the old vehicle and commits it as a new revision instead of moving `head`
+backwards. This keeps every parent chain, submitted id and trial association valid, and makes
+"restore" visible in the same append-only history used by the comparison. The submitted revision
+is persisted separately from `head`, because a player may record a newer revision after delivery
+while the contract still refers to the earlier one.
+
+The delivery PDF is generated from a pure list builder. It repeats the offer context and the
+requirement matrix rather than embedding game state, and it filters trial campaigns by both stored
+hashes so a dossier cannot cite a campaign flown on a different design or program.
+
+## 2026-11-26 — Workshop ergonomics stay in the session, locks cover subtrees
+
+Multiple selection, collapse, hide, lock, group names, favourites, recents and the palette query
+are editor state, not vehicle data. They live in `MissileSession`, are not serialized, and are
+summarised by `ui_signature()` so a board rebuilds only when one of them changes; schema 7 and old
+saves are untouched. Hover lives in a resource outside the session so moving the pointer can never
+mark the design dirty.
+
+Highlights are gizmo wire boxes rather than material or mesh rebuilds: hovering a 45-part design
+would otherwise respawn meshes every frame. Hidden parts are skipped by the mesh rebuild, picking
+and attachment markers, but `Vehicle` and every rule still see them. A lock covers the whole
+subtree: deleting or moving an ancestor that contains a locked part is refused, because otherwise
+the protected child would be removed or moved by an edit aimed at its parent.
+
+Camera framing goes through an optional interpolated `CameraGoal` in the rig. `F`, `Home`, the five
+view keys and the palette buttons all build the same goal from the selected bounds or the whole
+vehicle, which is what makes multi-selection framing and a smooth transition share one path. Free
+mode only changes how drag and wheel motion are interpreted; it does not create a second camera.
+
+## 2026-11-26 — Fixed-section parts carry a mounting diameter, and the nose is a part
+
+Sensors, computers, decouplers, payloads and mission electronics have no length/diameter fields of
+their own, so fitting them to a wider airframe forced an adapter or left a diameter-step warning.
+They now carry a per-placement `size_scale` (default 1, schema 7 unchanged) and the inspector
+exposes it as an actual mounting diameter in 5 cm steps. The scale multiplies only the cross-section:
+the part's length and mass stay its own, because the complaint was a radial step, not a request for
+larger versions of the electronics. Keeping the factor on `PlacedPart` avoids adding a scale field
+to every fixed `PartSpec` variant and keeps existing saves valid; the warning, poses, picking and
+mesh all read the same scaled dimensions.
+
+The automatic ogive cap is removed. A `NoseCone` part owns its length, base diameter and profile
+(conical, ogive, parabolic), contributes its shell mass and is the only thing that closes the top of
+the stack. It is a terminal part: adding above it is refused until the player removes it, so a
+palette drop can never place a tank through the tip. Presets do not add one implicitly, which keeps
+the 0.40 behaviour of an open stack until the designer chooses a cap.
+
+## 2026-11-26 — The inspector edits the existing attachment transform
+
+The numeric inspector reads and writes the six `Attach` fields already stored by schema 7
+(`offset_*_m` and `rotation_*_deg`), so direct entry needs no new save version. The precision
+selector only controls the `-`/`+` step and its rounding; direct entries are rounded to the field's
+displayed decimals (four for metres, three for degrees) so the stored value and the visible value
+cannot disagree. All six values are validated before the vehicle is mutated, and the whole field
+edit goes through `set_transform_values`, which records one undo entry. A gizmo drag still previews
+in `Vehicle` and commits once on release. The initial transform means the default zero mounting,
+not a saved per-part baseline, because the schema has no room for one and zero is the mounting the
+rules already use.
+
+## 2026-11-25 — Contracts are mission profiles, not only family thresholds
+
+Each mission family now draws from a small set of profiles (deep strike, veil raid, precision
+strike, air superiority, long-range intercept, point defence, area defence, theatre strike, sea
+skimmer). A profile sets the vehicle family, charge mass and yield, and either a low-altitude
+discretion demand or a high-apogee demand. The board takes at most two profiles per family so the
+cards still fit on screen. This is deliberately a rules-layer concept: `contracts.rs` owns the
+profile table and requirement construction, while the office only stores offers and evidence.
+
+Discretion is derived from the trial's peak altitude, not stored on the design: a low flight is
+discreet, a high ballistic apogee is not. The curve is a single gameplay exponential
+(`100 * exp(-altitude / 7000 m)`); it is not a sensor or radar-cross-section model. A profile-bearing
+contract only records evidence from its own vehicle family, and the same structural design cannot
+be delivered twice. The delivery fingerprint serializes the attachment tree with part ids, part
+names and child order removed, so renaming the vehicle or every part cannot create a second craft.
+The family check prevents cross-profile evidence; the delivery check makes the
+one-craft-one-contract rule explicit rather than relying on every profile being numerically
+incompatible.
+
+## 2026-11-25 — An explosive charge is an abstract payload grade
+
+A charge is a real workshop part with a charge mass, a casing mass and a game yield. Three grades
+(standard, improved, advanced) are separate palette entries because the research gate is already a
+per-part capability; the improved and advanced grades are two Materials projects. The grade raises
+yield per kilogram, never models chemistry, blast, fragmentation or a real warhead. Contracts ask
+for a minimum charge mass and a minimum yield, so the player can trade mass for research or accept
+a heavier airframe. High-altitude contracts also need a barometer and a low-pressure hold block;
+their apogee requirement is what makes a ballistic flight useful rather than a universal design.
+
+## 2026-11-25 — Cruise vehicles are edited horizontally
+
+The workshop rotates the whole vehicle presentation when it carries an air-breathing engine:
+`orientation()` maps the local nose axis to +X and the radial mounts into the horizontal plane.
+Picking, free nodes, gizmos and the camera go through the same `world_point()` / `part_rotation()`
+helpers, so the layout stays editable instead of being a baked transform. Why an air-breathing
+engine: it is the rules' existing cruise marker; a new save field would alter the schema for a
+presentation choice. Body sections are rounded rectangles generated in code for the same reason:
+no external mesh or texture asset enters the save or the release archive.
+
+## 2026-11-25 — An adapter owns the diameter transition
+
+An adapter is a real airframe part, not a scaling flag on the neighbouring bodies: it carries an
+inlet diameter, an outlet diameter, a length and a profile (conical, ogival, stepped). The two
+axial faces are what the diameter warning compares, so the adapter absorbs the step instead of the
+two bodies warning around it. The mesh is one rounded body whose radius follows the profile; the
+nose uses the outlet radius. The profile changes casing mass (1.12 for the ogive, 0.92 for the
+stepped form) but not the joint geometry, which keeps the rule explainable and the save small. The
+schema moves to 7; older graphs still load because the new variant is additive.
+
+The camera resize path and the gizmo ring point were folded into one helper each while adding the
+part. Both keep their previous formulas: only the duplicated expressions moved.
+
+## 2026-11-25 — The workshop camera keeps the model in the free strip
+
+The workshop aims a cruise vehicle above the central inspector with a vertical target bias derived
+from the viewport height (2.4 m at 960 px, 3.2 m at 768 px). The same bias is reapplied when the
+window is resized, while yaw, pitch, zoom and pan are kept, so opening or resizing at either width
+keeps the model readable instead of sliding it behind the panel. The opening view is a light rear
+3/4 (yaw -0.4, pitch 0.72): the older -1.05 yaw looked almost down the fuselage and hid the nose
+behind the radar. Transform handles are 0.7 m and rings 0.5 m: the previous 1.5 m arrows dwarfed a
+2.6 m missile, and 0.9 m put the nose handle under the header at 1280. The nose
+is 2.2 top radii long, the turbofan intake faces the nose, and a solid motor ends in a dark nozzle
+skirt. These are presentation-only changes; the save schema and design figures are unchanged.
+
+## 2026-11-24 — 0.36–0.42: chains plus shared state before the canvas
+
+For 0.36–0.42 the editor kept the thread model and drew connections between consecutive blocks
+instead of a free 2D canvas. Conditions and modes were gates on the current block, with a timeout,
+and four flags plus one mode register were the only shared state. Why at the time: the flight already
+executed parallel threads and the chain was easy to read without node placement or port hit-testing.
+The connection rules stayed real: a terminal block has no successor and an ignition cannot follow
+the separation of its stage. This choice is superseded by 0.43 for the presentation only; the
+execution model and validation rules described here still hold.
+
+## 2026-11-26 — 0.44 stores whole snapshots so a campaign can be replayed
+
+`TrialHistoryEntry` stores the complete `Vehicle` and `Program` that flew, not only their hashes.
+Why: the history must answer "what exactly produced this result?" after the workshop moved on, and
+a hash cannot be flown again. The entry also keeps the seed range, launch profile, revision id and
+program version so the laboratory can associate a campaign with the design log and identify stale
+proofs. The cost is a larger `trials/history.json`; the history is capped and remains separate from
+the vehicle, program, contracts and revision files. Relaunch deliberately ignores the current
+workshop state: a replay is evidence of the stored snapshot, not of what the player has since built.
+
+## 2026-11-26 — 0.43 adds a layout canvas without changing the language
+
+The editor now stores optional positions, zoom, pan and groups in `ProgramLayout`, separate from the
+executable `threads` and `routines`. The canvas is a view over the same blocks and the same
+`program_issues()` validation; dragging never changes execution order, and a program saved before
+0.43 loads with a neutral layout. Why: free placement, branches and routines make a long chain hard
+to scan, while keeping order in the vectors preserves determinism and the old JSON contract. Control
+bodies render as rows inside their card, so nesting stays readable without inventing a second
+coordinate system for every block. The debugger remains a replay of `FlightReport::trace`, not a
+second interpreter; the playback cursor only selects which trace entry colours the cards.
 
 ## 2026-11-24 — The debugger reuses the seeded flight
 
@@ -189,3 +342,35 @@ The interaction lot kept the values below; each is now covered by code and by a 
   export cannot corrupt a campaign.
 - **Explainability is derived, not stored.** `aero::breakdown` recomputes contributions from the same
   `Effect` tables; warnings carry an optional part id rather than a new warning type in the save.
+
+## 2026-11-26 — 3D assembly layer (0.42.0)
+
+- **Eight radial mounts, not a new node type.** Bodies expose `Radial(0..8)`; the first four keep
+  their old 90° positions, the last four add 45° points. `radial_angle(spec, index)` is shared by
+  poses, layout, picking and the preview, so a body and every consumer agree on where a mount is.
+  Existing designs that use the first four mounts are unchanged.
+- **Symmetry stays inside schema 7.** The existing `symmetry` string now reads
+  `<key>-<kind><index>` (`r` radial, `b` bilateral, `a` axial). A legacy `<key>` (for example
+  `sym-1`) decodes as radial index 0. This avoids a vehicle migration and keeps old four-way sets
+  linked while adding modes, counts and a copy index.
+- **A symmetry edit is a delta mapped per copy.** Parameter and design-choice edits are applied to
+  every member directly. A gizmo translation is rotated around Y for radial sets and mirrored on X
+  for bilateral sets; an axial set receives the 180° turn. A rotation delta follows the same mode.
+  The alternative — recomputing every copy from one anchor — was rejected because old sets do not
+  store enough information to prove which copy is the anchor.
+- **Duplicate onto free mounts; break the clone's link.** A duplicated subtree keeps its inner
+  `parent` edges and is attached to a free mount of the same parent. Clones start with `symmetry:
+  None`, so editing one does not silently drag the original set. A root part cannot be duplicated
+  because a vehicle allows exactly one root; the player is told to select a subassembly instead.
+- **Library files sit outside the slot.** Saved sets live in the slot (`designs/subassemblies.json`,
+  own schema and atomic write), while deliberate exports are plain JSON files in
+  `exports/subassemblies/<slug>.json`. Import scans that folder, validates every set and reports
+  unreadable files without hiding the valid ones. This is what makes a set reusable in another
+  campaign instead of being bound to one slot.
+- **The placement ghost is presentation only.** Automatic snapping uses a 140 px search radius and
+  the nearest free mount; the tighter 28 px `SNAP_PIXELS` only makes the exact node marker larger.
+  The ghost mesh is built from the real part dimensions and the rules' `node_status` decides
+  green/red; releasing on red attaches nothing. No rule lives in the render pass.
+- **Assembly control reads the shared report.** `MissileSession::assembly_report` classifies the
+  existing `Vehicle::issues`, then adds editor locks and named-group connectivity. The panel is a
+  view; it never reimplements a rule, and every row keeps a part id so one click selects it.

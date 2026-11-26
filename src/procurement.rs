@@ -12,9 +12,12 @@ use crate::save::{self, SaveFile};
 use crate::trials::TrialSession;
 use bevy::prelude::*;
 use omega_data::{ContentHash, hash_serializable};
-use omega_rules::contracts::{ContractOffer, MissileTrial, MissionFamily, generate_available_board, offer_for_family};
+use omega_rules::contracts::{
+    ContractOffer, ContractProfile, MAX_PROFILES_PER_FAMILY, MissileTrial, MissionFamily, generate_available_board,
+    offer_for_profile,
+};
 use omega_rules::research::capability_label;
-use omega_rules::{Dossier, DossierDecision, Program, ResearchState, Vehicle};
+use omega_rules::{Dossier, DossierDecision, NodeId, PartSpec, PlacedPart, Program, ResearchState, Vehicle};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -28,10 +31,98 @@ fn system_seed() -> u64 {
         .unwrap_or(0xA3E0_1AB5_2026_0001)
 }
 
+/// A part's attachment, without the parent id: the tree position is represented by where the part
+/// sits in [`StructuralPart`], not by a mutable identifier.
+#[derive(Serialize)]
+struct StructuralAttachment {
+    node: NodeId,
+    angle_deg: f64,
+    separation: bool,
+    offset_x_m: f64,
+    offset_y_m: f64,
+    offset_z_m: f64,
+    rotation_x_deg: f64,
+    rotation_y_deg: f64,
+    rotation_z_deg: f64,
+}
+
+/// The shape of a design with ids and display metadata removed. Children are sorted by their own
+/// serialized shape, so neither part order nor renamed ids can make an identical craft look new.
+#[derive(Serialize)]
+struct StructuralPart {
+    spec: PartSpec,
+    attachment: Option<StructuralAttachment>,
+    children: Vec<StructuralPart>,
+}
+
+#[derive(Serialize)]
+struct StructuralVehicle {
+    roots: Vec<StructuralPart>,
+}
+
+fn structural_part(part: &PlacedPart, parts: &[PlacedPart], seen: &mut BTreeSet<String>) -> Option<StructuralPart> {
+    if !seen.insert(part.id.clone()) {
+        return None;
+    }
+    let mut children = Vec::new();
+    for child in parts {
+        let Some(attach) = &child.attach else {
+            continue;
+        };
+        if attach.parent == part.id {
+            children.push(structural_part(child, parts, seen)?);
+        }
+    }
+    seen.remove(&part.id);
+    children.sort_by_key(|child| serde_json::to_string(child).unwrap_or_default());
+    let attachment = part.attach.as_ref().map(|attach| StructuralAttachment {
+        node: attach.node,
+        angle_deg: attach.angle_deg,
+        separation: attach.separation,
+        offset_x_m: attach.offset_x_m,
+        offset_y_m: attach.offset_y_m,
+        offset_z_m: attach.offset_z_m,
+        rotation_x_deg: attach.rotation_x_deg,
+        rotation_y_deg: attach.rotation_y_deg,
+        rotation_z_deg: attach.rotation_z_deg,
+    });
+    Some(StructuralPart {
+        spec: part.spec,
+        attachment,
+        children,
+    })
+}
+
+fn structural_design(vehicle: &Vehicle) -> Option<StructuralVehicle> {
+    let mut roots = Vec::new();
+    for root in vehicle.parts.iter().filter(|part| part.attach.is_none()) {
+        roots.push(structural_part(root, &vehicle.parts, &mut BTreeSet::new())?);
+    }
+    if roots.is_empty() {
+        return None;
+    }
+    roots.sort_by_key(|root| serde_json::to_string(root).unwrap_or_default());
+    Some(StructuralVehicle { roots })
+}
+
+/// Identity of the airframe itself, independent of its display name and of the ids assigned to its
+/// parts. Copying a design, or renaming its parts, cannot create a second craft for the
+/// one-design-one-contract rule.
+fn design_fingerprint(vehicle: &Vehicle) -> ContentHash {
+    if let Some(hash) = structural_design(vehicle).and_then(|design| hash_serializable(&design).ok()) {
+        return hash;
+    }
+    // Invalid or cyclic assemblies have no structural tree; keep the old full-design fallback
+    // rather than making every invalid design share one fingerprint.
+    let mut fallback = vehicle.clone();
+    fallback.name.clear();
+    hash_serializable(&fallback).unwrap_or_else(|_| ContentHash::of_bytes(b"vehicle"))
+}
+
 /// The vehicle and program hashes a dossier is checked against.
 pub(crate) fn hashes(vehicle: &Vehicle, program: &Program) -> (ContentHash, ContentHash) {
     let vehicle = hash_serializable(vehicle).unwrap_or_else(|_| ContentHash::of_bytes(b"vehicle"));
-    let program = hash_serializable(program).unwrap_or_else(|_| ContentHash::of_bytes(b"program"));
+    let program = hash_serializable(&program.semantic_copy()).unwrap_or_else(|_| ContentHash::of_bytes(b"program"));
     (vehicle, program)
 }
 
@@ -56,6 +147,16 @@ pub(crate) struct CompletedContract {
     pub reward: u64,
     pub completed_day: u32,
     pub score_percent: u8,
+    /// Revision submitted with the dossier; old deliveries have no revision link.
+    #[serde(default)]
+    pub revision_id: Option<u32>,
+    #[serde(default)]
+    pub secondary_bonus: u64,
+    /// Structural design fingerprint delivered. Used to stop one craft from being sold to several
+    /// contracts, even after renaming it or its parts. Older saves hold the full vehicle hash,
+    /// which still matches a same-name design.
+    #[serde(default)]
+    pub vehicle: Option<ContentHash>,
 }
 
 /// Whether the evidence on file still describes the current design and program.
@@ -84,6 +185,7 @@ pub(crate) struct Delivery {
     pub id: u32,
     pub reward: u64,
     pub score_percent: u8,
+    pub secondary_bonus: u64,
 }
 
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -143,6 +245,27 @@ fn starting_capabilities() -> BTreeSet<String> {
 }
 
 impl Procurement {
+    pub(crate) fn load_active(&mut self) {
+        *self = match save::read(SaveFile::Procurement) {
+            Ok(Some(bytes)) => match Self::from_bytes(&bytes) {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    warn!("Could not read the missile contracts: {error}");
+                    Self::fresh(system_seed())
+                }
+            },
+            Ok(None) => Self::fresh(system_seed()),
+            Err(error) => {
+                warn!("Could not read the missile contracts: {error}");
+                Self::fresh(system_seed())
+            }
+        };
+    }
+
+    pub(crate) fn new_campaign(&mut self) {
+        *self = Self::fresh(system_seed());
+    }
+
     pub(crate) fn fresh(seed: u64) -> Self {
         let caps = starting_capabilities();
         let offers = generate_available_board(seed, 1, &caps);
@@ -288,10 +411,17 @@ impl Procurement {
         format!("Accepted contract #{id}")
     }
 
-    /// Fold a finished trial into every active contract. Returns a message when it was recorded.
+    /// Fold a finished trial into every active contract that accepts its flight profile. A trial
+    /// flown by the wrong vehicle family is refused by those contracts instead of becoming
+    /// evidence for an unrelated mission.
     pub(crate) fn record_trial(&mut self, trial: MissileTrial) -> Option<String> {
         let mut recorded = 0;
+        let mut incompatible = 0;
         for active in &mut self.active {
+            if !active.offer.accepts_trial(&trial) {
+                incompatible += 1;
+                continue;
+            }
             let duplicate = active.trials.iter().any(|known| {
                 known.vehicle == trial.vehicle && known.program == trial.program && known.seed == trial.seed
             });
@@ -301,11 +431,16 @@ impl Procurement {
             active.trials.push(trial.clone());
             recorded += 1;
         }
-        if recorded == 0 {
+        if recorded == 0 && incompatible == 0 {
             return None;
         }
         self.dirty = true;
-        Some(format!("Trial evidence saved on {recorded} contract(s)"))
+        let skipped = if incompatible > 0 {
+            format!(" ({incompatible} refused: airframe profile mismatch)")
+        } else {
+            String::new()
+        };
+        Some(format!("Trial evidence saved on {recorded} contract(s){skipped}"))
     }
 
     pub(crate) fn deliver(
@@ -314,6 +449,7 @@ impl Procurement {
         contract_id: Option<u32>,
         vehicle: &Vehicle,
         program: &Program,
+        revision_id: Option<u32>,
     ) -> Result<Delivery, String> {
         let id = contract_id
             .or_else(|| self.selected_id())
@@ -326,6 +462,38 @@ impl Procurement {
         let active = &self.active[index];
         if day > active.due_day() {
             return Err(format!("Deadline passed on day {}.", active.due_day()));
+        }
+        let metrics = crate::lab::DesignMetrics::of(vehicle);
+        if !crate::lab::budget_ok(&active.offer, &metrics) {
+            return Err(format!(
+                "Design budget exceeded: {:.0} cr spent, {} cr allowed.",
+                metrics.cost_cr, active.offer.design_budget_cr
+            ));
+        }
+        let primary = crate::lab::goal_statuses(&active.offer.primary_goals, &metrics);
+        let failed: Vec<String> = primary
+            .iter()
+            .filter(|goal| !goal.met)
+            .map(|goal| goal.text())
+            .collect();
+        if !failed.is_empty() {
+            return Err(format!("Primary design goals not met: {}.", failed.join("; ")));
+        }
+        let secondary = crate::lab::goal_statuses(&active.offer.secondary_goals, &metrics);
+        let secondary_bonus = if !secondary.is_empty() && secondary.iter().all(|goal| goal.met) {
+            active.offer.secondary_bonus_cr
+        } else {
+            0
+        };
+        let (vehicle_hash, _) = hashes(vehicle, program);
+        let design = design_fingerprint(vehicle);
+        if let Some(previous) = self.completed.iter().find(|contract| {
+            contract.vehicle.as_ref() == Some(&design) || contract.vehicle.as_ref() == Some(&vehicle_hash)
+        }) {
+            return Err(format!(
+                "This exact design was already delivered to contract #{}. Build a distinct airframe for another contract.",
+                previous.id
+            ));
         }
         let dossier = self.dossier_for(active, vehicle, program);
         if !active.offer.accepts_dossier(&dossier) {
@@ -340,12 +508,13 @@ impl Procurement {
             return Err(format!("Dossier refused: {reason}"));
         }
         let score_percent = (dossier.score * 100.0).round().clamp(0.0, 100.0) as u8;
-        let reward = quality_reward(active.offer.reward_credits, dossier.score);
+        let reward = quality_reward(active.offer.reward_credits, dossier.score) + secondary_bonus;
         let active = self.active.remove(index);
         let delivery = Delivery {
             id: active.offer.id,
             reward,
             score_percent,
+            secondary_bonus,
         };
         self.completed.push(CompletedContract {
             id: active.offer.id,
@@ -354,6 +523,9 @@ impl Procurement {
             reward,
             completed_day: day,
             score_percent,
+            revision_id,
+            secondary_bonus,
+            vehicle: Some(design),
         });
         self.selected = self.active.first().map(|active| active.offer.id);
         self.refill();
@@ -361,23 +533,33 @@ impl Procurement {
         Ok(delivery)
     }
 
-    /// Drop offers the research no longer supports (never normally) and add one for each family
-    /// that became available, unless it is already on the board or under contract.
+    /// Drop offers the research no longer supports (never normally) and top each available family
+    /// back up to two profile offers, without duplicating one already on the board or under contract.
     pub(crate) fn refill(&mut self) {
         self.offers.retain(|offer| offer.is_available(&self.known_caps));
-        let contracted: Vec<MissionFamily> = self.active.iter().map(|active| active.offer.mission_family).collect();
         for family in MissionFamily::ALL {
             if !(1..=5u8).any(|difficulty| self.known_caps.contains(family.capability(difficulty))) {
                 continue;
             }
-            if contracted.contains(&family) || self.offers.iter().any(|offer| offer.mission_family == family) {
-                continue;
-            }
-            let id = self.next_id;
-            self.next_id = self.next_id.saturating_add(1);
-            let offer = offer_for_family(self.seed, id, family, &self.known_caps);
-            if offer.is_available(&self.known_caps) {
-                self.offers.push(offer);
+            let mut used: Vec<ContractProfile> = self
+                .offers
+                .iter()
+                .chain(self.active.iter().map(|active| &active.offer))
+                .filter_map(|offer| offer.profile)
+                .filter(|profile| profile.mission_family() == family)
+                .collect();
+            for profile in ContractProfile::available_for_family(family, &self.known_caps) {
+                if used.len() >= MAX_PROFILES_PER_FAMILY {
+                    break;
+                }
+                if used.contains(&profile) {
+                    continue;
+                }
+                let id = self.next_id;
+                self.next_id = self.next_id.saturating_add(1);
+                self.offers
+                    .push(offer_for_profile(self.seed, id, profile, &self.known_caps));
+                used.push(profile);
             }
         }
     }
@@ -434,7 +616,7 @@ impl Procurement {
 
 /// Persist the office when it changed.
 pub(crate) fn persist_procurement(mut procurement: ResMut<Procurement>) {
-    if !procurement.dirty {
+    if !procurement.dirty || crate::save::active_slot().is_none() {
         return;
     }
     match procurement
@@ -499,7 +681,8 @@ fn trial_run_id(procurement: &Procurement) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omega_rules::contracts::{ContractRequirements, VehicleFamily};
+    use crate::lab::DesignMetrics;
+    use omega_rules::contracts::{ContractProfile, ContractRequirements, DesignGoal, DesignGoalMetric, VehicleFamily};
     use omega_rules::{ComputerClass, Part, PartSpec, Stage};
 
     fn offer_for(family: VehicleFamily) -> ContractOffer {
@@ -507,15 +690,22 @@ mod tests {
             id: 7,
             mission_family: MissionFamily::AirToSurface,
             vehicle_family: family,
+            profile: None,
             title: "Test programme".into(),
             client: "Test client".into(),
             brief: "Test brief".into(),
+            context: "Test context".into(),
             requirements: ContractRequirements {
                 min_design_score: 0,
                 min_program_score: 0,
                 min_trial_score: 0,
                 required_capabilities: Vec::new(),
             },
+            design_budget_cr: 0,
+            primary_goals: Vec::new(),
+            secondary_goals: Vec::new(),
+            secondary_bonus_cr: 0,
+            requested_dossier: Vec::new(),
             reward_credits: 9_000,
             deadline_days: 10,
             difficulty: 1,
@@ -566,7 +756,20 @@ mod tests {
             lifted_off: true,
             separated: true,
             lock_acquired: None,
+            vehicle_family: None,
+            max_altitude_m: 0.0,
+            discretion: 0.0,
+            payload_kg: 0.0,
+            payload_yield_kg: 0.0,
         }
+    }
+
+    fn profile_offer(profile: ContractProfile) -> ContractOffer {
+        let mut offer = offer_for(profile.vehicle_family());
+        offer.mission_family = profile.mission_family();
+        offer.profile = Some(profile);
+        offer.requirements.min_trial_score = 0;
+        offer
     }
 
     fn office() -> Procurement {
@@ -659,6 +862,28 @@ mod tests {
     }
 
     #[test]
+    fn a_refilled_board_keeps_two_profiles_per_family_at_most() {
+        let mut procurement = Procurement::fresh(3);
+        procurement.sync_offers(&caps(&[
+            "family:cruise",
+            "family:surface_to_air",
+            "family:air_to_air",
+            "family:anti_ship",
+        ]));
+        for family in MissionFamily::ALL {
+            let offers: Vec<_> = procurement
+                .offers()
+                .iter()
+                .filter(|offer| offer.mission_family == family)
+                .collect();
+            assert_eq!(offers.len(), 2, "{family:?}: {offers:?}");
+            let profiles: Vec<ContractProfile> = offers.iter().filter_map(|offer| offer.profile).collect();
+            assert_eq!(profiles.len(), 2);
+            assert_ne!(profiles[0], profiles[1], "a family must not repeat a profile");
+        }
+    }
+
+    #[test]
     fn a_trial_becomes_evidence_and_a_delivery_is_credited() {
         let mut procurement = office();
         let owned = caps(&[]);
@@ -672,7 +897,7 @@ mod tests {
         let active = procurement.selected().unwrap();
         let dossier = procurement.dossier_for(active, &vehicle(), &program());
         assert!(matches!(dossier.decision, DossierDecision::Accepted { .. }));
-        let delivery = procurement.deliver(4, Some(7), &vehicle(), &program()).unwrap();
+        let delivery = procurement.deliver(4, Some(7), &vehicle(), &program(), None).unwrap();
         assert_eq!(delivery.reward, 10_350, "a perfect dossier pays a 15 % bonus");
         assert_eq!(procurement.completed()[0].reward, delivery.reward);
         assert_eq!(procurement.completed().len(), 1);
@@ -684,6 +909,78 @@ mod tests {
                 .any(|offer| offer.mission_family == MissionFamily::AirToSurface),
             "the delivered family gets a fresh offer"
         );
+    }
+
+    fn goal(id: &str, metric: DesignGoalMetric, limit: u32, at_most: bool) -> DesignGoal {
+        DesignGoal {
+            id: id.to_string(),
+            label: id.to_string(),
+            metric,
+            limit,
+            at_most,
+        }
+    }
+
+    #[test]
+    fn combined_goals_gate_delivery_and_secondary_goals_pay_a_bonus() {
+        let metrics = DesignMetrics::of(&vehicle());
+        let mut procurement = office();
+        let offer = &mut procurement.offers[0];
+        offer.design_budget_cr = metrics.cost_cr.ceil() as u64;
+        offer.primary_goals = vec![
+            goal(
+                "RELIABILITY",
+                DesignGoalMetric::Reliability,
+                metrics.reliability.floor() as u32,
+                false,
+            ),
+            goal(
+                "COMPLEXITY",
+                DesignGoalMetric::Complexity,
+                metrics.complexity.ceil() as u32,
+                true,
+            ),
+            goal("MASS", DesignGoalMetric::MassKg, metrics.mass_kg.ceil() as u32, true),
+        ];
+        offer.secondary_goals = vec![goal(
+            "SECONDARY",
+            DesignGoalMetric::Reliability,
+            metrics.reliability.floor() as u32,
+            false,
+        )];
+        offer.secondary_bonus_cr = 1_250;
+        procurement.accept(0, 3, 1, &caps(&[]));
+        procurement.record_trial(trial(&vehicle(), &program(), 1));
+        let delivery = procurement
+            .deliver(4, Some(7), &vehicle(), &program(), Some(12))
+            .unwrap();
+        assert_eq!(delivery.secondary_bonus, 1_250);
+        assert_eq!(delivery.reward, 10_350 + 1_250);
+        assert_eq!(procurement.completed()[0].revision_id, Some(12));
+        assert_eq!(procurement.completed()[0].secondary_bonus, 1_250);
+    }
+
+    #[test]
+    fn a_missed_primary_goal_or_budget_refuses_the_delivery() {
+        let metrics = DesignMetrics::of(&vehicle());
+        let mut procurement = office();
+        assert!(metrics.cost_cr > 1.0, "the test design must cost credits");
+        procurement.accept(0, 3, 1, &caps(&[]));
+        procurement.active[0].offer.design_budget_cr = (metrics.cost_cr.floor() as u64).saturating_sub(1);
+        procurement.record_trial(trial(&vehicle(), &program(), 1));
+        let error = procurement
+            .deliver(4, Some(7), &vehicle(), &program(), None)
+            .unwrap_err();
+        assert!(error.contains("budget"), "{error}");
+        assert_eq!(procurement.active().len(), 1, "a refused budget keeps the contract");
+
+        procurement.active[0].offer.design_budget_cr = 0;
+        procurement.active[0].offer.primary_goals = vec![goal("IMPOSSIBLE", DesignGoalMetric::Reliability, 101, false)];
+        procurement.active[0].offer.secondary_bonus_cr = 0;
+        let error = procurement
+            .deliver(4, Some(7), &vehicle(), &program(), None)
+            .unwrap_err();
+        assert!(error.contains("Primary design goals"), "{error}");
     }
 
     #[test]
@@ -724,7 +1021,7 @@ mod tests {
             },
         );
         assert_eq!(procurement.evidence_status(&edited, &program()), EvidenceStatus::Stale);
-        let error = procurement.deliver(4, Some(7), &edited, &program()).unwrap_err();
+        let error = procurement.deliver(4, Some(7), &edited, &program(), None).unwrap_err();
         assert!(error.contains("stale") || error.contains("Dossier"), "{error}");
         assert_eq!(procurement.active().len(), 1, "a refused dossier keeps the contract");
     }
@@ -741,16 +1038,77 @@ mod tests {
             procurement.evidence_status(&vehicle(), &edited_program),
             EvidenceStatus::Stale
         );
-        assert!(procurement.deliver(4, Some(7), &vehicle(), &edited_program).is_err());
+        assert!(
+            procurement
+                .deliver(4, Some(7), &vehicle(), &edited_program, None)
+                .is_err()
+        );
         assert_eq!(procurement.active().len(), 1);
 
         assert_eq!(
             procurement.evidence_status(&vehicle(), &original_program),
             EvidenceStatus::Current
         );
-        let delivery = procurement.deliver(4, Some(7), &vehicle(), &original_program).unwrap();
+        let delivery = procurement
+            .deliver(4, Some(7), &vehicle(), &original_program, None)
+            .unwrap();
         assert_eq!(delivery.reward, 10_350);
         assert!(procurement.active().is_empty());
+        assert_eq!(procurement.completed().len(), 1);
+    }
+
+    #[test]
+    fn a_trial_is_refused_by_a_contract_with_another_flight_profile() {
+        let mut procurement = office();
+        procurement.offers = vec![profile_offer(ContractProfile::LowObservableRaid)];
+        procurement.offers[0].id = 7;
+        procurement.accept(0, 3, 1, &caps(&["family:cruise"]));
+        let mut ballistic = trial(&vehicle(), &program(), 1);
+        ballistic.vehicle_family = Some(VehicleFamily::Ballistic);
+        procurement.record_trial(ballistic);
+        assert!(
+            procurement.active()[0].trials.is_empty(),
+            "a ballistic trial cannot prove a cruise raid"
+        );
+        let mut cruise = trial(&vehicle(), &program(), 2);
+        cruise.vehicle_family = Some(VehicleFamily::Cruise);
+        procurement.record_trial(cruise);
+        assert_eq!(procurement.active()[0].trials.len(), 1);
+    }
+
+    #[test]
+    fn one_exact_design_cannot_be_delivered_to_two_contracts() {
+        let mut procurement = office();
+        procurement.offers.push(offer_for(VehicleFamily::ShortRange));
+        procurement.offers[1].id = 8;
+        procurement.accept(0, 3, 2, &caps(&[]));
+        procurement.accept(0, 3, 2, &caps(&[]));
+        procurement.record_trial(trial(&vehicle(), &program(), 1));
+        procurement.deliver(4, Some(7), &vehicle(), &program(), None).unwrap();
+        let error = procurement
+            .deliver(4, Some(8), &vehicle(), &program(), None)
+            .unwrap_err();
+        assert!(error.contains("already delivered"), "{error}");
+        let mut renamed = vehicle();
+        renamed.name = "A different label".into();
+        let error = procurement.deliver(4, Some(8), &renamed, &program(), None).unwrap_err();
+        assert!(
+            error.contains("already delivered"),
+            "renaming must not bypass the rule: {error}"
+        );
+        let mut copied = vehicle();
+        for part in &mut copied.parts {
+            let old_id = part.id.clone();
+            if let Some(attach) = &mut part.attach {
+                attach.parent = format!("copy-{}", attach.parent);
+            }
+            part.id = format!("copy-{old_id}");
+        }
+        let error = procurement.deliver(4, Some(8), &copied, &program(), None).unwrap_err();
+        assert!(
+            error.contains("already delivered"),
+            "renaming every part must not bypass the rule: {error}"
+        );
         assert_eq!(procurement.completed().len(), 1);
     }
 
@@ -764,7 +1122,9 @@ mod tests {
             omega_rules::Block::Wait { seconds: 5.0 },
         ]);
         assert_eq!(procurement.evidence_status(&vehicle(), &edited), EvidenceStatus::Stale);
-        let late = procurement.deliver(14, Some(7), &vehicle(), &program()).unwrap_err();
+        let late = procurement
+            .deliver(14, Some(7), &vehicle(), &program(), None)
+            .unwrap_err();
         assert!(late.contains("Deadline"), "{late}");
     }
 
@@ -782,6 +1142,40 @@ mod tests {
         let mut future = procurement.clone();
         future.schema_version = 99;
         assert!(Procurement::from_bytes(&future.to_bytes().unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_new_campaign_goes_from_offer_to_trial_revision_and_delivery() {
+        let mut procurement = office();
+        let owned = caps(&[]);
+        procurement.accept(0, 3, 1, &owned);
+        let vehicle = vehicle();
+        let program = program();
+        procurement.record_trial(trial(&vehicle, &program, 1));
+
+        // The revision log is the workshop side of the same loop: the delivered airframe is the
+        // one that was recorded, named and marked as submitted.
+        let mut revisions = crate::revisions::RevisionLog::from_bytes(
+            br#"{"schema_version":3,"revisions":[],"next_id":1,"head":null,"submitted":null}"#,
+        )
+        .unwrap();
+        let revision = revisions.commit_vehicle(&vehicle).unwrap();
+        revisions.rename(revision, "Campagne de test").unwrap();
+        revisions.mark_submitted(revision);
+        assert_eq!(revisions.submitted().unwrap().id, revision);
+
+        let delivery = procurement
+            .deliver(4, Some(7), &vehicle, &program, Some(revision))
+            .unwrap();
+        assert_eq!(delivery.reward, 10_350);
+        assert_eq!(
+            procurement.evidence_status(&vehicle, &program),
+            EvidenceStatus::NoContract,
+            "the contract is closed but the evidence chain remains replayable"
+        );
+        assert_eq!(procurement.completed().len(), 1);
+        assert_eq!(revisions.len(), 1);
+        assert_eq!(revisions.head().unwrap().label, "Campagne de test");
     }
 
     #[test]

@@ -1,12 +1,56 @@
 use crate::campus::{BuildingVisual, FacilityKind};
 use bevy::prelude::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CameraMode {
+    Orbit,
+    Free,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CameraView {
+    Front,
+    Side,
+    Top,
+    Rear,
+    Iso,
+}
+
+/// Commands the interface and the keyboard send to `move_camera` for the next frame.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CameraAction {
+    CenterSelection,
+    FrameVehicle,
+    View(CameraView),
+    ToggleMode,
+    Faster,
+    Slower,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct CameraCommand(pub(crate) Option<CameraAction>);
+
+/// A smooth-framing destination. `move_camera` eases toward it and clears it on arrival.
+#[derive(Clone, Copy, Debug)]
+pub struct CameraGoal {
+    pub target: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
+}
+
+#[derive(Component)]
+pub struct SceneCamera;
+
 #[derive(Component, Clone, Copy, Debug)]
 pub struct OrbitCameraRig {
     pub target: Vec3,
     pub yaw: f32,
     pub pitch: f32,
     pub distance: f32,
+    pub mode: CameraMode,
+    pub speed: f32,
+    pub goal: Option<CameraGoal>,
 }
 
 pub fn setup(
@@ -182,9 +226,13 @@ pub fn setup(
         yaw: camera_offset.x.atan2(camera_offset.z),
         pitch: (camera_offset.y / camera_offset.length()).asin(),
         distance: camera_offset.length(),
+        mode: CameraMode::Orbit,
+        speed: 1.0,
+        goal: None,
     };
     commands.spawn((
         Camera3d::default(),
+        SceneCamera,
         camera_rig,
         Transform::from_translation(camera_position).looking_at(camera_target, Vec3::Y),
     ));

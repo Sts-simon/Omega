@@ -249,7 +249,7 @@ fn combine(a: Effect, b: Effect) -> Effect {
 }
 
 /// Effect of one placed surface, shape included.
-fn surface_effect(spec: &PartSpec) -> Option<Effect> {
+pub(crate) fn surface_effect(spec: &PartSpec) -> Option<Effect> {
     match *spec {
         PartSpec::Wing { planform, profile, .. } => Some(combine(planform_effect(planform), profile_effect(profile))),
         PartSpec::FinSet { role, layout, .. } => Some(combine(role_effect(role), layout_effect(layout))),
@@ -737,6 +737,7 @@ mod tests {
             spec,
             attach: None,
             symmetry: None,
+            size_scale: 1.0,
         });
         vehicle.attach(id, parent, node, 0.0).unwrap();
     }

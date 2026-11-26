@@ -7,6 +7,7 @@
 //!   a design change can be compared without editing anything in the game.
 //! - `omega --export-design <slot-dir> <out.json>` and `--import-design <slot-dir> <in.json>`
 //!   move one design between saves or people, refusing anything that does not validate.
+//! - `omega --balance-report` prints the 0.46 part/contract/research audit used to review tuning.
 //!
 //! Neither mode opens a window, so a lot's flight acceptance criteria can be checked over SSH or
 //! in CI.
@@ -17,6 +18,7 @@ use std::path::Path;
 
 const USAGE: &str = "usage: omega --trial <slot-dir> [--seed N] [--air] | \
                      omega --revisions <slot-dir> [--seed N] [--air] | omega --aero-report | \
+                     omega --balance-report | \
                      omega --export-design <slot-dir> <out.json> | \
                      omega --import-design <slot-dir> <in.json>";
 /// How many recorded revisions the comparison mode replays.
@@ -27,6 +29,10 @@ pub(crate) fn main() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--aero-report") {
         println!("{}", omega_rules::aero::balance_report());
+        return Some(0);
+    }
+    if args.iter().any(|arg| arg == "--balance-report") {
+        println!("{}", omega_rules::balance::report());
         return Some(0);
     }
     let mode = if args.iter().any(|arg| arg == "--trial") {

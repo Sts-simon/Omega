@@ -8,6 +8,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::lab::{
+    self, AnomalyInsight, BatchEntryInput, EntryInput, PhaseSummary, TrialContext, TrialHistory, TrialHistoryEntry,
+    TrialStats,
+};
 use bevy::prelude::*;
 use omega_data::hash_serializable;
 use omega_rules::flight::{FlightConfig, FlightReport, LaunchMode, lock_roll, simulate};
@@ -20,7 +24,7 @@ pub(crate) const BATCH_SIZES: [usize; 3] = [10, 100, 1_000];
 const COMPARE_RUNS: usize = 10;
 const AIR_SPEED_MS: f64 = 200.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TrialAction {
     SeedStep(i64),
     ToggleLaunch,
@@ -28,6 +32,31 @@ pub(crate) enum TrialAction {
     Batch(usize),
     Snapshot,
     Compare,
+    SetTab(TrialTab),
+    SelectHistory(u64),
+    Relaunch(u64),
+    ExportHtml,
+    ExportCsv,
+    ExportPdf,
+    InspectPart(String),
+    InspectBlock { thread: usize, block: usize },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrialTab {
+    Dashboard,
+    Compare,
+    History,
+}
+
+/// Validation errors that stopped a run before it could produce a report.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TrialFailure {
+    pub message: String,
+    pub anomalies: Vec<AnomalyInsight>,
+    pub vehicle_name: String,
+    pub seed: u64,
+    pub air_launch: bool,
 }
 
 /// One completed trial and the inputs that produced it.
@@ -53,6 +82,12 @@ pub(crate) struct BatchSummary {
     pub mean_max_speed_ms: f64,
     pub mean_path_m: f64,
     pub mean_flight_time_s: f64,
+    /// Per-phase means over every report in the batch, in phase order.
+    pub phases: Vec<PhaseSummary>,
+    /// The same outcome counters and extremes as [`TrialStats`], ready for history and exports.
+    pub stats: TrialStats,
+    /// Distinct structured anomalies seen at least once in the batch.
+    pub anomaly_insights: Vec<AnomalyInsight>,
 }
 
 impl BatchSummary {
@@ -67,6 +102,9 @@ impl BatchSummary {
             mean_max_speed_ms: 0.0,
             mean_path_m: 0.0,
             mean_flight_time_s: 0.0,
+            phases: Vec::new(),
+            stats: TrialStats::default(),
+            anomaly_insights: Vec::new(),
         }
     }
 
@@ -92,6 +130,14 @@ impl BatchSummary {
         self.mean_max_speed_ms += (report.max_speed_ms - self.mean_max_speed_ms) / runs;
         self.mean_path_m += (report.path_length_m - self.mean_path_m) / runs;
         self.mean_flight_time_s += (report.flight_time_s - self.mean_flight_time_s) / runs;
+        TrialStats::accumulate(report, &mut self.stats);
+        for phase in lab::phases(report) {
+            if let Some(existing) = self.phases.iter_mut().find(|entry| entry.name == phase.name) {
+                existing.merge(&phase);
+            } else {
+                self.phases.push(phase);
+            }
+        }
     }
 
     pub fn lock_rate(&self) -> Option<f64> {
@@ -106,6 +152,12 @@ pub(crate) struct BatchJob {
     outcome: Arc<Mutex<Option<Result<BatchSummary, String>>>>,
     /// Inputs the batch was started with, kept so its result can be marked stale later.
     input_hash: String,
+    vehicle: Vehicle,
+    program: Program,
+    seed: u64,
+    air_launch: bool,
+    context: TrialContext,
+    relaunched_from: Option<u64>,
 }
 
 /// What the seeded target-lock roll gives for the current vehicle and seed.
@@ -166,6 +218,17 @@ pub(crate) struct TrialSession {
     pub revision: u64,
     /// Completed single runs, so an identical rerun still counts as new evidence.
     pub runs: u64,
+    /// Current laboratory page.
+    pub tab: TrialTab,
+    /// Last failed validation, kept so the dashboard explains why no report exists.
+    pub failure: Option<TrialFailure>,
+    /// Persisted trial campaigns for the active slot.
+    pub history: TrialHistory,
+    pub history_dirty: bool,
+    /// Campaign selected in the history tab.
+    pub selected_history: Option<u64>,
+    /// Revision, program version and change summary captured before a run.
+    pub context: TrialContext,
 }
 
 impl Default for TrialSession {
@@ -181,11 +244,61 @@ impl Default for TrialSession {
             batch_job: None,
             revision: 0,
             runs: 0,
+            tab: TrialTab::Dashboard,
+            failure: None,
+            history: TrialHistory::default(),
+            history_dirty: false,
+            selected_history: None,
+            context: TrialContext::default(),
         }
     }
 }
 
 impl TrialSession {
+    pub(crate) fn set_context(&mut self, context: TrialContext) {
+        if self.context != context {
+            self.context = context;
+            self.revision += 1;
+        }
+    }
+
+    pub(crate) fn reset_new(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn load_active(&mut self) {
+        *self = Self::default();
+        match crate::save::read(crate::save::SaveFile::TrialHistory) {
+            Ok(Some(bytes)) => match TrialHistory::from_bytes(&bytes) {
+                Ok(history) => self.history = history,
+                Err(error) => warn!("Could not read the trial history: {error}"),
+            },
+            Ok(None) => {}
+            Err(error) => warn!("Could not read the trial history: {error}"),
+        }
+        self.selected_history = self.history.entries().last().map(|entry| entry.id);
+    }
+
+    pub(crate) fn persist_history(&mut self) -> Result<(), String> {
+        if !self.history_dirty || crate::save::active_slot().is_none() {
+            return Ok(());
+        }
+        self.history
+            .to_bytes()
+            .and_then(|bytes| crate::save::write(crate::save::SaveFile::TrialHistory, &bytes))?;
+        self.history_dirty = false;
+        Ok(())
+    }
+
+    fn record(&mut self, entry: TrialHistoryEntry, relaunched_from: Option<u64>) -> u64 {
+        let mut entry = entry;
+        entry.relaunched_from = relaunched_from;
+        let id = self.history.push(entry);
+        self.history_dirty = true;
+        self.selected_history = Some(id);
+        id
+    }
+
     /// Takes the finished batch, if the worker has delivered one, and remembers its inputs.
     pub(crate) fn take_batch_outcome(&mut self) -> Option<Result<BatchSummary, String>> {
         let outcome = self.batch_job.as_ref()?.outcome.lock().ok()?.take()?;
@@ -193,7 +306,36 @@ impl TrialSession {
         if outcome.is_ok()
             && let Some(job) = job
         {
-            self.batch_hash = Some(job.input_hash);
+            self.batch_hash = Some(job.input_hash.clone());
+            if let Ok(summary) = &outcome {
+                let entry = lab::entry_from_batch(
+                    BatchEntryInput {
+                        context: &job.context,
+                        vehicle: &job.vehicle,
+                        program: &job.program,
+                        seed: job.seed,
+                        air_launch: job.air_launch,
+                        runs: job.total,
+                        input_hash: job.input_hash.clone(),
+                        stats: &summary.stats,
+                        phases: &summary.phases,
+                        anomalies: &summary.anomaly_insights,
+                    },
+                    job.relaunched_from,
+                );
+                self.record(entry, job.relaunched_from);
+            }
+            self.failure = None;
+        } else if let Err(message) = &outcome
+            && let Some(job) = job
+        {
+            self.failure = Some(TrialFailure {
+                message: message.clone(),
+                anomalies: lab::analyze_failure(&job.vehicle, &job.program, std::slice::from_ref(message)),
+                vehicle_name: job.vehicle.name.clone(),
+                seed: job.seed,
+                air_launch: job.air_launch,
+            });
         }
         self.revision += 1;
         Some(outcome)
@@ -206,6 +348,14 @@ impl TrialSession {
         }
         let current = input_hash(vehicle, program, &config(self));
         self.batch_hash.as_deref() != Some(current.as_str())
+    }
+
+    /// Whether the displayed single run no longer matches the current design, program, profile
+    /// or seed. A history entry stays valid for its own inputs; this check is for the live result.
+    pub(crate) fn report_stale(&self, vehicle: &Vehicle, program: &Program) -> bool {
+        self.report
+            .as_ref()
+            .is_some_and(|run| run.input_hash != input_hash(vehicle, program, &config(self)))
     }
 
     /// Seeds flown and seeds requested by the running batch.
@@ -233,6 +383,7 @@ pub(crate) fn config(session: &TrialSession) -> FlightConfig {
 
 /// Hash of everything a run depends on, so a report can be replayed.
 pub(crate) fn input_hash(vehicle: &Vehicle, program: &Program, config: &FlightConfig) -> String {
+    let semantic_program = program.semantic_copy();
     let seed = config.seed;
     let launch = match config.launch {
         LaunchMode::Vertical => format!("vertical|{seed}"),
@@ -240,7 +391,7 @@ pub(crate) fn input_hash(vehicle: &Vehicle, program: &Program, config: &FlightCo
     };
     hash_serializable(&(
         vehicle,
-        program,
+        &semantic_program,
         config.dt_s.to_bits(),
         config.max_time_s.to_bits(),
         launch,
@@ -265,6 +416,15 @@ fn run_batch(
         };
         let report = simulate(vehicle, program, config).map_err(|issues| issues.join("; "))?;
         summary.accumulate(&report);
+        for anomaly in lab::analyze_report_anomalies(&report, vehicle, program) {
+            if !summary
+                .anomaly_insights
+                .iter()
+                .any(|known| known.message == anomaly.message)
+            {
+                summary.anomaly_insights.push(anomaly);
+            }
+        }
         progress.store(step + 1, Ordering::Relaxed);
     }
     Ok(summary)
@@ -280,14 +440,43 @@ fn gate(monte_carlo: bool) -> Result<(), String> {
 
 pub(crate) fn run(session: &mut TrialSession, vehicle: &Vehicle, program: &Program) -> Result<String, String> {
     let config = config(session);
-    let report = simulate(vehicle, program, config).map_err(|issues| issues.join("; "))?;
+    let report = match simulate(vehicle, program, config) {
+        Ok(report) => report,
+        Err(issues) => {
+            let message = issues.join("; ");
+            session.report = None;
+            session.failure = Some(TrialFailure {
+                message: message.clone(),
+                anomalies: lab::analyze_failure(vehicle, program, &issues),
+                vehicle_name: vehicle.name.clone(),
+                seed: config.seed,
+                air_launch: session.air_launch,
+            });
+            session.revision += 1;
+            return Err(message);
+        }
+    };
     let hash = input_hash(vehicle, program, &config);
     let vehicle_hash = hash_serializable(vehicle)
         .map(|hash| hash.as_str().to_string())
         .unwrap_or_default();
-    let program_hash = hash_serializable(program)
+    let program_hash = hash_serializable(&program.semantic_copy())
         .map(|hash| hash.as_str().to_string())
         .unwrap_or_default();
+    let entry = lab::entry_from_report(
+        lab::EntryInput {
+            context: &session.context,
+            vehicle,
+            program,
+            seed: config.seed,
+            air_launch: session.air_launch,
+            report: &report,
+            input_hash: hash.clone(),
+        },
+        None,
+    );
+    session.record(entry, None);
+    session.failure = None;
     session.report = Some(TrialRun {
         report,
         seed: config.seed,
@@ -309,20 +498,45 @@ pub(crate) fn start_batch(
     runs: usize,
     monte_carlo: bool,
 ) -> Result<String, String> {
+    let context = session.context.clone();
+    start_batch_with(
+        session,
+        vehicle,
+        program,
+        config(session),
+        runs,
+        monte_carlo,
+        context,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_batch_with(
+    session: &mut TrialSession,
+    vehicle: &Vehicle,
+    program: &Program,
+    base: FlightConfig,
+    runs: usize,
+    monte_carlo: bool,
+    context: TrialContext,
+    relaunched_from: Option<u64>,
+) -> Result<String, String> {
     gate(monte_carlo)?;
     if session.batch_job.is_some() {
         return Err("Batch already running.".to_string());
     }
     let vehicle = vehicle.clone();
     let program = program.clone();
-    let base = config(session);
+    let worker_vehicle = vehicle.clone();
+    let worker_program = program.clone();
     let input_hash = input_hash(&vehicle, &program, &base);
     let done = Arc::new(AtomicUsize::new(0));
     let outcome = Arc::new(Mutex::new(None));
     let worker_done = Arc::clone(&done);
     let worker_outcome = Arc::clone(&outcome);
     thread::spawn(move || {
-        let result = run_batch(&vehicle, &program, base, runs, &worker_done);
+        let result = run_batch(&worker_vehicle, &worker_program, base, runs, &worker_done);
         if let Ok(mut slot) = worker_outcome.lock() {
             *slot = Some(result);
         }
@@ -332,6 +546,12 @@ pub(crate) fn start_batch(
         done,
         outcome,
         input_hash,
+        vehicle,
+        program,
+        seed: base.seed,
+        air_launch: matches!(base.launch, LaunchMode::Air { .. }),
+        context,
+        relaunched_from,
     });
     session.revision += 1;
     Ok("Batch started".to_string())
@@ -362,8 +582,35 @@ pub(crate) fn compare(
         .ok_or_else(|| "Snapshot A first".to_string())?;
     let base = config(session);
     let progress = AtomicUsize::new(0);
-    let left = run_batch(&baseline.vehicle, &baseline.program, base, COMPARE_RUNS, &progress)?;
-    let right = run_batch(vehicle, program, base, COMPARE_RUNS, &progress)?;
+    let left = match run_batch(&baseline.vehicle, &baseline.program, base, COMPARE_RUNS, &progress) {
+        Ok(summary) => summary,
+        Err(error) => {
+            session.failure = Some(TrialFailure {
+                message: error.clone(),
+                anomalies: lab::analyze_failure(&baseline.vehicle, &baseline.program, std::slice::from_ref(&error)),
+                vehicle_name: baseline.vehicle.name.clone(),
+                seed: base.seed,
+                air_launch: session.air_launch,
+            });
+            session.revision += 1;
+            return Err(error);
+        }
+    };
+    let right = match run_batch(vehicle, program, base, COMPARE_RUNS, &progress) {
+        Ok(summary) => summary,
+        Err(error) => {
+            session.failure = Some(TrialFailure {
+                message: error.clone(),
+                anomalies: lab::analyze_failure(vehicle, program, std::slice::from_ref(&error)),
+                vehicle_name: vehicle.name.clone(),
+                seed: base.seed,
+                air_launch: session.air_launch,
+            });
+            session.revision += 1;
+            return Err(error);
+        }
+    };
+    session.failure = None;
     let config = config(session);
     session.comparison = Some(Comparison {
         baseline: left,
@@ -373,6 +620,81 @@ pub(crate) fn compare(
     });
     session.revision += 1;
     Ok("A/B compared".to_string())
+}
+
+/// Replay a history campaign exactly: same vehicle, program, seed range and flight profile.
+pub(crate) fn relaunch(session: &mut TrialSession, id: u64, monte_carlo: bool) -> Result<String, String> {
+    let entry = session
+        .history
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("Campaign #{id} is not in the history"))?;
+    session.seed = entry.seed;
+    session.air_launch = entry.air_launch;
+    if entry.runs > 1 {
+        let config = lab::entry_config(&entry);
+        return start_batch_with(
+            session,
+            &entry.vehicle,
+            &entry.program,
+            config,
+            entry.runs,
+            monte_carlo,
+            entry.context(),
+            Some(entry.id),
+        )
+        .map(|_| format!("Campaign #{} replayed ({} seeds)", entry.id, entry.runs));
+    }
+    let config = lab::entry_config(&entry);
+    let report = match simulate(&entry.vehicle, &entry.program, config) {
+        Ok(report) => report,
+        Err(issues) => {
+            let message = issues.join("; ");
+            session.report = None;
+            session.failure = Some(TrialFailure {
+                message: message.clone(),
+                anomalies: lab::analyze_failure(&entry.vehicle, &entry.program, &issues),
+                vehicle_name: entry.vehicle.name.clone(),
+                seed: entry.seed,
+                air_launch: entry.air_launch,
+            });
+            session.revision += 1;
+            return Err(message);
+        }
+    };
+    let hash = input_hash(&entry.vehicle, &entry.program, &config);
+    let vehicle_hash = hash_serializable(&entry.vehicle)
+        .map(|hash| hash.as_str().to_string())
+        .unwrap_or_default();
+    let program_hash = hash_serializable(&entry.program.semantic_copy())
+        .map(|hash| hash.as_str().to_string())
+        .unwrap_or_default();
+    let context = entry.context();
+    let new_entry = lab::entry_from_report(
+        EntryInput {
+            context: &context,
+            vehicle: &entry.vehicle,
+            program: &entry.program,
+            seed: entry.seed,
+            air_launch: entry.air_launch,
+            report: &report,
+            input_hash: hash.clone(),
+        },
+        Some(entry.id),
+    );
+    session.record(new_entry, Some(entry.id));
+    session.failure = None;
+    session.report = Some(TrialRun {
+        report,
+        seed: entry.seed,
+        air_launch: entry.air_launch,
+        input_hash: hash,
+        vehicle_hash,
+        program_hash,
+    });
+    session.runs += 1;
+    session.revision += 1;
+    Ok(format!("Campaign #{} replayed", entry.id))
 }
 
 /// Route one UI action; the returned message is what the message lane shows.
@@ -403,6 +725,27 @@ pub(crate) fn apply_action(
         TrialAction::Batch(runs) => start_batch(session, vehicle, program, runs, monte_carlo),
         TrialAction::Snapshot => snapshot(session, vehicle, program),
         TrialAction::Compare => compare(session, vehicle, program, monte_carlo),
+        TrialAction::SetTab(tab) => {
+            session.tab = tab;
+            session.revision += 1;
+            Ok(String::new())
+        }
+        TrialAction::SelectHistory(id) => {
+            if session.history.get(id).is_none() {
+                return Err(format!("Campaign #{id} is not in the history"));
+            }
+            session.selected_history = Some(id);
+            session.revision += 1;
+            Ok(String::new())
+        }
+        TrialAction::Relaunch(id) => relaunch(session, id, monte_carlo),
+        // Export and inspector actions need the campaign, revisions and workshop resources; the
+        // board dispatches them after this match.
+        TrialAction::ExportHtml
+        | TrialAction::ExportCsv
+        | TrialAction::ExportPdf
+        | TrialAction::InspectPart(_)
+        | TrialAction::InspectBlock { .. } => Ok(String::new()),
     }
 }
 
@@ -487,6 +830,23 @@ mod tests {
         session.seed = 2;
         run(&mut session, &vehicle, &program).unwrap();
         assert_ne!(first, session.report.as_ref().unwrap().input_hash);
+    }
+
+    #[test]
+    fn a_live_report_goes_stale_when_its_inputs_change() {
+        let vehicle = rocket();
+        let program = two_stage(20.0);
+        let mut session = TrialSession::default();
+        run(&mut session, &vehicle, &program).unwrap();
+        assert!(!session.report_stale(&vehicle, &program));
+        session.seed = 2;
+        assert!(session.report_stale(&vehicle, &program), "seed changed");
+        session.seed = 1;
+        assert!(!session.report_stale(&vehicle, &program));
+        session.air_launch = true;
+        assert!(session.report_stale(&vehicle, &program), "profile changed");
+        session.air_launch = false;
+        assert!(session.report_stale(&vehicle, &two_stage(8.0)), "program changed");
     }
 
     fn wait_for_batch(session: &mut TrialSession) -> BatchSummary {
@@ -660,5 +1020,103 @@ mod tests {
         .unwrap();
         assert!(session.air_launch);
         assert!(matches!(config(&session).launch, LaunchMode::Air { .. }));
+    }
+
+    #[test]
+    fn a_run_and_its_history_keep_phases_and_anomaly_anchors() {
+        let mut session = TrialSession::default();
+        run(&mut session, &rocket(), &two_stage(20.0)).unwrap();
+        let report_anomalies = session.report.as_ref().unwrap().report.anomalies.len();
+        let entry = session.history.entries().last().unwrap();
+        assert_eq!(entry.kind, "SINGLE");
+        assert!(!entry.phases.is_empty());
+        assert!(entry.phases.iter().any(|phase| phase.duration_s > 0.0));
+        assert_eq!(entry.anomalies.len(), report_anomalies);
+
+        let error = run(&mut session, &rocket(), &Program::single(vec![Block::LockTarget])).unwrap_err();
+        assert!(error.to_lowercase().contains("lock target"), "{error}");
+        let failure = session.failure.as_ref().unwrap();
+        let insight = failure
+            .anomalies
+            .iter()
+            .find(|insight| insight.kind == lab::AnomalyKind::ProgramIncompatible)
+            .expect("the incompatible program is not classified");
+        assert!(insight.block.is_some(), "the failing block is not linked");
+        assert!(insight.component.is_none(), "this design has no radar to link");
+    }
+
+    #[test]
+    fn relaunching_a_campaign_replays_its_exact_snapshot() {
+        let vehicle = rocket();
+        let program = two_stage(20.0);
+        let mut session = TrialSession::default();
+        run(&mut session, &vehicle, &program).unwrap();
+        let id = session.history.entries().last().unwrap().id;
+        let original_report = session.report.as_ref().unwrap().report.clone();
+        let original_hash = session.report.as_ref().unwrap().input_hash.clone();
+
+        apply_action(&mut session, TrialAction::Relaunch(id), &vehicle, &program, true).unwrap();
+        let replay = session.report.as_ref().unwrap();
+        assert_eq!(original_report, replay.report);
+        assert_eq!(original_hash, replay.input_hash);
+        let entry = session.history.entries().last().unwrap();
+        assert_eq!(entry.relaunched_from, Some(id));
+        assert_eq!(entry.input_hash, original_hash);
+    }
+
+    #[test]
+    fn a_batch_is_recorded_with_its_exact_seed_range() {
+        let mut session = TrialSession::default();
+        start_batch(&mut session, &rocket(), &two_stage(20.0), 10, true).unwrap();
+        session.batch = Some(wait_for_batch(&mut session));
+        let entry = session.history.entries().last().unwrap();
+        assert_eq!(entry.kind, "BATCH");
+        assert_eq!(entry.runs, 10);
+        assert_eq!(entry.seeds_label(), "Graines 1–10");
+        assert_eq!(entry.stats.runs, 10);
+        assert_eq!(entry.phases.len(), session.batch.as_ref().unwrap().phases.len());
+    }
+
+    #[test]
+    fn a_history_entry_goes_stale_only_after_its_inputs_change() {
+        let vehicle = rocket();
+        let program = two_stage(20.0);
+        let mut session = TrialSession::default();
+        run(&mut session, &vehicle, &program).unwrap();
+        let entry = session.history.entries().last().unwrap().clone();
+        assert!(!entry.stale(&vehicle, &program));
+        assert!(entry.stale_reason(&vehicle, &program).is_none());
+
+        assert!(entry.stale(&vehicle, &two_stage(8.0)));
+        assert!(
+            entry
+                .stale_reason(&vehicle, &two_stage(8.0))
+                .unwrap()
+                .contains("programme")
+        );
+
+        let mut edited = rocket();
+        edited.replace_part(
+            "booster",
+            PartSpec::SolidMotor {
+                length_m: 3.0,
+                diameter_m: 0.4,
+                burn_time_s: 20.0,
+            },
+        );
+        assert!(entry.stale(&edited, &program));
+        assert_eq!(entry.stale_reason(&edited, &program), Some("conception modifiée"));
+    }
+
+    #[test]
+    fn the_history_round_trips_through_its_json_file() {
+        let mut session = TrialSession::default();
+        run(&mut session, &rocket(), &two_stage(20.0)).unwrap();
+        let expected = session.history.entries().first().unwrap().input_hash.clone();
+        let bytes = session.history.to_bytes().unwrap();
+        let restored = TrialHistory::from_bytes(&bytes).unwrap();
+        assert_eq!(restored, session.history);
+        assert_eq!(restored.entries().len(), 1);
+        assert_eq!(lab::entry_hash(restored.entries().first().unwrap()), expected);
     }
 }

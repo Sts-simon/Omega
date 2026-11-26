@@ -9,12 +9,17 @@ use omega_rules::ResearchState;
 use serde::{Deserialize, Serialize};
 
 mod board;
+mod program_canvas;
+mod trial_lab;
 
 pub(crate) use board::{
-    ProgramPaletteScroll, ResearchScroll, ToastText, WorkshopPaletteScroll, WorkshopScroll, handle_extra_actions,
-    poll_trial_batch, scroll_part_list, scroll_program_list, scroll_program_palette, scroll_research_grid,
-    scroll_workshop_palette, setup_boards, sync_boards, update_batch_progress, update_nav_status, update_toast,
+    AssemblyControlScroll, ContractScroll, InspectorScrollOffset, ProgramPaletteScroll, ResearchScroll, ToastText,
+    WorkshopPaletteScroll, WorkshopScroll, handle_extra_actions, persist_trial_history, poll_trial_batch,
+    scroll_assembly_control, scroll_contracts_board, scroll_inspector, scroll_part_list, scroll_program_list,
+    scroll_program_palette, scroll_research_grid, scroll_workshop_palette, setup_boards, spec_summary, sync_boards,
+    update_batch_progress, update_nav_status, update_toast,
 };
+pub(crate) use program_canvas::{advance_program_debug, drag_program_canvas, zoom_program_canvas};
 
 const CAMPAIGN_SCHEMA: u32 = 2;
 /// Contracts a fresh office can hold at once; `parallel_projects` raises it.
@@ -69,24 +74,44 @@ pub struct CampusState {
 
 impl Default for CampusState {
     fn default() -> Self {
-        match load_campaign() {
-            Some(save) => Self {
-                view: CampusView::Island,
-                credits: save.credits,
-                message: "Campaign loaded".to_string(),
-                research: save.research,
-                day: save.day.max(1),
-                dirty: false,
-            },
-            None => Self {
-                view: CampusView::Island,
-                credits: 25_000,
-                message: "Select a facility on the island".to_string(),
-                research: ResearchState::default(),
-                day: 1,
-                dirty: true,
-            },
+        // The title screen selects a campaign before any game state exists; a fresh, clean
+        // campaign is shown behind it until that choice is made.
+        Self {
+            view: CampusView::Island,
+            credits: 25_000,
+            message: "Select a campaign".to_string(),
+            research: ResearchState::default(),
+            day: 1,
+            dirty: false,
         }
+    }
+}
+
+impl CampusState {
+    /// Replace the current campaign with the active slot, or start a clean one when it has no
+    /// campaign file. Returns whether a saved campaign was found.
+    pub(crate) fn load_active(&mut self) -> bool {
+        if let Some(save) = load_campaign() {
+            self.view = CampusView::Island;
+            self.credits = save.credits;
+            self.message = "Campaign loaded".to_string();
+            self.research = save.research;
+            self.day = save.day.max(1);
+            self.dirty = false;
+            true
+        } else {
+            self.reset_new();
+            false
+        }
+    }
+
+    pub(crate) fn reset_new(&mut self) {
+        self.view = CampusView::Island;
+        self.credits = 25_000;
+        self.message = "New campaign: select a facility on the island".to_string();
+        self.research = ResearchState::default();
+        self.day = 1;
+        self.dirty = true;
     }
 }
 
@@ -160,7 +185,7 @@ fn load_campaign() -> Option<CampaignSave> {
 }
 
 pub fn persist_campaign(mut campus: ResMut<CampusState>) {
-    if !campus.dirty {
+    if !campus.dirty || crate::save::active_slot().is_none() {
         return;
     }
     let save = CampaignSave {
@@ -229,14 +254,46 @@ pub(crate) fn deliver_missile_contract(
     contract_id: Option<u32>,
     vehicle: &omega_rules::Vehicle,
     program: &omega_rules::Program,
+    revision_id: Option<u32>,
+    history: &crate::lab::TrialHistory,
+    log: &mut crate::revisions::RevisionLog,
 ) {
-    match procurement.deliver(campus.day, contract_id, vehicle, program) {
+    let delivered = contract_id
+        .or_else(|| procurement.selected_id())
+        .and_then(|id| procurement.active().iter().find(|active| active.offer.id == id))
+        .map(|active| (active.offer.clone(), procurement.dossier_for(active, vehicle, program)));
+    match procurement.deliver(campus.day, contract_id, vehicle, program, revision_id) {
         Ok(delivery) => {
             campus.credits = campus.credits.saturating_add(delivery.reward);
-            campus.message = format!(
+            let mut message = format!(
                 "Contract #{} delivered: +{} cr ({}% dossier)",
                 delivery.id, delivery.reward, delivery.score_percent
             );
+            if delivery.secondary_bonus > 0 {
+                message.push_str(&format!(" +{} cr secondary bonus", delivery.secondary_bonus));
+            }
+            if let Some((offer, dossier)) = delivered
+                && let Err(error) = crate::trial_export::export_contract_dossier(
+                    &offer,
+                    &dossier,
+                    vehicle,
+                    program,
+                    history,
+                    revision_id,
+                )
+            {
+                message.push_str(&format!(" | dossier not written: {error}"));
+            }
+            campus.message = message;
+            if let Some(id) = revision_id {
+                log.mark_submitted(id);
+                if let Err(error) = log
+                    .to_bytes()
+                    .and_then(|bytes| crate::save::write(crate::save::SaveFile::Revisions, &bytes))
+                {
+                    campus.message = format!("{} | submitted revision not saved: {error}", campus.message);
+                }
+            }
             campus.mark_dirty();
         }
         Err(message) => campus.message = message,
@@ -244,21 +301,35 @@ pub(crate) fn deliver_missile_contract(
 }
 
 pub fn handle_input(
+    frontend: Res<crate::main_menu::Frontend>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    camera: Single<(&Camera, &GlobalTransform), With<Camera3d>>,
+    camera: Single<(&Camera, &GlobalTransform), With<crate::scene::SceneCamera>>,
     buildings: Query<(&GlobalTransform, &BuildingVisual)>,
     mut campus: ResMut<CampusState>,
     missile: Res<crate::missile::MissileSession>,
     program: Res<crate::program_editor::MissileProgramSession>,
+    mut log: ResMut<crate::revisions::RevisionLog>,
+    trials: Res<crate::trials::TrialSession>,
     mut procurement: ResMut<crate::procurement::Procurement>,
     workshop: Res<crate::workshop::WorkshopInput>,
     ui_buttons: Query<&UiInteraction>,
 ) {
+    if *frontend != crate::main_menu::Frontend::Game {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         if workshop.drag_active {
             // The workshop cancels its drag this frame and keeps the board open.
+            return;
+        }
+        if workshop.text_active {
+            // The search field or a group rename cancels instead of leaving the workshop.
+            return;
+        }
+        if campus.view == CampusView::Missile && !missile.selection.is_empty() {
+            // The workshop clears the selection later this frame; keep the board open.
             return;
         }
         if campus.view != CampusView::Island {
@@ -321,6 +392,9 @@ pub fn handle_input(
                     selected,
                     &missile.vehicle,
                     &program.program,
+                    log.head().map(|revision| revision.id),
+                    &trials.history,
+                    &mut log,
                 );
                 return;
             }

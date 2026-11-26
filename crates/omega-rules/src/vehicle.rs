@@ -240,6 +240,112 @@ impl ControlKind {
     }
 }
 
+/// Axial transition between two body diameters. The shape only changes the silhouette and the
+/// casing mass; the inlet and outlet still meet the parts they join.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterShape {
+    Conical,
+    Ogive,
+    Stepped,
+}
+
+impl AdapterShape {
+    pub const ALL: [Self; 3] = [Self::Conical, Self::Ogive, Self::Stepped];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Conical => "CONICAL",
+            Self::Ogive => "OGIVE",
+            Self::Stepped => "STEPPED",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Conical => Self::Ogive,
+            Self::Ogive => Self::Stepped,
+            Self::Stepped => Self::Conical,
+        }
+    }
+}
+
+/// Player-chosen nose profile. The shape changes the silhouette and the shell mass only, not the
+/// flight model; the base diameter and length are set by the designer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoseShape {
+    Conical,
+    Ogive,
+    Parabolic,
+}
+
+impl NoseShape {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Conical => "CONICAL",
+            Self::Ogive => "OGIVE",
+            Self::Parabolic => "PARABOLIC",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Conical => Self::Ogive,
+            Self::Ogive => Self::Parabolic,
+            Self::Parabolic => Self::Conical,
+        }
+    }
+
+    /// Casing mass multiplier relative to a conical shell of the same envelope.
+    pub fn mass_factor(self) -> f64 {
+        match self {
+            Self::Conical => 1.0,
+            Self::Ogive => 1.12,
+            Self::Parabolic => 1.06,
+        }
+    }
+}
+
+/// Abstract explosive payload grade. The grade does not model chemistry or blast effects: it is a
+/// game multiplier on the payload yield and a research gate for the workshop palette.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExplosiveGrade {
+    Standard,
+    Improved,
+    Advanced,
+}
+
+impl ExplosiveGrade {
+    pub const ALL: [Self; 3] = [Self::Standard, Self::Improved, Self::Advanced];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "STANDARD",
+            Self::Improved => "IMPROVED",
+            Self::Advanced => "ADVANCED",
+        }
+    }
+
+    /// Game yield per kilogram of charge, not a real explosive performance figure.
+    pub fn yield_multiplier(self) -> f64 {
+        match self {
+            Self::Standard => 1.0,
+            Self::Improved => 1.25,
+            Self::Advanced => 1.6,
+        }
+    }
+
+    pub fn capability(self) -> &'static str {
+        match self {
+            Self::Standard => "part:explosive",
+            Self::Improved => "part:explosive_improved",
+            Self::Advanced => "part:explosive_advanced",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "part", rename_all = "snake_case")]
 pub enum PartSpec {
@@ -271,6 +377,28 @@ pub enum PartSpec {
     /// Abstract mission module: only mass matters here.
     MissionModule {
         mass_kg: f64,
+    },
+    /// Explosive payload package. `mass_kg` is the charge itself; its casing is added to the dry
+    /// mass and its grade sets the abstract game yield.
+    Explosive {
+        mass_kg: f64,
+        grade: ExplosiveGrade,
+    },
+    /// Airframe adapter: a body transition from `diameter_m` (mount side) to `exit_diameter_m`
+    /// (next part). Its two axial nodes stay on the body axis, so a stack can change size without
+    /// a visual or validation step.
+    Adapter {
+        length_m: f64,
+        diameter_m: f64,
+        exit_diameter_m: f64,
+        shape: AdapterShape,
+    },
+    /// Player-placed nose cone capping the top of the stack. It is never generated implicitly:
+    /// the designer chooses its length, base diameter and profile.
+    NoseCone {
+        length_m: f64,
+        diameter_m: f64,
+        shape: NoseShape,
     },
     /// Lifting surface for cruise flight. `light` selects the light-structure build once its
     /// research is done: less mass, more complexity and less reliability.
@@ -345,6 +473,10 @@ pub struct PartStats {
     /// Fixed burn time (solid motors only).
     pub burn_time_s: Option<f64>,
     pub diameter_m: f64,
+    /// Explosive charge mass carried by this part, in kilograms.
+    pub payload_kg: f64,
+    /// Abstract game yield of the charge, already multiplied by its grade.
+    pub payload_yield_kg: f64,
 }
 
 const SOLID_DENSITY: f64 = 1_700.0;
@@ -386,7 +518,24 @@ impl PartSpec {
                 in_range("tank diameter (m)", diameter_m, 0.1, 1.2)
             }
             Self::LiquidEngine { scale } | Self::AirBreathing { scale } => in_range("engine scale", scale, 0.3, 3.0),
+            Self::Adapter {
+                length_m,
+                diameter_m,
+                exit_diameter_m,
+                ..
+            } => {
+                in_range("adapter length (m)", length_m, 0.1, 2.0)?;
+                in_range("adapter inlet diameter (m)", diameter_m, 0.05, 1.2)?;
+                in_range("adapter outlet diameter (m)", exit_diameter_m, 0.05, 1.2)
+            }
+            Self::NoseCone {
+                length_m, diameter_m, ..
+            } => {
+                in_range("nose length (m)", length_m, 0.1, 3.0)?;
+                in_range("nose diameter (m)", diameter_m, 0.05, 1.2)
+            }
             Self::MissionModule { mass_kg } => in_range("module mass (kg)", mass_kg, 1.0, 300.0),
+            Self::Explosive { mass_kg, .. } => in_range("charge mass (kg)", mass_kg, 5.0, 300.0),
             Self::Wing {
                 span_m,
                 chord_m,
@@ -405,6 +554,11 @@ impl PartSpec {
         }
     }
 
+    /// True for the nose cone, the only part that closes the top of the stack visually.
+    pub fn is_nose(&self) -> bool {
+        matches!(self, Self::NoseCone { .. })
+    }
+
     /// True for the aerodynamic surfaces, which are always leaf parts on a radial mount.
     pub fn is_aero(&self) -> bool {
         matches!(
@@ -419,7 +573,11 @@ impl PartSpec {
             Self::SolidMotor { .. } | Self::FuelTank { .. } | Self::LiquidEngine { .. } | Self::AirBreathing { .. } => {
                 PartCategory::Propulsion
             }
-            Self::Decoupler | Self::MissionModule { .. } => PartCategory::Airframe,
+            Self::Decoupler
+            | Self::MissionModule { .. }
+            | Self::Explosive { .. }
+            | Self::Adapter { .. }
+            | Self::NoseCone { .. } => PartCategory::Airframe,
             Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. } => PartCategory::Aerodynamics,
             Self::Sensor { .. } => PartCategory::Sensors,
             // Every mission module shares the electronics section; the inspector and the rules
@@ -478,6 +636,7 @@ impl PartSpec {
                     isp_s: SOLID_ISP_S,
                     burn_time_s: Some(burn_time_s),
                     diameter_m,
+                    ..PartStats::default()
                 }
             }
             Self::FuelTank { length_m, diameter_m } => PartStats {
@@ -525,6 +684,42 @@ impl PartSpec {
                 dry_mass_kg: mass_kg,
                 ..PartStats::default()
             },
+            Self::Explosive { mass_kg, grade } => PartStats {
+                // The charge and a light casing both count as launch mass.
+                dry_mass_kg: mass_kg * 1.15 + 2.0,
+                diameter_m: 0.20,
+                payload_kg: mass_kg,
+                payload_yield_kg: mass_kg * grade.yield_multiplier(),
+                ..PartStats::default()
+            },
+            Self::Adapter {
+                length_m,
+                diameter_m,
+                exit_diameter_m,
+                shape,
+            } => {
+                let mean_diameter = (diameter_m + exit_diameter_m) * 0.5;
+                let shape_factor = match shape {
+                    AdapterShape::Conical => 1.0,
+                    AdapterShape::Ogive => 1.12,
+                    AdapterShape::Stepped => 0.92,
+                };
+                PartStats {
+                    dry_mass_kg: (2.8 * cylinder_surface(length_m, mean_diameter) + 1.0) * shape_factor,
+                    diameter_m: diameter_m.max(exit_diameter_m),
+                    ..PartStats::default()
+                }
+            }
+            Self::NoseCone {
+                length_m,
+                diameter_m,
+                shape,
+            } => PartStats {
+                // A thin shell over the envelope, not a solid cone.
+                dry_mass_kg: (1.6 * cylinder_surface(length_m, diameter_m * 0.7) + 0.6) * shape.mass_factor(),
+                diameter_m,
+                ..PartStats::default()
+            },
             Self::Wing { .. } | Self::FinSet { .. } | Self::ControlSurface { .. } => PartStats {
                 dry_mass_kg: crate::aero::surface_mass_kg(self).unwrap_or(0.0),
                 ..PartStats::default()
@@ -566,6 +761,9 @@ impl PartSpec {
             } => "computer:advanced",
             Self::Decoupler => "part:decoupler",
             Self::MissionModule { .. } => "part:mission_module",
+            Self::Explosive { grade, .. } => grade.capability(),
+            Self::Adapter { .. } => "part:adapter",
+            Self::NoseCone { .. } => "part:nose",
             Self::Wing { .. } => "part:wing",
             Self::FinSet { .. } => "part:fin",
             Self::ControlSurface { .. } => "part:control_surface",
@@ -579,6 +777,9 @@ impl PartSpec {
             Self::Wing { .. } => "WING",
             Self::FinSet { .. } => "FIN SET",
             Self::ControlSurface { .. } => "CONTROL",
+            Self::Adapter { .. } => "ADAPTER",
+            Self::NoseCone { .. } => "NOSE",
+            Self::Explosive { .. } => "CHARGE",
             _ => "PART",
         }
     }
@@ -700,6 +901,10 @@ mod tests {
             PartSpec::AirBreathing { scale: 1.0 },
             PartSpec::Decoupler,
             PartSpec::MissionModule { mass_kg: 10.0 },
+            PartSpec::Explosive {
+                mass_kg: 40.0,
+                grade: ExplosiveGrade::Standard,
+            },
             PartSpec::Sensor {
                 kind: SensorKind::Pitot,
             },
@@ -736,5 +941,48 @@ mod tests {
         );
         assert!(PartSpec::LiquidEngine { scale: 0.1 }.validate().is_err());
         assert!(PartSpec::Decoupler.validate().is_ok());
+        assert!(
+            PartSpec::Explosive {
+                mass_kg: 1.0,
+                grade: ExplosiveGrade::Standard,
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn explosive_grades_trade_research_for_yield_and_never_model_real_blast() {
+        let charge = |grade| PartSpec::Explosive { mass_kg: 40.0, grade };
+        let standard = charge(ExplosiveGrade::Standard);
+        let improved = charge(ExplosiveGrade::Improved);
+        let advanced = charge(ExplosiveGrade::Advanced);
+        assert_eq!(standard.stats().payload_kg, 40.0);
+        assert!(improved.stats().payload_yield_kg > standard.stats().payload_yield_kg);
+        assert!(advanced.stats().payload_yield_kg > improved.stats().payload_yield_kg);
+        assert!(advanced.stats().dry_mass_kg > 40.0, "the casing is launch mass too");
+        assert_eq!(standard.required_capability(), "part:explosive");
+        assert_eq!(improved.required_capability(), "part:explosive_improved");
+        assert_eq!(advanced.required_capability(), "part:explosive_advanced");
+        assert_eq!(advanced.category(), PartCategory::Airframe);
+    }
+
+    #[test]
+    fn adapter_shape_trades_casing_mass_and_envelope() {
+        let adapter = |shape| PartSpec::Adapter {
+            length_m: 0.4,
+            diameter_m: 0.6,
+            exit_diameter_m: 0.3,
+            shape,
+        };
+        let conical = adapter(AdapterShape::Conical);
+        let ogive = adapter(AdapterShape::Ogive);
+        let stepped = adapter(AdapterShape::Stepped);
+        assert!(conical.validate().is_ok());
+        assert!(ogive.stats().dry_mass_kg > conical.stats().dry_mass_kg);
+        assert!(stepped.stats().dry_mass_kg < conical.stats().dry_mass_kg);
+        assert_eq!(conical.stats().diameter_m, 0.6);
+        assert_eq!(conical.category(), PartCategory::Airframe);
+        assert_eq!(conical.required_capability(), "part:adapter");
     }
 }

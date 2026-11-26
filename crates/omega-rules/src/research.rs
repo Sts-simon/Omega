@@ -260,6 +260,9 @@ pub fn starting_capabilities() -> &'static [&'static str] {
         "part:fuel_tank",
         "part:decoupler",
         "part:mission_module",
+        "part:explosive",
+        "part:adapter",
+        "part:nose",
         "computer:basic",
         "sensor:pitot",
         "family:ballistic",
@@ -330,6 +333,26 @@ pub fn default_tree() -> Vec<TechNode> {
             4,
             &["liquid_engines"],
             vec![cap("part:air_breathing")],
+        ),
+        node(
+            "improved_explosives",
+            Materials,
+            "Improved explosive charges",
+            "Unlocks the improved charge: more game yield for the same payload mass.",
+            3_000,
+            2,
+            &[],
+            vec![cap("part:explosive_improved")],
+        ),
+        node(
+            "advanced_explosives",
+            Materials,
+            "Advanced explosive charges",
+            "Unlocks the advanced charge, the most mass-efficient payload package.",
+            5_000,
+            3,
+            &["improved_explosives"],
+            vec![cap("part:explosive_advanced")],
         ),
         node(
             "aerodynamics",
@@ -502,8 +525,11 @@ mod tests {
         let tree = default_tree();
         let cost: u64 = tree.iter().map(|node| node.cost_cr).sum();
         let days: u16 = tree.iter().map(|node| node.duration_days).sum();
-        assert_eq!(cost, 77_000, "the total research cost is the campaign's credit target");
-        assert!(days <= 90, "serial research must stay near 90 days, not {days}");
+        assert_eq!(cost, 85_000, "the total research cost is the campaign's credit target");
+        assert!(
+            days <= 95,
+            "serial research must stay near the 90-day campaign target, not {days}"
+        );
         let aero: u16 = tree
             .iter()
             .filter(|node| node.department == Department::Aerodynamics)
@@ -565,6 +591,24 @@ mod tests {
             },
             PartSpec::Decoupler,
             PartSpec::MissionModule { mass_kg: 10.0 },
+            PartSpec::Explosive {
+                mass_kg: 40.0,
+                grade: crate::vehicle::ExplosiveGrade::Standard,
+            },
+            PartSpec::Explosive {
+                mass_kg: 40.0,
+                grade: crate::vehicle::ExplosiveGrade::Improved,
+            },
+            PartSpec::Explosive {
+                mass_kg: 40.0,
+                grade: crate::vehicle::ExplosiveGrade::Advanced,
+            },
+            PartSpec::Adapter {
+                length_m: 0.4,
+                diameter_m: 0.4,
+                exit_diameter_m: 0.3,
+                shape: crate::vehicle::AdapterShape::Conical,
+            },
             PartSpec::Wing {
                 span_m: 1.0,
                 chord_m: 0.3,
@@ -718,5 +762,31 @@ mod tests {
         state.advance_days(1);
         let json = serde_json::to_string(&state).unwrap();
         assert_eq!(serde_json::from_str::<ResearchState>(&json).unwrap(), state);
+    }
+
+    #[test]
+    fn the_research_tree_stays_affordable_and_spread_across_departments() {
+        let tree = default_tree();
+        validate_tree(&tree).unwrap();
+        assert!(tree.len() >= 20);
+        let total: u64 = tree.iter().map(|node| node.cost_cr).sum();
+        assert!((60_000..=120_000).contains(&total), "{total}");
+        for department in Department::ALL {
+            let nodes: Vec<_> = tree.iter().filter(|node| node.department == department).collect();
+            assert!(!nodes.is_empty(), "{department:?}");
+        }
+        for node in &tree {
+            assert!(node.cost_cr <= 8_000, "{} costs too much", node.id);
+            assert!((1..=12).contains(&node.duration_days), "{} duration", node.id);
+            assert!(!node.grants.is_empty(), "{} grants nothing", node.id);
+        }
+        let starting = starting_capabilities();
+        assert!(starting.contains(&"part:solid_motor"));
+        for family in ["family:ballistic", "family:surface_to_air", "family:cruise"] {
+            assert!(
+                starting.contains(&family) || technology_granting(family).is_some(),
+                "{family} has neither a starting grant nor a research source"
+            );
+        }
     }
 }

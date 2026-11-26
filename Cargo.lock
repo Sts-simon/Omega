@@ -4297,7 +4297,11 @@ dependencies = [
 
 [[package]]
 name = "omega"
+<<<<<<< Updated upstream
 version = "0.39.0"
+=======
+version = "0.47.0"
+>>>>>>> Stashed changes
 dependencies = [
  "bevy",
  "omega-data",

@@ -55,11 +55,12 @@ const CLOSE_BAND: f64 = 0.05;
 pub fn contract_preview(vehicle: &Vehicle, offer: &ContractOffer) -> Vec<ContractCheck> {
     let aero = vehicle.aero();
     let mass = vehicle.total_wet_mass_kg();
+    let payload = vehicle.payload_summary();
     offer
         .missile_requirements()
         .into_iter()
         .map(|requirement| {
-            let value = design_value(&requirement.metric, mass, &aero);
+            let value = design_value(&requirement.metric, mass, &aero, payload);
             let status = match value {
                 None => CheckStatus::Unproven,
                 Some(value) => status(value, requirement.limit, requirement.cmp),
@@ -79,9 +80,16 @@ pub fn contract_preview(vehicle: &Vehicle, offer: &ContractOffer) -> Vec<Contrac
 
 /// The figures the design determines before a trial. Everything else is `None`, which the panel
 /// renders as "trial": inventing a path length or a lock result here would be a second flight model.
-fn design_value(metric: &str, mass_kg: f64, aero: &crate::aero::AeroFigures) -> Option<f64> {
+fn design_value(
+    metric: &str,
+    mass_kg: f64,
+    aero: &crate::aero::AeroFigures,
+    (payload_kg, payload_yield_kg): (f64, f64),
+) -> Option<f64> {
     match metric {
         "launch_mass_kg" => Some(mass_kg),
+        "payload_kg" => Some(payload_kg),
+        "payload_yield_kg" => Some(payload_yield_kg),
         "stability" => Some(aero.stability),
         "lift" => Some(aero.lift),
         "control_authority" => Some(aero.control_authority),
@@ -109,22 +117,29 @@ fn status(value: f64, limit: f64, comparator: Comparator) -> CheckStatus {
 mod tests {
     use super::*;
     use crate::assembly::tests::sounding_rocket;
-    use crate::contracts::{ContractRequirements, MissionFamily, VehicleFamily};
+    use crate::contracts::{ContractProfile, ContractRequirements, MissionFamily, VehicleFamily};
 
     fn offer(mission: MissionFamily, vehicle: VehicleFamily, difficulty: u8) -> ContractOffer {
         ContractOffer {
             id: 1,
             mission_family: mission,
             vehicle_family: vehicle,
+            profile: None,
             title: "Preview programme".into(),
             client: "Test client".into(),
             brief: "Preview brief".into(),
+            context: "Preview context".into(),
             requirements: ContractRequirements {
                 min_design_score: 0,
                 min_program_score: 0,
                 min_trial_score: 0,
                 required_capabilities: Vec::new(),
             },
+            design_budget_cr: 0,
+            primary_goals: Vec::new(),
+            secondary_goals: Vec::new(),
+            secondary_bonus_cr: 0,
+            requested_dossier: Vec::new(),
             reward_credits: 10_000,
             deadline_days: 20,
             difficulty,
@@ -169,6 +184,35 @@ mod tests {
         let mass = heavier.iter().find(|check| check.id == "MASS").unwrap();
         assert_eq!(mass.status, CheckStatus::Missed, "{mass:?}");
         assert!(mass.value.unwrap() > limit);
+    }
+
+    #[test]
+    fn a_charge_is_checked_on_paper_for_mass_and_yield() {
+        let mut vehicle = sounding_rocket();
+        vehicle
+            .add_to_top(
+                "charge",
+                crate::PartSpec::Explosive {
+                    mass_kg: 30.0,
+                    grade: crate::ExplosiveGrade::Advanced,
+                },
+            )
+            .unwrap();
+        let mut offer = offer(MissionFamily::AirToSurface, VehicleFamily::ShortRange, 1);
+        offer.profile = Some(ContractProfile::PrecisionStrike);
+        let checks = contract_preview(&vehicle, &offer);
+        let payload = checks.iter().find(|check| check.id == "PAYLOAD").unwrap();
+        assert_eq!(payload.status, CheckStatus::Met, "{payload:?}");
+        assert_eq!(payload.value, Some(30.0));
+        let yield_kg = checks.iter().find(|check| check.id == "YIELD").unwrap();
+        assert_eq!(yield_kg.value, Some(48.0), "advanced grade multiplies the yield");
+        assert_eq!(yield_kg.status, CheckStatus::Met);
+        let discretion = checks.iter().find(|check| check.id == "DISCRETION").unwrap();
+        assert_eq!(
+            discretion.status,
+            CheckStatus::Unproven,
+            "only a trial measures the profile"
+        );
     }
 
     #[test]
