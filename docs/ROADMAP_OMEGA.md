@@ -8,11 +8,7 @@ Omega is a fictional, abstract game about completing military-themed design cont
 
 All values and outcomes are game mechanics. The project does not attempt to model real weapons, real targeting, guidance, navigation, seeker logic, real warheads or real-world performance. The explosive charge is an abstract payload with a game yield. This boundary is deliberate and is not a future feature.
 
-<<<<<<< Updated upstream
-## Current baseline (0.39.0)
-=======
 ## Current baseline (0.45.0)
->>>>>>> Stashed changes
 
 The following features are already present in the application:
 

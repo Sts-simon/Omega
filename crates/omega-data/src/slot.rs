@@ -396,9 +396,10 @@ mod tests {
         slot.commit("0.30.1", &[("campaign.json", b"v2".to_vec())]).unwrap();
         assert_eq!(fs::read(slot.root().join("campaign.json.bak")).unwrap(), b"v1");
         fs::write(slot.root().join("campaign.json"), b"truncated").unwrap();
+        // A torn write is caught by the size check, a damaged one by the hash check.
         assert!(matches!(
             slot.read_verified("campaign.json"),
-            Err(SlotError::Corrupt { .. })
+            Err(SlotError::SizeMismatch { .. } | SlotError::Corrupt { .. })
         ));
         assert_eq!(slot.recover_backup("campaign.json").unwrap(), b"v1");
         assert_eq!(slot.read_verified("campaign.json").unwrap(), b"v1");

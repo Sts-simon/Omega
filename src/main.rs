@@ -42,10 +42,6 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-<<<<<<< Updated upstream
-                title: "OMEGA 0.39.0 | Conception de véhicules".to_string(),
-                resolution: (1600, 960).into(),
-=======
                 title: "OMEGA 0.47.0 | Cohérence, finition et version candidate".to_string(),
                 resolution: DEFAULT_WINDOW.into(),
                 resize_constraints: WindowResizeConstraints {
@@ -53,7 +49,6 @@ fn main() {
                     min_height: MIN_WINDOW.1,
                     ..default()
                 },
->>>>>>> Stashed changes
                 ..default()
             }),
             ..default()

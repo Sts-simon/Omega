@@ -1,13 +1,3 @@
-<<<<<<< Updated upstream
-## 0.39.0 — Inspecteur de transformations précises
-
-- L'inspecteur permet maintenant de régler séparément la translation et la rotation locales sur X, Y et Z.
-- Chaque axe dispose de commandes dédiées : ±0,05 m en translation et ±5° en rotation ; les valeurs sont actualisées immédiatement dans l'atelier.
-- Chaque clic constitue une modification annulable/rétablissable, sans modifier les autres axes.
-- Les rotations restent normalisées sur 360° et les transformations sont conservées dans la sauvegarde existante.
-- Ajout de tests sur l'indépendance des axes, l'annulation/rétablissement et le refus de transformer la pièce racine.
-- Les valeurs restent des paramètres d'édition et de gameplay fictifs, sans prétention de modélisation physique réelle.
-=======
 ## 0.45.0 — Contrats et progression
 
 - **Contrats détaillés.** Chaque offre porte désormais un contexte fictif, une famille de mission et de véhicule, une difficulté, un budget de conception, une échéance, une récompense et les sections demandées du dossier technique. Les anciennes sauvegardes restent lisibles : les nouveaux champs ont une valeur par défaut et une offre sans budget ou sans objectif conserve son ancien mode de livraison.
@@ -93,7 +83,6 @@
 - Vérification en jeu à 1600 × 960 et 1280 × 768 : ouverture directe, redimensionnement à chaud, picking d'une aile, translation par gizmo et anneaux de rotation ; `cargo fmt`, clippy et tests restent verts.
 - Vérification du bureau des contrats à 1600 × 960 et 1280 × 768 : huit offres, molette sur la seule colonne des offres, dossier et contrats actifs accessibles, profils incompatibles signalés, charge et discrétion affichées dans les cartes et le dossier ; `cargo fmt`, clippy et 334 tests restent verts.
 - Vérification de l'adaptateur : picking par cylindre au diamètre maximal, alignement des deux nœuds axiaux, absence d'avertissement de saut de diamètre, changement de profil et de diamètre de sortie, et même biais de cadrage après redimensionnement ; fmt, clippy et suite complète verts.
->>>>>>> Stashed changes
 
 ## 0.38.0 — Ergonomie du gizmo, angle d'aile et interface lisible
 
